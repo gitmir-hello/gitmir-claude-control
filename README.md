@@ -71,7 +71,7 @@ Skills are reusable instructions you copy from the dashboard (**Settings → �
 - **`task-log`** — Claude keeps a human-readable log of completed tasks in the project's `.claude/tasks.json`; the **Tasks** tab shows it live.
 - **`gitmir-model`** — Claude builds/updates the project's **multidimensional object model** in `.gitmir/model/` (entities, server units & functions, API routes, frontend units, events, business processes, status flows, reactions — all cross-linked by stable id) from the real code. It also installs a standing rule into the project's `CLAUDE.md` so the model stays the product's living source of truth: consult it before working, update it after code changes. The **Model** tab visualizes it.
 
-Run `gitmir-model` once per project (then re-run after changes — it's idempotent) and the **Model** tab lights up with the same kind of diagrams you see in the demo.
+Run `gitmir-model` once per project (then re-run after changes — it's idempotent) and the **Model** tab lights up with data (ER), data-flow, process and entity-lifecycle diagrams.
 
 ## Design
 
