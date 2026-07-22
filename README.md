@@ -47,7 +47,8 @@ You keep dozens of projects in different folders and launch `claude` from each. 
 
 - **Settings** — name, path, description, and one-click **▶ Run Claude** (opens a terminal in that folder and starts `claude`). Cross-platform: macOS Terminal, Windows `cmd`, Linux terminals. Below, one-click **Skills** you copy into your Claude session.
 - **Tasks** — a live log of what Claude did in the project (`.claude/tasks.json`), driven by the `task-log` skill.
-- **Model** — a visualization of the project's **`.gitmir/model/`**: **Business logic** (entity lifecycles), **Overview**, **Data (ER)**, **Data flow** and **Processes**.
+- **Model** — a visualization of the project's **`.gitmir/model/`**: **Business logic** (entity lifecycles), **Overview**, **Data (ER)**, **Data flow** and **Processes**. **Click any element** in a diagram to pull its exact context or turn it into a task.
+- **Queue** — a board of the file-based task queue (`tasks/todo · inprogress · done`) that the `task-runner` skill works through.
 
 It's **one Node file, no npm dependencies**. Everything it needs (ELK, fonts) is vendored locally, so it runs fully offline.
 
@@ -81,6 +82,30 @@ comes out of the **GITMIR lab**. It is the same information model that powers
 repository is the open-source companion that builds that model locally (via the
 `gitmir-model` skill) and renders it.
 
+## Tasks from the schema
+
+The model isn't just to look at — it's how you brief Claude. **Click any element**
+in a Model diagram and the tool walks its id-links to assemble the *exact* context
+for that thing: its fields, lifecycle, the functions that read/write it, the events
+it fires, the processes and reactions it's part of, related entities. No LLM
+guessing — pure, deterministic graph traversal.
+
+<img src="docs/img/06-context-popup.png" alt="Click an element → deterministic context" width="100%">
+
+From there, **📋 copy the context** into Claude, or **＋ create a task**. Tasks are
+plain markdown files under `<project>/tasks/{todo,inprogress,done}/` — one file per
+task, each already carrying its context. The **Queue** tab shows them as a board:
+
+<img src="docs/img/07-queue.png" alt="Task queue — todo · in progress · done" width="100%">
+
+Then paste the **`task-runner`** skill into Claude: it works the queue one task at a
+time, moving each file `todo → inprogress → done` as it goes (the board updates
+live). Because every task ships with the right context, Claude executes it precisely.
+
+<img src="docs/img/demo-tasks.gif" alt="Click a schema element → create a task → queue" width="920">
+
+<sub>Click an element → assemble context → create a task → watch it land in the queue.</sub>
+
 ## Requirements
 
 - [Node.js](https://nodejs.org) 18+
@@ -105,6 +130,8 @@ Skills are reusable instructions you copy from the dashboard (**Settings → �
 
 - **`task-log`** — Claude keeps a human-readable log of completed tasks in the project's `.claude/tasks.json`; the **Tasks** tab shows it live.
 - **`gitmir-model`** — Claude builds/updates the project's **multidimensional object model** in `.gitmir/model/` from the real code. It also installs a standing rule into the project's `CLAUDE.md` so the model stays the product's living source of truth: consult it before working, update it after code changes.
+- **`task-planner`** — break a goal into small, self-contained task files in `tasks/todo/`, each with the relevant model context.
+- **`task-runner`** — execute the task queue one at a time, moving each file `todo → inprogress → done` and appending an outcome.
 
 Run `gitmir-model` once per project (then re-run after changes — it's idempotent) and the **Model** tab lights up with data (ER), data-flow, process and entity-lifecycle diagrams.
 
