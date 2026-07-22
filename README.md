@@ -24,6 +24,18 @@ Built on the **GITMIR multidimensional model** — the living source-of-truth mo
 
 ---
 
+## Why we built it
+
+At **GITMIR** we run Claude Code all day, across dozens of projects scattered over different folders and disks. Two things kept getting in the way — so we fixed them for ourselves, and now we use this every day.
+
+**First, the launching.** `cd` into the right folder, start `claude`, repeat — and never quite remember where everything lives. So we put every project behind one screen: pick it, hit **▶ Run Claude**, done.
+
+**Second — and this is the real one — losing the thread.** As AI writes more of the software, the code stops being something you *read* and becomes something you have to *trust*. You lose sight of what the product actually is: which entities exist, how an order moves from `placed` to `refunded`, what fires when a status changes. Our answer is a **model** — a living, multidimensional source of truth the repository keeps current, instead of code you re-read every time. This tool builds that model from your real code and draws it, so you can see a product's business logic and data flows at a glance — and so Claude keeps it up to date after every change.
+
+We built it for ourselves. It turned out useful enough to share — **free and open source** under GPL-3.0. If something's missing, you find a bug, or you'd like to contribute, you're very welcome.
+
+**Grab it:** clone and `node server.js` — see [Run](#run). Made in the [GITMIR](https://gitmir.com) lab.
+
 ## What it is
 
 You keep dozens of projects in different folders and launch `claude` from each. **GITMIR Claude Control** is a local web dashboard that holds them all:
