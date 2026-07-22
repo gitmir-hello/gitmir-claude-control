@@ -95,9 +95,9 @@ cd gitmir-claude-control
 node server.js
 ```
 
-It starts on **http://localhost:4599** and opens your browser. On macOS you can also just double-click **`start.command`**.
+It starts on **http://localhost:4599** and opens your browser. You can also double-click **`start.command`** (macOS) or **`start.cmd`** (Windows).
 
-Stop with `Ctrl+C`.
+Run it in your normal desktop session so the native folder picker and terminal launch work (macOS Terminal · Windows `cmd` · Linux terminals). Stop with `Ctrl+C`.
 
 ## Skills
 

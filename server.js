@@ -56,17 +56,60 @@ function osascript(script, args = []) {
 }
 
 // Native macOS folder picker -> POSIX path (no trailing slash), or null if cancelled.
+// Native folder picker -> selected path, or null if cancelled. Detects the OS.
 async function chooseFolder() {
-  const script =
-    'try\n' +
-    '  set f to choose folder with prompt "Choose a project folder for Claude"\n' +
-    '  return POSIX path of f\n' +
-    'on error number -128\n' +
-    '  return ""\n' +
-    'end try';
-  const out = await osascript(script);
-  if (!out) return null;
-  return out.replace(/\/+$/, '');
+  const plat = process.platform;
+
+  // macOS — osascript "choose folder"
+  if (plat === 'darwin') {
+    const script =
+      'try\n' +
+      '  set f to choose folder with prompt "Choose a project folder for Claude"\n' +
+      '  return POSIX path of f\n' +
+      'on error number -128\n' +
+      '  return ""\n' +
+      'end try';
+    const out = await osascript(script);
+    return out ? out.replace(/\/+$/, '') : null;
+  }
+
+  // Windows — PowerShell FolderBrowserDialog
+  if (plat === 'win32') {
+    const ps =
+      'Add-Type -AssemblyName System.Windows.Forms | Out-Null; ' +
+      '$d = New-Object System.Windows.Forms.FolderBrowserDialog; ' +
+      "$d.Description = 'Choose a project folder for Claude'; " +
+      '$d.ShowNewFolderButton = $true; ' +
+      "if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.SelectedPath) }";
+    return new Promise((resolve, reject) => {
+      execFile('powershell.exe', ['-NoProfile', '-STA', '-Command', ps], { timeout: 180000 }, (err, stdout, stderr) => {
+        if (err && !stdout) return reject(new Error((stderr || err.message || '').trim() || 'folder picker failed'));
+        const p = (stdout || '').trim();
+        resolve(p ? p.replace(/[\\/]+$/, '') : null);
+      });
+    });
+  }
+
+  // Linux — zenity, then kdialog (best-effort)
+  const home = process.env.HOME || '.';
+  const tools = [
+    ['zenity', ['--file-selection', '--directory', '--title=Choose a project folder for Claude']],
+    ['kdialog', ['--getexistingdirectory', home]],
+  ];
+  for (const [bin, args] of tools) {
+    try {
+      const p = await new Promise((resolve, reject) => {
+        execFile(bin, args, { timeout: 180000 }, (err, stdout) => {
+          if (err && err.code === 'ENOENT') return reject(err);   // tool not installed -> try next
+          resolve((stdout || '').trim());                          // empty = cancelled
+        });
+      });
+      return p ? p.replace(/\/+$/, '') : null;
+    } catch (e) {
+      if (e.code !== 'ENOENT') throw e;
+    }
+  }
+  throw new Error('no folder picker found (install zenity or kdialog)');
 }
 
 // Open a terminal in the folder and run `claude` — detects the OS.
@@ -125,15 +168,30 @@ function openInTerminal(projectPath) {
   return Promise.reject(new Error('unsupported OS: ' + plat));
 }
 
-async function revealInFinder(projectPath) {
-  const script =
-    'on run argv\n' +
-    '  tell application "Finder"\n' +
-    '    activate\n' +
-    '    open (POSIX file (item 1 of argv) as alias)\n' +
-    '  end tell\n' +
-    'end run';
-  return osascript(script, [projectPath]);
+// Reveal a folder in the OS file manager. Detects the OS.
+function revealInFinder(projectPath) {
+  const plat = process.platform;
+  if (plat === 'darwin') {
+    const script =
+      'on run argv\n' +
+      '  tell application "Finder"\n' +
+      '    activate\n' +
+      '    open (POSIX file (item 1 of argv) as alias)\n' +
+      '  end tell\n' +
+      'end run';
+    return osascript(script, [projectPath]);
+  }
+  if (plat === 'win32') {
+    // explorer.exe returns a non-zero exit code even on success -> fire and forget
+    return new Promise((resolve) => {
+      const c = spawn('explorer.exe', [projectPath], { detached: true, stdio: 'ignore' });
+      c.on('error', () => resolve('')); c.unref(); resolve('');
+    });
+  }
+  return new Promise((resolve, reject) => {
+    const c = spawn('xdg-open', [projectPath], { detached: true, stdio: 'ignore' });
+    c.on('error', reject); c.on('spawn', () => { c.unref(); resolve(''); });
+  });
 }
 
 // ---------- http helpers ----------
@@ -229,8 +287,22 @@ const server = http.createServer(async (req, res) => {
       }
     }
     if (req.method === 'POST' && url.pathname === '/api/add') {
-      const folder = await chooseFolder();
-      if (!folder) return sendJSON(res, 200, { added: false, cancelled: true });
+      const body = await readBody(req);
+      let folder;
+      if (body && body.path) {
+        // manual path (typed/pasted fallback) — no native picker
+        folder = String(body.path).trim().replace(/[\\/]+$/, '');
+        if (!folder) return sendJSON(res, 200, { added: false, cancelled: true });
+        if (!fs.existsSync(folder)) return sendJSON(res, 200, { added: false, error: 'Folder not found: ' + folder });
+      } else {
+        try {
+          folder = await chooseFolder();
+        } catch (e) {
+          // picker unavailable (headless / no GUI / missing tool) -> let the UI offer manual entry
+          return sendJSON(res, 200, { added: false, pickerFailed: true, error: String(e.message || e) });
+        }
+        if (!folder) return sendJSON(res, 200, { added: false, cancelled: true });
+      }
       const list = loadProjects();
       if (list.some((p) => p.path === folder)) {
         return sendJSON(res, 200, { added: false, duplicate: true, path: folder });
@@ -288,7 +360,10 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, '127.0.0.1', () => {
   const addr = `http://localhost:${PORT}`;
   console.log(`\n  GITMIR Claude Control  ->  ${addr}\n  (Ctrl+C to stop)\n`);
-  execFile('open', [addr], () => {});
+  const opener = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', addr]]
+    : process.platform === 'darwin' ? ['open', [addr]]
+    : ['xdg-open', [addr]];
+  execFile(opener[0], opener[1], () => {});
 });
 
 // ---------- frontend ----------
@@ -1294,12 +1369,21 @@ async function remove(p){
   toast('Removed from list'); load();
 }
 
+async function addProject(bodyObj){
+  const r = await fetch('/api/add', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(bodyObj||{})});
+  return r.json();
+}
 document.getElementById('addBtn').addEventListener('click', async ()=>{
   toast('Opening folder picker…');
-  const r = await fetch('/api/add', {method:'POST'});
-  const d = await r.json();
+  let d = await addProject({});
+  if(d.pickerFailed){
+    const p = prompt('Could not open the folder picker.\\nPaste the full path to the project folder:');
+    if(!p){ document.getElementById('toast').className='toast'; return; }
+    d = await addProject({ path: p });
+  }
   if(d.added){ selected = d.project.path; await load(); toast('Added: '+displayName(d.project)); }
   else if(d.duplicate){ selected = d.path; await load(); toast('Already in the list', true); }
+  else if(d.error){ toast(d.error, true); }
   else { document.getElementById('toast').className='toast'; }
 });
 searchEl.addEventListener('input', renderList);
