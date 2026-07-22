@@ -16,9 +16,9 @@ Built on the **GITMIR multidimensional model** — the living source-of-truth mo
 
 <br>
 
-<img src="docs/img/04-order-lifecycle.png" alt="Order lifecycle — business logic diagram" width="920">
+<img src="docs/img/demo.gif" alt="GITMIR Claude Control — demo" width="920">
 
-<sub>The `Order` lifecycle — laid out by [ELK](https://github.com/kieler/elkjs) and rendered in the GITMIR HUD. Every status transition shows its trigger (role · condition) and the side effects it fires.</sub>
+<sub>Pick a project → <b>▶ Run Claude</b> → copy the <code>gitmir-model</code> skill → open <b>Model</b> and see the product's business logic and data flows — laid out by <a href="https://github.com/kieler/elkjs">ELK</a> in the GITMIR HUD.</sub>
 
 </div>
 
