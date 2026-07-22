@@ -4,9 +4,21 @@
 
 **A local, single-file dashboard to run [Claude Code](https://www.anthropic.com/claude-code) across all your projects — with a per-project task log and a live business-logic model of each product.**
 
+[![License: GPL v3](https://img.shields.io/badge/License-GPL_v3-2fd8ff.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%E2%89%A518-2fd8ff.svg)](https://nodejs.org)
+[![Platform](https://img.shields.io/badge/platform-macOS%20·%20Windows%20·%20Linux-2fd8ff.svg)](#requirements)
+[![Dependencies](https://img.shields.io/badge/npm_deps-0-2fd8ff.svg)](#)
+[![by GITMIR](https://img.shields.io/badge/by-gitmir.com-2fd8ff.svg)](https://gitmir.com)
+
 Launch Claude in any project with one click · copy reusable skills into your session · visualize your product's data, flows, processes and entity lifecycles — all in an offline, dependency-free HUD.
 
 Built on the **GITMIR multidimensional model** — the living source-of-truth model behind **[gitmir.com](https://gitmir.com)**.
+
+<br>
+
+<img src="docs/img/04-order-lifecycle.png" alt="Order lifecycle — business logic diagram" width="920">
+
+<sub>The `Order` lifecycle — laid out by [ELK](https://github.com/kieler/elkjs) and rendered in the GITMIR HUD. Every status transition shows its trigger (role · condition) and the side effects it fires.</sub>
 
 </div>
 
@@ -17,12 +29,23 @@ Built on the **GITMIR multidimensional model** — the living source-of-truth mo
 You keep dozens of projects in different folders and launch `claude` from each. **GITMIR Claude Control** is a local web dashboard that holds them all:
 
 - **Left:** your project list (add any folder on any disk).
-- **Right, per project:**
-  - **Settings** — name, path, description, and one-click **▶ Run Claude** (opens a terminal in that folder and starts `claude`). Cross-platform: macOS Terminal, Windows `cmd`, Linux terminals.
-  - **Tasks** — a live log of what Claude did in the project (`.claude/tasks.json`), driven by the `task-log` skill.
-  - **Model** — a visualization of the project's **`.gitmir/model/`**: overview, ER (data), data flow, processes, and a **Business logic** view that traces an entity's lifecycle (how/when its status changes, with triggers and side effects) — laid out with [ELK](https://github.com/kieler/elkjs) and rendered as SVG in a holographic "HUD" style.
+- **Right, per project:** three tabs — **Settings**, **Tasks**, **Model**.
+
+<img src="docs/img/01-dashboard-settings.png" alt="Dashboard — Settings tab" width="100%">
+
+- **Settings** — name, path, description, and one-click **▶ Run Claude** (opens a terminal in that folder and starts `claude`). Cross-platform: macOS Terminal, Windows `cmd`, Linux terminals. Below, one-click **Skills** you copy into your Claude session.
+- **Tasks** — a live log of what Claude did in the project (`.claude/tasks.json`), driven by the `task-log` skill.
+- **Model** — a visualization of the project's **`.gitmir/model/`**: **Business logic** (entity lifecycles), **Overview**, **Data (ER)**, **Data flow** and **Processes**.
 
 It's **one Node file, no npm dependencies**. Everything it needs (ELK, fonts) is vendored locally, so it runs fully offline.
+
+## Screenshots
+
+| Business logic — entity lifecycle | Data flow |
+|---|---|
+| [<img src="docs/img/03-model-business-logic.png" alt="Model — Business logic">](docs/img/03-model-business-logic.png) | [<img src="docs/img/05-data-flow.png" alt="Model — Data flow">](docs/img/05-data-flow.png) |
+| **Tasks — what Claude did** | **Order state machine (fullscreen)** |
+| [<img src="docs/img/02-tasks.png" alt="Tasks tab">](docs/img/02-tasks.png) | [<img src="docs/img/04-order-lifecycle.png" alt="Order lifecycle">](docs/img/04-order-lifecycle.png) |
 
 ## The multidimensional model — from the GITMIR lab
 
@@ -69,13 +92,13 @@ Stop with `Ctrl+C`.
 Skills are reusable instructions you copy from the dashboard (**Settings → 📋 skill**) and paste into your Claude session (`⌘V`/`Ctrl+V` + Enter). They live in [`skills.json`](skills.json); add your own by pointing an entry at a `.md` file.
 
 - **`task-log`** — Claude keeps a human-readable log of completed tasks in the project's `.claude/tasks.json`; the **Tasks** tab shows it live.
-- **`gitmir-model`** — Claude builds/updates the project's **multidimensional object model** in `.gitmir/model/` (entities, server units & functions, API routes, frontend units, events, business processes, status flows, reactions — all cross-linked by stable id) from the real code. It also installs a standing rule into the project's `CLAUDE.md` so the model stays the product's living source of truth: consult it before working, update it after code changes. The **Model** tab visualizes it.
+- **`gitmir-model`** — Claude builds/updates the project's **multidimensional object model** in `.gitmir/model/` from the real code. It also installs a standing rule into the project's `CLAUDE.md` so the model stays the product's living source of truth: consult it before working, update it after code changes.
 
 Run `gitmir-model` once per project (then re-run after changes — it's idempotent) and the **Model** tab lights up with data (ER), data-flow, process and entity-lifecycle diagrams.
 
 ## Design
 
-The UI follows the **GITMIR "holo / HUD"** design language — deep-navy `#04060a`, electric cyan `#2fd8ff`, sharp technical plates with glowing corner brackets, `Onest` + `JetBrains Mono` typography.
+The UI follows the **GITMIR "holo / HUD"** design language — deep-navy `#04060a`, electric cyan `#2fd8ff`, sharp technical plates with glowing corner brackets, `Onest` + `JetBrains Mono` typography. Diagram layout is computed by **ELK** and drawn as SVG.
 
 ## About GITMIR
 
