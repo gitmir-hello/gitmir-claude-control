@@ -253,6 +253,40 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 200, { tasks: [], updated: null });
       }
     }
+    // ---- file-based task queue: tasks/{todo,inprogress,done}/*.md ----
+    if (req.method === 'POST' && url.pathname === '/api/task') {
+      const { path: p, title, content } = await readBody(req);
+      if (!p || !content) return sendJSON(res, 400, { error: 'no path/content' });
+      const dir = path.join(p, 'tasks', 'todo');
+      fs.mkdirSync(dir, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const slug = String(title || 'task').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'task';
+      const file = path.join(dir, stamp + '-' + slug + '.md');
+      fs.writeFileSync(file, content);
+      return sendJSON(res, 200, { ok: true, file: path.basename(file) });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/queue') {
+      const p = url.searchParams.get('path') || '';
+      const cols = ['todo', 'inprogress', 'done'];
+      const out = {};
+      for (const c of cols) {
+        const dir = path.join(p, 'tasks', c);
+        let items = [];
+        try {
+          items = fs.readdirSync(dir).filter((f) => f.endsWith('.md')).map((f) => {
+            let title = f.replace(/\.md$/, '');
+            try {
+              const first = fs.readFileSync(path.join(dir, f), 'utf8').split('\n').find((l) => l.trim());
+              if (first) title = first.replace(/^#+\s*/, '').trim().slice(0, 120);
+            } catch {}
+            let mtime = 0; try { mtime = fs.statSync(path.join(dir, f)).mtimeMs; } catch {}
+            return { file: f, title, mtime };
+          }).sort((a, b) => a.file.localeCompare(b.file));
+        } catch {}
+        out[c] = items;
+      }
+      return sendJSON(res, 200, out);
+    }
     if (req.method === 'GET' && url.pathname === '/api/model') {
       const p = url.searchParams.get('path') || '';
       const dir = path.join(p, '.gitmir', 'model');
@@ -600,6 +634,33 @@ const HTML = /* html */ `<!doctype html>
   .fs-stage{position:absolute; top:0; left:0; transform-origin:0 0; will-change:transform}
   .fs-stage svg{display:block}
 
+  /* context popup (click a schema element) */
+  .ctx-overlay{position:fixed; inset:0; z-index:1100; background:rgba(3,6,14,.72); display:none; align-items:center; justify-content:center; padding:30px}
+  .ctx-overlay.show{display:flex}
+  .ctx-modal{width:100%; max-width:780px; max-height:88vh; display:flex; flex-direction:column; background:linear-gradient(165deg,rgba(16,32,60,.96),rgba(8,17,36,.98)); border:1px solid var(--glass-brd-strong); box-shadow:0 20px 60px rgba(0,0,0,.6), 0 0 30px rgba(47,216,255,.1)}
+  .ctx-head{display:flex; align-items:center; gap:10px; padding:16px 18px; border-bottom:1px solid var(--glass-brd)}
+  .ctx-title{font-weight:650; font-size:16px; color:#fff}
+  .ctx-x{margin-left:auto; background:none; border:none; color:var(--ink-2); cursor:pointer; font-size:16px}
+  .ctx-x:hover{color:var(--txt)}
+  .ctx-note{padding:11px 18px 0; color:var(--ink-3); font-size:12px; font-family:var(--font-mono); line-height:1.5}
+  .ctx-pre{margin:12px 18px; padding:14px; overflow:auto; background:#061021; border:1px solid var(--line); color:#cfe0f5; font:12px/1.55 "JetBrains Mono",ui-monospace,monospace; white-space:pre-wrap; word-break:break-word; flex:1; min-height:120px}
+  .ctx-taskl{padding:0 18px; color:var(--cyan-soft); font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase}
+  .ctx-task{margin:8px 18px 0; padding:11px 13px; background:rgba(8,16,36,.6); border:1px solid var(--glass-brd); color:var(--ink-0); font-size:14px; min-height:70px; resize:vertical; outline:none; font-family:inherit}
+  .ctx-task:focus{border-color:rgba(47,216,255,.55); box-shadow:0 0 0 3px rgba(47,216,255,.12)}
+  .ctx-actions{display:flex; gap:10px; align-items:center; padding:14px 18px 18px}
+  .ctx-actions .del{margin-left:auto}
+
+  /* task queue */
+  .q-cols{display:grid; grid-template-columns:repeat(3,1fr); gap:14px}
+  .q-col{background:rgba(10,18,36,.5); border:1px solid var(--line); min-height:120px}
+  .q-col-h{font-family:var(--font-mono); text-transform:uppercase; letter-spacing:.12em; font-size:12px; padding:12px 14px; border-bottom:1px solid var(--line)}
+  .q-col-h .q-n{color:var(--ink-3)}
+  .q-list{padding:10px; display:flex; flex-direction:column; gap:8px}
+  .q-empty{color:var(--ink-3); font-size:13px; text-align:center; padding:10px}
+  .q-card{background:rgba(14,30,58,.5); border:1px solid var(--line); border-left:3px solid; padding:10px 12px}
+  .q-t{font-size:13px; color:var(--ink-0); word-break:break-word}
+  .q-f{font-family:var(--font-mono); font-size:10.5px; color:var(--ink-3); margin-top:5px; word-break:break-all}
+
   .toast{
     position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(30px);
     background:var(--panel2);border:1px solid var(--line2);color:var(--txt);
@@ -785,12 +846,15 @@ function renderList(){
 }
 
 let taskTimer = null;
+let queueTimer = null;
 let activeTab = 'settings';
 function setTab(tab){
   activeTab = tab;
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
   document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('active', p.dataset.pane===tab));
+  clearInterval(queueTimer);
   if(tab==='model' && selected) loadModel(selected);
+  if(tab==='queue' && selected){ loadQueue(selected); queueTimer=setInterval(()=>{ if(selected && activeTab==='queue') loadQueue(selected); }, 4000); }
 }
 function renderDetail(){
   const p = byPath(selected);
@@ -807,6 +871,7 @@ function renderDetail(){
       '<button class="tab-btn" data-tab="settings">Settings</button>' +
       '<button class="tab-btn" data-tab="tasks">Tasks <span class="badge" id="taskBadge"></span></button>' +
       '<button class="tab-btn" data-tab="model">Model</button>' +
+      '<button class="tab-btn" data-tab="queue">Queue <span class="badge" id="queueBadge"></span></button>' +
     '</div></div>' +
     '<div class="pane" data-pane="settings">' +
       '<div class="field"><div class="row-lbl"><label>Name</label><span class="saved" id="savedN">saved ✓</span></div>' +
@@ -837,6 +902,10 @@ function renderDetail(){
         '<button class="mrefresh" id="modelRefresh" title="Refresh model">⟳</button>' +
       '</div>' +
       '<div id="modelView"><div class="model-empty">Opening model…</div></div>' +
+    '</div>' +
+    '<div class="pane" data-pane="queue">' +
+      '<div class="tasks-head"><span class="t">Task queue — tasks/todo · inprogress · done</span></div>' +
+      '<div id="queueView"><div class="model-empty">Loading…</div></div>' +
     '</div>';
   mainEl.innerHTML = ''; mainEl.appendChild(wrap);
 
@@ -945,6 +1014,7 @@ const HOLO_DEFS='<defs>'+
   '.hchip text{fill:#7dffce;font:600 11px "JetBrains Mono",ui-monospace,monospace}'+
   '.hcard{fill:rgba(10,18,36,.94);stroke-width:1.5}'+
   '.hnode:hover .hcard{filter:brightness(1.3)}'+
+  '.hclk{cursor:pointer}.hnode.hclk:hover .hcard{filter:brightness(1.55)}'+
   '.hname{fill:#dceaff;font:600 13px "Onest",-apple-system,BlinkMacSystemFont,sans-serif}'+
   '.hsub{fill:#7286a6;font:500 11px "JetBrains Mono",ui-monospace,monospace}'+
   '.hfield{fill:#9fb2d0;font:500 11px "JetBrains Mono",ui-monospace,monospace}'+
@@ -963,7 +1033,8 @@ function nodeSvg(n){
     inner+='<text x="14" y="'+ny+'" class="hname"><tspan fill="'+acc+'">'+gl+'</tspan> '+esc(trunc(md.label,26))+'</text>';
     if(md.sub) inner+='<text x="15" y="'+(ny+17)+'" class="hsub">'+esc(trunc(md.sub,32))+'</text>';
   }
-  return '<g class="hnode" transform="translate('+x+','+y+')">'+inner+'</g>';
+  const ref = md.ref && md.ref.id ? ' data-ck="'+esc(md.ref.k)+'" data-cid="'+esc(md.ref.id)+'"' : '';
+  return '<g class="hnode'+(ref?' hclk':'')+'"'+ref+' transform="translate('+x+','+y+')">'+inner+'</g>';
 }
 
 function svgFromElk(g){
@@ -1010,9 +1081,12 @@ async function renderElk(container, spec){
   container.innerHTML='<div class="mermaid-box"><button class="fs-open" title="Open fullscreen">⛶ Fullscreen</button>'+
     '<div class="holo-wrap" title="Click to open fullscreen">'+svg+'</div></div>';
   const wrap=container.querySelector('.holo-wrap');
-  const open=(e)=>{ if(e) e.stopPropagation(); openDiagramFullscreen(wrap.innerHTML); };
-  container.querySelector('.fs-open').addEventListener('click', open);
-  wrap.addEventListener('click', open);
+  container.querySelector('.fs-open').addEventListener('click', (e)=>{ e.stopPropagation(); openDiagramFullscreen(wrap.innerHTML); });
+  wrap.addEventListener('click', (e)=>{
+    const node = e.target.closest('[data-cid]');
+    if(node && node.dataset.cid){ e.stopPropagation(); openContextPopup(node.dataset.ck, node.dataset.cid); return; }
+    openDiagramFullscreen(wrap.innerHTML);
+  });
 }
 
 async function loadModel(pathStr){
@@ -1107,6 +1181,112 @@ function resolveRef(kind, id, m){
   const o=(maps[kind]||[]).find(x=>x.id===id); return o ? (o.name||o.id) : id;
 }
 
+/* ---------- deterministic context from a clicked schema element ---------- */
+function ctxIx(m){
+  return {
+    ent:new Map((m.entities||[]).map(e=>[e.id,e])),
+    su:new Map((m.serverUnits||[]).map(x=>[x.id,x])),
+    sf:new Map((m.serverFunctions||[]).map(x=>[x.id,x])),
+    rt:new Map((m.apiRoutes||[]).map(x=>[x.id,x])),
+    fe:new Map((m.frontendUnits||[]).map(x=>[x.id,x])),
+    ev:new Map((m.events||[]).map(x=>[x.id,x])),
+    mod:new Map((m.modules||[]).map(x=>[x.id,x])),
+    owner:fieldOwner(m),
+  };
+}
+function objName(kind,id,m){
+  const map={entity:'entities',function:'serverFunctions',route:'apiRoutes',event:'events',frontend:'frontendUnits',module:'modules'}[kind];
+  const o=(m[map]||[]).find(x=>x.id===id); return o?(o.name||o.id):id;
+}
+function ctxTitle(kind,id,m){ return objName(kind,id,m)+' ('+kind+')'; }
+
+function gatherContext(kind,id,m){
+  const ix=ctxIx(m); const nm=(mp,i)=> (mp.get(i)||{}).name || i; const L=[];
+  if(kind==='entity'){
+    const e=ix.ent.get(id); if(!e) return 'Entity not found: '+id;
+    L.push('# Entity: '+e.name+' ('+e.id+')'); if(e.description) L.push(e.description);
+    L.push('- module: '+(e.moduleId?nm(ix.mod,e.moduleId):'—')+'  ·  storage: '+(e.storage||'table')+(e.tableName?'  ·  table: '+e.tableName:''));
+    if(e.fields&&e.fields.length){ L.push(''); L.push('## Fields'); for(const f of e.fields){ const tag=f.isPrimary?' [PK]':(f.type==='ref'&&f.refEntityId?' [FK → '+nm(ix.ent,f.refEntityId)+']':''); L.push('- '+f.name+' : '+(f.type||'')+tag+(f.note?'  — '+f.note:'')); } }
+    const flows=(m.statusFlows||[]).filter(f=>f.entityId===id);
+    if(flows.length){ L.push(''); L.push('## Lifecycle (status flows)'); for(const fl of flows){ L.push('### '+(fl.name||fl.id)+(fl.fieldName?'  — field '+fl.fieldName:'')); L.push('states: '+(fl.states||[]).map(s=>s.key).join(' → ')); for(const t of (fl.transitions||[])){ const trig=[t.byRole,t.condition].filter(Boolean).join(' · '); const eff=(t.effects||[]).map(ef=>effLabel(ef,m)).join('; '); L.push('- '+t.from+' → '+t.to+(trig?'  ['+trig+']':'')+(eff?'  ⇒ '+eff:'')); } } }
+    const ops=(m.serverFunctions||[]).filter(f=>(f.readsFieldIds||[]).some(x=>ix.owner.get(x)===id)||(f.writesFieldIds||[]).some(x=>ix.owner.get(x)===id));
+    if(ops.length){ L.push(''); L.push('## Operations (server functions)'); for(const f of ops){ const rw=((f.readsFieldIds||[]).some(x=>ix.owner.get(x)===id)?'R':'')+((f.writesFieldIds||[]).some(x=>ix.owner.get(x)===id)?'W':''); const rt=f.routeId&&ix.rt.get(f.routeId); const evs=(f.emitsEventIds||[]).map(x=>nm(ix.ev,x)).join(', '); L.push('- '+f.name+' ('+(f.operation||'')+')  ['+rw+']'+(rt?'  · '+rt.method+' '+rt.path:'')+(evs?'  · emits '+evs:'')); } }
+    const procs=(m.processes||[]).filter(p=>(p.steps||[]).some(s=>s.refId===id||(s.refKind==='function'&&ops.some(o=>o.id===s.refId))));
+    if(procs.length){ L.push(''); L.push('## Processes'); for(const p of procs) L.push('- '+(p.name||p.id)+': '+(p.steps||[]).map(s=>resolveRef(s.refKind,s.refId,m)).join(' → ')); }
+    const rx=(m.reactions||[]).filter(r=>(r.trigger&&r.trigger.entityId===id)||(r.effects||[]).some(ef=>ef.entityId===id));
+    if(rx.length){ L.push(''); L.push('## Reactions'); for(const r of rx) L.push('- '+(r.name||r.id)+': on change of '+nm(ix.ent,r.trigger&&r.trigger.entityId)+((r.trigger&&r.trigger.fieldName)?'.'+r.trigger.fieldName:'')+' ⇒ '+(r.effects||[]).map(ef=>effLabel(ef,m)).join('; ')); }
+    const rel=[];
+    for(const f of (e.fields||[])) if(f.type==='ref'&&f.refEntityId) rel.push(nm(ix.ent,f.refEntityId)+' (via '+f.name+')');
+    for(const src of (e.derivedFrom||[])) rel.push(nm(ix.ent,src)+' (derivedFrom)');
+    for(const oe of (m.entities||[])) for(const f of (oe.fields||[])) if(f.type==='ref'&&f.refEntityId===id) rel.push(oe.name+' → '+e.name+' (via '+f.name+')');
+    if(rel.length){ L.push(''); L.push('## Related entities'); for(const r of rel) L.push('- '+r); }
+    return L.join('\\n');
+  }
+  if(kind==='function'){ const f=ix.sf.get(id); if(!f) return 'Function not found'; L.push('# Server function: '+f.name+' ('+f.id+')'); if(f.description) L.push(f.description); L.push('- unit: '+(f.serverUnitId?nm(ix.su,f.serverUnitId):'—')+'  ·  operation: '+(f.operation||'')); const rt=f.routeId&&ix.rt.get(f.routeId); if(rt) L.push('- route: '+rt.method+' '+rt.path+(rt.auth?' (auth)':'')); const rd=[...new Set((f.readsFieldIds||[]).map(x=>ix.owner.get(x)).filter(Boolean))].map(x=>nm(ix.ent,x)); const wr=[...new Set((f.writesFieldIds||[]).map(x=>ix.owner.get(x)).filter(Boolean))].map(x=>nm(ix.ent,x)); if(rd.length) L.push('- reads: '+rd.join(', ')); if(wr.length) L.push('- writes: '+wr.join(', ')); const cl=(f.callsFunctionIds||[]).map(x=>nm(ix.sf,x)); if(cl.length) L.push('- calls: '+cl.join(', ')); const em=(f.emitsEventIds||[]).map(x=>nm(ix.ev,x)); if(em.length) L.push('- emits: '+em.join(', ')); const sb=(f.subscribesEventIds||[]).map(x=>nm(ix.ev,x)); if(sb.length) L.push('- subscribes: '+sb.join(', ')); const procs=(m.processes||[]).filter(p=>(p.steps||[]).some(s=>s.refId===id)); if(procs.length){ L.push(''); L.push('## Processes'); for(const p of procs) L.push('- '+(p.name||p.id)); } return L.join('\\n'); }
+  if(kind==='route'){ const r=ix.rt.get(id); if(!r) return 'Route not found'; L.push('# API route: '+r.method+' '+r.path+' ('+r.id+')'); if(r.description) L.push(r.description); L.push('- unit: '+(r.serverUnitId?nm(ix.su,r.serverUnitId):'—')+'  ·  auth: '+(!!r.auth)); const fns=(m.serverFunctions||[]).filter(f=>f.routeId===id); if(fns.length){ L.push(''); L.push('## Handlers'); for(const f of fns) L.push('- '+f.name+' ('+(f.operation||'')+')'); } const fes=(m.frontendUnits||[]).filter(fe=>(fe.consumesRouteIds||[]).includes(id)); if(fes.length){ L.push(''); L.push('## Called from (frontend)'); for(const fe of fes) L.push('- '+fe.name); } return L.join('\\n'); }
+  if(kind==='event'){ const ev=ix.ev.get(id); if(!ev) return 'Event not found'; L.push('# Domain event: '+ev.name+' ('+ev.id+')'); if(ev.description) L.push(ev.description); const prod=(m.serverFunctions||[]).filter(f=>(f.emitsEventIds||[]).includes(id)); const cons=(m.serverFunctions||[]).filter(f=>(f.subscribesEventIds||[]).includes(id)); if(prod.length){ L.push(''); L.push('## Emitted by'); for(const f of prod) L.push('- '+f.name); } if(cons.length){ L.push(''); L.push('## Handled by'); for(const f of cons) L.push('- '+f.name); } return L.join('\\n'); }
+  if(kind==='frontend'){ const fe=ix.fe.get(id); if(!fe) return 'Frontend unit not found'; L.push('# Frontend unit: '+fe.name+' ('+fe.id+', '+(fe.kind||'')+')'); if(fe.description) L.push(fe.description); const routes=(fe.consumesRouteIds||[]).map(rid=>ix.rt.get(rid)).filter(Boolean); if(routes.length){ L.push(''); L.push('## Consumes routes'); for(const r of routes){ const fns=(m.serverFunctions||[]).filter(f=>f.routeId===r.id).map(f=>f.name); L.push('- '+r.method+' '+r.path+(fns.length?'  → '+fns.join(', '):'')); } } return L.join('\\n'); }
+  if(kind==='process'){ const p=(m.processes||[]).find(x=>x.id===id); if(!p) return 'Process not found'; L.push('# Business process: '+p.name+' ('+p.id+')'); if(p.description) L.push(p.description); L.push('- trigger: '+(p.triggerKind||'')+(p.triggerRefId?' → '+resolveRef({ui:'frontend',api:'route',event:'event',schedule:'route'}[p.triggerKind]||'frontend',p.triggerRefId,m):'')); L.push(''); L.push('## Steps'); (p.steps||[]).forEach((s,i)=> L.push((i+1)+'. '+resolveRef(s.refKind,s.refId,m)+'  ('+s.refKind+')'+(s.note?' — '+s.note:''))); return L.join('\\n'); }
+  return objName(kind,id,m)+' ('+kind+')';
+}
+
+function openContextPopup(kind,id){
+  if(!modelData) return; const m=modelData.model;
+  const ctx=gatherContext(kind,id,m); const title=ctxTitle(kind,id,m);
+  let ov=document.getElementById('ctxOverlay');
+  if(!ov){ ov=document.createElement('div'); ov.id='ctxOverlay'; ov.className='ctx-overlay'; document.body.appendChild(ov); }
+  ov.innerHTML=
+    '<div class="ctx-modal">'+
+      '<div class="ctx-head"><div class="ctx-title">'+esc(title)+'</div><button class="ctx-x" title="Close (Esc)">✕</button></div>'+
+      '<div class="ctx-note">Deterministic context — assembled from the model by walking id-links. Paste into Claude, or turn it into a queued task.</div>'+
+      '<pre class="ctx-pre">'+esc(ctx)+'</pre>'+
+      '<div class="ctx-taskl">Task for this element (optional):</div>'+
+      '<textarea class="ctx-task" placeholder="e.g. Add a partial-refund transition from paid, updating Payment and Inventory…"></textarea>'+
+      '<div class="ctx-actions">'+
+        '<button class="run ctx-create">＋ Create task</button>'+
+        '<button class="ghost ctx-copy">📋 Copy context</button>'+
+        '<button class="ghost ctx-copyt">📋 Copy context + task</button>'+
+        '<button class="del ctx-close">Close</button>'+
+      '</div>'+
+    '</div>';
+  ov.classList.add('show');
+  const ta=ov.querySelector('.ctx-task');
+  const withTask=()=> ctx + (ta.value.trim()? '\\n\\n---\\n## Task\\n'+ta.value.trim() : '');
+  const close=()=>{ ov.classList.remove('show'); ov.innerHTML=''; };
+  ov.querySelector('.ctx-x').addEventListener('click', close);
+  ov.querySelector('.ctx-close').addEventListener('click', close);
+  ov.addEventListener('click', e=>{ if(e.target===ov) close(); });
+  ov.querySelector('.ctx-copy').addEventListener('click', async ()=>{ await copyToClipboard(ctx); toast('Context copied ✓  paste into claude'); });
+  ov.querySelector('.ctx-copyt').addEventListener('click', async ()=>{ await copyToClipboard(withTask()); toast('Context + task copied ✓'); });
+  ov.querySelector('.ctx-create').addEventListener('click', async ()=>{
+    const t=ta.value.trim(); if(!t){ toast('Type the task first', true); ta.focus(); return; }
+    const content='# '+title+' — '+t.split('\\n')[0].slice(0,80)+'\\n\\n## Task\\n'+t+'\\n\\n## Context (from the model)\\n'+ctx+'\\n';
+    const r=await fetch('/api/task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:selected, title:title+' — '+t.slice(0,40), content})});
+    const d=await r.json();
+    if(d.ok){ toast('Task created in tasks/todo ✓'); close(); if(activeTab==='queue') loadQueue(selected); }
+    else toast('Failed: '+(d.error||'error'), true);
+  });
+}
+
+/* ---------- task queue view ---------- */
+async function loadQueue(pathStr){
+  const view=document.getElementById('queueView'); if(!view) return;
+  let q; try{ q=await (await fetch('/api/queue?path='+encodeURIComponent(pathStr))).json(); }catch{ return; }
+  if(selected!==pathStr) return;
+  const total=(q.todo||[]).length+(q.inprogress||[]).length+(q.done||[]).length;
+  const badge=document.getElementById('queueBadge'); if(badge) badge.textContent = (q.todo||[]).length ? String((q.todo||[]).length) : '';
+  if(!total){ view.innerHTML='<div class="model-empty">No tasks yet.<br>Open <b>Model</b>, click any element in a diagram → <b>＋ Create task</b> (or copy the <b>task-planner</b> skill). Then run <b>📋 task-runner</b> in Claude — it executes them one by one, moving each file todo → inprogress → done.</div>'; return; }
+  const cols=[['todo','To do','#8aa0ff'],['inprogress','In progress','#ffb86b'],['done','Done','#34f0a6']];
+  let html='<div class="q-cols">';
+  for(const [k,label,acc] of cols){ const items=q[k]||[];
+    html+='<div class="q-col"><div class="q-col-h" style="color:'+acc+'">'+label+' <span class="q-n">'+items.length+'</span></div><div class="q-list">';
+    if(!items.length) html+='<div class="q-empty">—</div>';
+    for(const it of items) html+='<div class="q-card" style="border-left-color:'+acc+'"><div class="q-t">'+esc(it.title)+'</div><div class="q-f">'+esc(it.file)+'</div></div>';
+    html+='</div></div>';
+  }
+  view.innerHTML=html+'</div>';
+}
+
 // ----- overview -----
 function renderOverview(view, d){
   const m=d.model;
@@ -1133,7 +1313,7 @@ function graphER(m){
   for(const e of ents){
     const fs=(e.fields||[]).slice(0,8).map(f=> (f.isPrimary?'● ':(f.type==='ref'?'◇ ':'  '))+f.name+' : '+(f.type||''));
     const h=32+Math.max(1,fs.length)*18+8;
-    nodes.push({id:e.id, w:216, h, meta:{kind:'entity', label:e.name||e.id, fields:fs}});
+    nodes.push({id:e.id, w:216, h, meta:{kind:'entity', label:e.name||e.id, fields:fs, ref:{k:'entity',id:e.id}}});
   }
   for(const e of ents){
     for(const f of (e.fields||[])) if(f.type==='ref'&&f.refEntityId&&byId.has(f.refEntityId)) edges.push({from:f.refEntityId, to:e.id, kind:'data', label:f.name});
@@ -1146,7 +1326,7 @@ function graphFlow(m){
   const fe=m.frontendUnits||[], rt=m.apiRoutes||[], sf=m.serverFunctions||[], ent=m.entities||[], ev=m.events||[];
   const nodes=[], edges=[], have=new Set(); const owner=fieldOwner(m);
   const rtById=new Map(rt.map(r=>[r.id,r])), fnById=new Map(sf.map(f=>[f.id,f])), evById=new Map(ev.map(e=>[e.id,e])), entById=new Map(ent.map(e=>[e.id,e]));
-  const add=(id,kind,label,sub)=>{ if(!have.has(id)){ have.add(id); nodes.push({id, w:186, h: sub?52:44, meta:{kind,label,sub:sub||''}}); } };
+  const add=(id,kind,label,sub)=>{ if(!have.has(id)){ have.add(id); nodes.push({id, w:186, h: sub?52:44, meta:{kind,label,sub:sub||'', ref:{k:kind,id}}}); } };
   for(const f of fe){ add(f.id,'frontend',f.name); for(const rid of (f.consumesRouteIds||[])) if(rtById.has(rid)){ add(rid,'route', rtLabel(rtById.get(rid))); edges.push({from:f.id,to:rid,kind:'spine'}); } }
   for(const f of sf){ if(f.routeId&&rtById.has(f.routeId)){ add(f.routeId,'route', rtLabel(rtById.get(f.routeId))); add(f.id,'function',f.name); edges.push({from:f.routeId,to:f.id,kind:'spine'}); } }
   for(const f of sf){ if(!have.has(f.id)) continue;
@@ -1282,16 +1462,16 @@ async function renderEntityLogic(container, entId, m){
 function graphLifecycle(fl, m){
   const nodes=[], edges=[]; const states=fl.states||[], trans=fl.transitions||[];
   const sid=k=>'st_'+mSafe(k);
-  for(const st of states) nodes.push({id:sid(st.key), w:162, h:46, meta:{kind:'state', label:st.name||st.key, sub: st.ownerRole||''}});
+  for(const st of states) nodes.push({id:sid(st.key), w:162, h:46, meta:{kind:'state', label:st.name||st.key, sub: st.ownerRole||'', ref:{k:'entity',id:fl.entityId}}});
   const targets=new Set(trans.map(t=>t.to));
   const initials=states.filter(st=>!targets.has(st.key));
-  if(initials.length){ nodes.push({id:'START', w:118, h:38, meta:{kind:'start', label:'created'}}); for(const st of initials) edges.push({from:'START', to:sid(st.key), kind:'spine'}); }
+  if(initials.length){ nodes.push({id:'START', w:118, h:38, meta:{kind:'start', label:'created', ref:{k:'entity',id:fl.entityId}}}); for(const st of initials) edges.push({from:'START', to:sid(st.key), kind:'spine'}); }
   trans.forEach((t,i)=>{
     const trig=[t.byRole,t.condition].filter(Boolean).join(' · ')||'transition';
-    const tn='tr'+i; nodes.push({id:tn, w:Math.max(120,Math.min(250, trig.length*7+30)), h:44, meta:{kind:'trigger', label:trig}});
+    const tn='tr'+i; nodes.push({id:tn, w:Math.max(120,Math.min(250, trig.length*7+30)), h:44, meta:{kind:'trigger', label:trig, ref:{k:'entity',id:fl.entityId}}});
     edges.push({from:sid(t.from), to:tn, kind:'spine'});
     edges.push({from:tn, to:sid(t.to), kind:'branch'});
-    (t.effects||[]).forEach((ef,j)=>{ const en='ef'+i+'_'+j, lbl=effLabel(ef,m); nodes.push({id:en, w:Math.max(150,Math.min(270,lbl.length*6.4+28)), h:40, meta:{kind:'effect', label:lbl}}); edges.push({from:tn, to:en, kind:'effect'}); });
+    (t.effects||[]).forEach((ef,j)=>{ const en='ef'+i+'_'+j, lbl=effLabel(ef,m); nodes.push({id:en, w:Math.max(150,Math.min(270,lbl.length*6.4+28)), h:40, meta:{kind:'effect', label:lbl, ref: ef.entityId?{k:'entity',id:ef.entityId}:{k:'entity',id:fl.entityId}}}); edges.push({from:tn, to:en, kind:'effect'}); });
   });
   return {direction:'DOWN', nodes, edges};
 }
@@ -1300,7 +1480,7 @@ function graphProcess(p, m, hi){
   const nodes=[], edges=[]; const steps=p.steps||[];
   steps.forEach((st,i)=>{
     const kind = st.refKind==='entity'?'entity' : st.refKind==='route'?'route' : st.refKind==='event'?'event' : st.refKind==='frontend'?'frontend' : 'function';
-    nodes.push({id:'ps'+i, w:186, h:50, meta:{kind, label:resolveRef(st.refKind,st.refId,m), sub: st.refKind+(st.refId===hi?' ◄':'')}});
+    nodes.push({id:'ps'+i, w:186, h:50, meta:{kind, label:resolveRef(st.refKind,st.refId,m), sub: st.refKind+(st.refId===hi?' ◄':''), ref:{k:st.refKind,id:st.refId}}});
     if(i>0) edges.push({from:'ps'+(i-1), to:'ps'+i, kind:'spine'});
   });
   return {direction:'RIGHT', nodes, edges};
@@ -1409,7 +1589,7 @@ async function saveOrder(){
   projects.sort((a,b)=> paths.indexOf(a.path)-paths.indexOf(b.path));
 }
 
-document.addEventListener('keydown', (e)=>{ if(e.key==='Escape') fsClose(); });
+document.addEventListener('keydown', (e)=>{ if(e.key==='Escape'){ fsClose(); const cx=document.getElementById('ctxOverlay'); if(cx){ cx.classList.remove('show'); cx.innerHTML=''; } } });
 loadSkillsList();
 load();
 </script>
