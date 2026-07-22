@@ -1,0 +1,49 @@
+[
+  {
+    "id": "fe-checkout",
+    "name": "CheckoutPage",
+    "kind": "page",
+    "description": "Оформление заказа.",
+    "consumesRouteIds": [
+      "rt-orders-post"
+    ],
+    "dependsOn": [],
+    "moduleId": "mod-orders"
+  },
+  {
+    "id": "fe-orders-list",
+    "name": "OrdersList",
+    "kind": "page",
+    "description": "Мои заказы.",
+    "consumesRouteIds": [
+      "rt-orders-get"
+    ],
+    "dependsOn": [],
+    "moduleId": "mod-orders"
+  },
+  {
+    "id": "fe-order-detail",
+    "name": "OrderDetail",
+    "kind": "page",
+    "description": "Карточка заказа: оплата, отмена, возврат.",
+    "consumesRouteIds": [
+      "rt-order-get",
+      "rt-order-pay",
+      "rt-order-cancel",
+      "rt-order-refund"
+    ],
+    "dependsOn": [],
+    "moduleId": "mod-orders"
+  },
+  {
+    "id": "fe-fulfillment",
+    "name": "FulfillmentBoard",
+    "kind": "view",
+    "description": "Админка сборки/отгрузки.",
+    "consumesRouteIds": [
+      "rt-order-ship"
+    ],
+    "dependsOn": [],
+    "moduleId": "mod-shipping"
+  }
+]

@@ -1,0 +1,16 @@
+{
+  "dimensions": {
+    "modules": 4,
+    "entities": 7,
+    "serverUnits": 7,
+    "serverFunctions": 13,
+    "apiRoutes": 7,
+    "frontendUnits": 4,
+    "events": 5,
+    "processes": 4,
+    "statusFlows": 2,
+    "reactions": 2
+  },
+  "at": "2026-07-21T17:05:00Z",
+  "project": "shop-demo"
+}

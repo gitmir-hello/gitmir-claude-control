@@ -1,0 +1,14 @@
+# local runtime state (personal — never commit)
+projects.json
+.claude/
+/.gitmir/
+
+# dependencies / env
+node_modules/
+.env
+.env.*
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

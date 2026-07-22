@@ -1,0 +1,134 @@
+[
+  {
+    "id": "proc-checkout",
+    "name": "Оформление заказа",
+    "description": "Покупатель оформляет заказ, резервируется склад.",
+    "triggerKind": "ui",
+    "triggerRefId": "fe-checkout",
+    "moduleId": "mod-orders",
+    "steps": [
+      {
+        "refKind": "frontend",
+        "refId": "fe-checkout"
+      },
+      {
+        "refKind": "route",
+        "refId": "rt-orders-post"
+      },
+      {
+        "refKind": "function",
+        "refId": "sf-checkout"
+      },
+      {
+        "refKind": "function",
+        "refId": "sf-reserve-inventory"
+      },
+      {
+        "refKind": "entity",
+        "refId": "ent-order"
+      },
+      {
+        "refKind": "event",
+        "refId": "ev-order-placed"
+      }
+    ]
+  },
+  {
+    "id": "proc-payment",
+    "name": "Оплата заказа",
+    "description": "Списание оплаты и переход в paid.",
+    "triggerKind": "api",
+    "triggerRefId": "rt-order-pay",
+    "moduleId": "mod-payments",
+    "steps": [
+      {
+        "refKind": "route",
+        "refId": "rt-order-pay"
+      },
+      {
+        "refKind": "function",
+        "refId": "sf-capture-payment"
+      },
+      {
+        "refKind": "entity",
+        "refId": "ent-payment"
+      },
+      {
+        "refKind": "entity",
+        "refId": "ent-order"
+      },
+      {
+        "refKind": "event",
+        "refId": "ev-order-paid"
+      }
+    ]
+  },
+  {
+    "id": "proc-fulfillment",
+    "name": "Сборка и доставка",
+    "description": "Сборка, отгрузка курьеру и доставка.",
+    "triggerKind": "event",
+    "triggerRefId": "ev-order-paid",
+    "moduleId": "mod-shipping",
+    "steps": [
+      {
+        "refKind": "function",
+        "refId": "sf-pack-order"
+      },
+      {
+        "refKind": "function",
+        "refId": "sf-ship-order"
+      },
+      {
+        "refKind": "entity",
+        "refId": "ent-shipment"
+      },
+      {
+        "refKind": "event",
+        "refId": "ev-order-shipped"
+      },
+      {
+        "refKind": "function",
+        "refId": "sf-mark-delivered"
+      },
+      {
+        "refKind": "entity",
+        "refId": "ent-order"
+      }
+    ]
+  },
+  {
+    "id": "proc-refund",
+    "name": "Возврат",
+    "description": "Возврат оплаты и остатков.",
+    "triggerKind": "ui",
+    "triggerRefId": "fe-order-detail",
+    "moduleId": "mod-payments",
+    "steps": [
+      {
+        "refKind": "frontend",
+        "refId": "fe-order-detail"
+      },
+      {
+        "refKind": "route",
+        "refId": "rt-order-refund"
+      },
+      {
+        "refKind": "function",
+        "refId": "sf-refund-order"
+      },
+      {
+        "refKind": "function",
+        "refId": "sf-release-inventory"
+      },
+      {
+        "refKind": "entity",
+        "refId": "ent-order"
+      },
+      {
+        "refKind": "event",
+        "refId": "ev-order-refunded"
+      }
+    ]
+  }
+]

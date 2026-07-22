@@ -1,0 +1,26 @@
+[
+  {
+    "id": "mod-orders",
+    "name": "Заказы",
+    "key": "orders",
+    "description": "Оформление, оплата и выполнение заказов."
+  },
+  {
+    "id": "mod-catalog",
+    "name": "Каталог",
+    "key": "catalog",
+    "description": "Товары и склад."
+  },
+  {
+    "id": "mod-payments",
+    "name": "Платежи",
+    "key": "payments",
+    "description": "Приём и возврат оплат."
+  },
+  {
+    "id": "mod-shipping",
+    "name": "Доставка",
+    "key": "shipping",
+    "description": "Отгрузки и трекинг."
+  }
+]

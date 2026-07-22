@@ -1,0 +1,38 @@
+[
+  {
+    "id": "rx-recalc-total",
+    "name": "Пересчёт суммы заказа",
+    "description": "Меняется количество позиции — пересчитать сумму заказа.",
+    "moduleId": "mod-orders",
+    "trigger": {
+      "entityId": "ent-order-item",
+      "fieldName": "qty",
+      "change": "update"
+    },
+    "effects": [
+      {
+        "kind": "recalculate",
+        "entityId": "ent-order",
+        "fieldName": "total",
+        "description": "sum(qty*price)"
+      }
+    ]
+  },
+  {
+    "id": "rx-low-stock",
+    "name": "Уведомление о низком остатке",
+    "description": "Остаток ниже порога — уведомить закупки.",
+    "moduleId": "mod-catalog",
+    "trigger": {
+      "entityId": "ent-inventory",
+      "fieldName": "available",
+      "change": "decrease"
+    },
+    "effects": [
+      {
+        "kind": "notify",
+        "description": "алерт закупщику"
+      }
+    ]
+  }
+]

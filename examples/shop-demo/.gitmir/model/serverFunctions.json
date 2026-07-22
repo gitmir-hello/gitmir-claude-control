@@ -1,0 +1,262 @@
+[
+  {
+    "id": "sf-checkout",
+    "name": "checkout",
+    "serverUnitId": "su-orders",
+    "operation": "business_action",
+    "routeId": "rt-orders-post",
+    "moduleId": "mod-orders",
+    "readsFieldIds": [
+      "f-oi-qty",
+      "f-prod-price"
+    ],
+    "writesFieldIds": [
+      "f-order-status",
+      "f-order-total",
+      "f-oi-order"
+    ],
+    "callsFunctionIds": [
+      "sf-reserve-inventory",
+      "sf-recalc-total"
+    ],
+    "emitsEventIds": [
+      "ev-order-placed"
+    ],
+    "subscribesEventIds": [],
+    "description": "Создаёт заказ из корзины, резервирует склад."
+  },
+  {
+    "id": "sf-capture-payment",
+    "name": "capturePayment",
+    "serverUnitId": "su-payments",
+    "operation": "business_action",
+    "routeId": "rt-order-pay",
+    "moduleId": "mod-payments",
+    "readsFieldIds": [
+      "f-order-total"
+    ],
+    "writesFieldIds": [
+      "f-pay-status",
+      "f-order-status"
+    ],
+    "callsFunctionIds": [
+      "sf-notify-customer"
+    ],
+    "emitsEventIds": [
+      "ev-order-paid"
+    ],
+    "subscribesEventIds": [
+      "ev-order-placed"
+    ],
+    "description": "Списывает оплату, помечает заказ оплаченным."
+  },
+  {
+    "id": "sf-reserve-inventory",
+    "name": "reserveInventory",
+    "serverUnitId": "su-inventory",
+    "operation": "business_action",
+    "moduleId": "mod-catalog",
+    "readsFieldIds": [
+      "f-inv-available"
+    ],
+    "writesFieldIds": [
+      "f-inv-reserved"
+    ],
+    "callsFunctionIds": [],
+    "emitsEventIds": [],
+    "subscribesEventIds": [],
+    "description": "Резервирует остатки под заказ."
+  },
+  {
+    "id": "sf-release-inventory",
+    "name": "releaseInventory",
+    "serverUnitId": "su-inventory",
+    "operation": "business_action",
+    "moduleId": "mod-catalog",
+    "readsFieldIds": [
+      "f-inv-reserved"
+    ],
+    "writesFieldIds": [
+      "f-inv-reserved",
+      "f-inv-available"
+    ],
+    "callsFunctionIds": [],
+    "emitsEventIds": [],
+    "subscribesEventIds": [],
+    "description": "Возвращает резерв при отмене/возврате."
+  },
+  {
+    "id": "sf-pack-order",
+    "name": "packOrder",
+    "serverUnitId": "su-orders",
+    "operation": "business_action",
+    "moduleId": "mod-orders",
+    "readsFieldIds": [],
+    "writesFieldIds": [
+      "f-order-status",
+      "f-inv-available",
+      "f-inv-reserved"
+    ],
+    "callsFunctionIds": [],
+    "emitsEventIds": [],
+    "subscribesEventIds": [
+      "ev-order-paid"
+    ],
+    "description": "Сборка: списывает резерв со склада."
+  },
+  {
+    "id": "sf-ship-order",
+    "name": "shipOrder",
+    "serverUnitId": "su-shipping",
+    "operation": "business_action",
+    "routeId": "rt-order-ship",
+    "moduleId": "mod-shipping",
+    "readsFieldIds": [],
+    "writesFieldIds": [
+      "f-order-status",
+      "f-ship-status"
+    ],
+    "callsFunctionIds": [
+      "sf-notify-customer"
+    ],
+    "emitsEventIds": [
+      "ev-order-shipped"
+    ],
+    "subscribesEventIds": [],
+    "description": "Создаёт отгрузку, передаёт курьеру."
+  },
+  {
+    "id": "sf-mark-delivered",
+    "name": "markDelivered",
+    "serverUnitId": "su-shipping",
+    "operation": "subscriber",
+    "moduleId": "mod-shipping",
+    "readsFieldIds": [],
+    "writesFieldIds": [
+      "f-order-status",
+      "f-ship-status"
+    ],
+    "callsFunctionIds": [
+      "sf-notify-customer"
+    ],
+    "emitsEventIds": [
+      "ev-order-delivered"
+    ],
+    "subscribesEventIds": [
+      "ev-order-shipped"
+    ],
+    "description": "Отмечает доставку по вебхуку курьера."
+  },
+  {
+    "id": "sf-cancel-order",
+    "name": "cancelOrder",
+    "serverUnitId": "su-orders",
+    "operation": "business_action",
+    "routeId": "rt-order-cancel",
+    "moduleId": "mod-orders",
+    "readsFieldIds": [],
+    "writesFieldIds": [
+      "f-order-status"
+    ],
+    "callsFunctionIds": [
+      "sf-release-inventory"
+    ],
+    "emitsEventIds": [],
+    "subscribesEventIds": [],
+    "description": "Отмена до оплаты, снимает резерв."
+  },
+  {
+    "id": "sf-refund-order",
+    "name": "refundOrder",
+    "serverUnitId": "su-payments",
+    "operation": "business_action",
+    "routeId": "rt-order-refund",
+    "moduleId": "mod-payments",
+    "readsFieldIds": [
+      "f-order-total"
+    ],
+    "writesFieldIds": [
+      "f-order-status",
+      "f-pay-status"
+    ],
+    "callsFunctionIds": [
+      "sf-release-inventory",
+      "sf-notify-customer"
+    ],
+    "emitsEventIds": [
+      "ev-order-refunded"
+    ],
+    "subscribesEventIds": [],
+    "description": "Возврат оплаты по заказу."
+  },
+  {
+    "id": "sf-recalc-total",
+    "name": "recalcOrderTotal",
+    "serverUnitId": "su-orders",
+    "operation": "business_action",
+    "moduleId": "mod-orders",
+    "readsFieldIds": [
+      "f-oi-qty",
+      "f-oi-price"
+    ],
+    "writesFieldIds": [
+      "f-order-total"
+    ],
+    "callsFunctionIds": [],
+    "emitsEventIds": [],
+    "subscribesEventIds": [],
+    "description": "Пересчитывает сумму заказа по позициям."
+  },
+  {
+    "id": "sf-notify-customer",
+    "name": "notifyCustomer",
+    "serverUnitId": "su-notify",
+    "operation": "business_action",
+    "moduleId": "mod-orders",
+    "readsFieldIds": [
+      "f-cust-email"
+    ],
+    "writesFieldIds": [],
+    "callsFunctionIds": [],
+    "emitsEventIds": [],
+    "subscribesEventIds": [],
+    "description": "Шлёт письмо о статусе заказа."
+  },
+  {
+    "id": "sf-list-orders",
+    "name": "listOrders",
+    "serverUnitId": "su-orders",
+    "operation": "list",
+    "routeId": "rt-orders-get",
+    "moduleId": "mod-orders",
+    "readsFieldIds": [
+      "f-order-number",
+      "f-order-status",
+      "f-order-total"
+    ],
+    "writesFieldIds": [],
+    "callsFunctionIds": [],
+    "emitsEventIds": [],
+    "subscribesEventIds": [],
+    "description": "Список заказов."
+  },
+  {
+    "id": "sf-get-order",
+    "name": "getOrder",
+    "serverUnitId": "su-orders",
+    "operation": "getById",
+    "routeId": "rt-order-get",
+    "moduleId": "mod-orders",
+    "readsFieldIds": [
+      "f-order-number",
+      "f-order-status",
+      "f-order-total",
+      "f-order-customer"
+    ],
+    "writesFieldIds": [],
+    "callsFunctionIds": [],
+    "emitsEventIds": [],
+    "subscribesEventIds": [],
+    "description": "Карточка заказа."
+  }
+]

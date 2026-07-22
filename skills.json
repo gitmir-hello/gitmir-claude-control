@@ -1,0 +1,16 @@
+[
+  {
+    "name": "task-log",
+    "title": "task-log",
+    "desc": "Keep a log of the project's completed tasks in .claude/tasks.json (shown on the Tasks tab).",
+    "file": "skills/task-log.md"
+  },
+  {
+    "name": "gitmir-model",
+    "title": "gitmir-model",
+    "desc": "Build/update the project's multidimensional object model in .gitmir/model/: entities, server logic, API, frontend, events, business processes, status flows, reactions — all linked by id.",
+    "file": "skills/gitmir-model.md",
+    "stripFrontmatter": true,
+    "prepend": "Build (or, if a model already exists, idempotently update it, keeping stable ids) the multidimensional object model of THIS project by following the specification below in full — including the mandatory standing rule it defines (install/refresh the 'GitMir model — source of truth' section in the project's CLAUDE.md). Write only inside .gitmir/ and that one CLAUDE.md section; do not modify application source.\n\n"
+  }
+]
