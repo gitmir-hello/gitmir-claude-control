@@ -586,9 +586,12 @@ const HTML = /* html */ `<!doctype html>
   .dgm-b:hover{border-color:var(--cyan); color:var(--cyan)}
   .dgm-hint{flex:1; color:var(--ink-3); font-family:var(--font-mono); font-size:11px; letter-spacing:.02em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:0 6px}
   .dgm-full{min-width:34px}
-  .dgm-canvas{position:relative; height:60vh; overflow:hidden; background:#061021; cursor:grab; touch-action:none}
+  .dgm-canvas{position:relative; height:60vh; overflow:hidden; cursor:grab; touch-action:none;
+    background-color:#061021;
+    background-image:linear-gradient(rgba(120,210,255,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(120,210,255,.05) 1px, transparent 1px);
+    background-size:28px 28px; background-position:0 0}
   .dgm-canvas.grab{cursor:grabbing}
-  .dgm-stage{position:absolute; top:0; left:0; transform-origin:0 0; will-change:transform}
+  .dgm-stage{position:absolute; top:0; left:0; transform-origin:0 0}
   .dgm-stage svg{display:block}
   .mmsrc{overflow:auto; max-height:220px; background:#0b0c10; border:1px solid var(--line); border-radius:8px; padding:10px; font-size:11px; color:var(--dim); margin-top:10px}
   .ov-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(108px,1fr)); gap:10px; margin-bottom:22px}
@@ -640,9 +643,12 @@ const HTML = /* html */ `<!doctype html>
   .fs-btn:hover{border-color:var(--accent)}
   .fs-hint{color:var(--dim2); font-size:12px; margin-left:6px}
   .fs-close{margin-left:auto; color:var(--danger); font-weight:600}
-  .fs-canvas{flex:1; overflow:hidden; position:relative; cursor:grab}
+  .fs-canvas{flex:1; overflow:hidden; position:relative; cursor:grab;
+    background-color:#061021;
+    background-image:linear-gradient(rgba(120,210,255,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(120,210,255,.05) 1px, transparent 1px);
+    background-size:28px 28px; background-position:0 0}
   .fs-canvas.drag, .fs-canvas.grab{cursor:grabbing}
-  .fs-stage{position:absolute; top:0; left:0; transform-origin:0 0; will-change:transform}
+  .fs-stage{position:absolute; top:0; left:0; transform-origin:0 0}
   .fs-stage svg{display:block}
 
   /* context popup (click a schema element) */
@@ -1063,8 +1069,7 @@ function svgFromElk(g){
   }
   for(const n of (g.children||[])) nL.push(nodeSvg(n));
   return '<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" class="holo-svg">'+
-    HOLO_DEFS+'<rect x="0" y="0" width="'+W+'" height="'+H+'" fill="#061021"/><rect x="0" y="0" width="'+W+'" height="'+H+'" fill="url(#hgrid)"/>'+
-    eL.join('')+nL.join('')+'</svg>';
+    HOLO_DEFS+eL.join('')+nL.join('')+'</svg>';
 }
 
 async function renderElk(container, spec){
@@ -1117,7 +1122,7 @@ async function renderElk(container, spec){
 function attachPanZoom(canvas, stage, svgEl, onNodeClick){
   let k=1, x=0, y=0;
   if(svgEl){ svgEl.style.maxWidth='none'; svgEl.style.maxHeight='none'; }
-  const apply=()=>{ stage.style.transform='translate('+x+'px,'+y+'px) scale('+k+')'; };
+  const apply=()=>{ stage.style.transform='translate('+x+'px,'+y+'px) scale('+k+')'; const gs=28*k; canvas.style.backgroundSize=gs+'px '+gs+'px'; canvas.style.backgroundPosition=x+'px '+y+'px'; };
   const nat=()=>{ if(svgEl && svgEl.viewBox && svgEl.viewBox.baseVal && svgEl.viewBox.baseVal.width) return {w:svgEl.viewBox.baseVal.width, h:svgEl.viewBox.baseVal.height}; return {w:800,h:600}; };
   const fit=()=>{ const cw=canvas.clientWidth, ch=canvas.clientHeight, n=nat(); const s=Math.min(cw/n.w, ch/n.h)*0.94; k=Math.min(1.4, Math.max(0.08, (isFinite(s)&&s>0)?s:1)); x=(cw-n.w*k)/2; y=(ch-n.h*k)/2; apply(); };
   const reset=()=>{ k=1; x=18; y=18; apply(); };
