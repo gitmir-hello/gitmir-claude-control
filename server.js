@@ -3,7 +3,20 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { execFile, spawn } = require('child_process');
+
+// The native folder picker is reliable on macOS, Linux and Windows 10, but on
+// Windows 11 a dialog spawned by a background process gets suppressed — so we hide
+// the "Browse…" button there and let the user paste the path instead.
+function nativePickerAvailable() {
+  if (process.platform === 'darwin' || process.platform === 'linux') return true;
+  if (process.platform === 'win32') {
+    const m = /^10\.0\.(\d+)/.exec(os.release() || '');
+    return (m ? parseInt(m[1], 10) : 0) < 22000; // Win11 is build >= 22000
+  }
+  return false;
+}
 
 const PORT = 4599;
 const DATA_FILE = path.join(__dirname, 'projects.json');
@@ -233,6 +246,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/api/ping') {
       return sendJSON(res, 200, { ok: true });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/env') {
+      return sendJSON(res, 200, { platform: process.platform, pickerAvailable: nativePickerAvailable() });
     }
     if (req.method === 'GET' && url.pathname === '/api/projects') {
       const list = loadProjects().map((p) => ({
@@ -965,6 +981,7 @@ function renderDetail(){
   taskTimer = setInterval(()=>{ if(selected) refreshTasks(selected); }, 4000);
 }
 
+let PICKER_OK = true;
 let SKILLS = [];
 async function loadSkillsList(){
   try{ SKILLS = (await (await fetch('/api/skills')).json()).skills || []; }catch{ SKILLS = []; }
@@ -1606,12 +1623,12 @@ function openAddModal(){
   ov.innerHTML=
     '<div class="ctx-modal" style="max-width:560px">'+
       '<div class="ctx-head"><div class="ctx-title">Add a project</div><button class="ctx-x" title="Close (Esc)">✕</button></div>'+
-      '<div class="ctx-note">Paste the full path to the project folder — open it in your file manager and copy the path from the address bar. Or use <b>Browse…</b> to pick it.</div>'+
+      '<div class="ctx-note">Paste the full path to the project folder — open it in your file manager and copy the path from the address bar.'+(PICKER_OK?' Or use <b>Browse…</b> to pick it.':'')+'</div>'+
       '<div class="ctx-taskl" style="margin:14px 18px 0">Folder path</div>'+
       '<input class="ctx-task" id="addPath" style="min-height:0; height:44px; line-height:22px; font-family:var(--font-mono)" placeholder="e.g.  C:&#92;projects&#92;my-app   or   /Users/you/projects/my-app" autocomplete="off" spellcheck="false">'+
       '<div class="ctx-actions">'+
         '<button class="run" id="addGo">＋ Add</button>'+
-        '<button class="ghost" id="addBrowse">🗂 Browse…</button>'+
+        (PICKER_OK?'<button class="ghost" id="addBrowse">🗂 Browse…</button>':'')+
         '<button class="del" id="addCancel">Cancel</button>'+
       '</div>'+
     '</div>';
@@ -1631,7 +1648,8 @@ function openAddModal(){
   ov.addEventListener('click', e=>{ if(e.target===ov) close(); });
   ov.querySelector('#addGo').addEventListener('click', go);
   inp.addEventListener('keydown', e=>{ if(e.key==='Enter') go(); });
-  ov.querySelector('#addBrowse').addEventListener('click', async ()=>{
+  const bb=ov.querySelector('#addBrowse');
+  if(bb) bb.addEventListener('click', async ()=>{
     toast('Opening folder picker…');
     let d; try{ d=await (await fetch('/api/pick',{method:'POST'})).json(); }catch{ d={}; }
     if(d.path){ inp.value=d.path; toast('Picked ✓'); }
@@ -1666,6 +1684,7 @@ async function saveOrder(){
 }
 
 document.addEventListener('keydown', (e)=>{ if(e.key==='Escape'){ fsClose(); for(const id of ['ctxOverlay','addOverlay']){ const o=document.getElementById(id); if(o){ o.classList.remove('show'); o.innerHTML=''; } } } });
+fetch('/api/env').then(r=>r.json()).then(d=>{ PICKER_OK = !!d.pickerAvailable; }).catch(()=>{});
 loadSkillsList();
 load();
 </script>
