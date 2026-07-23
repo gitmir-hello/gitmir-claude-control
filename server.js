@@ -73,16 +73,23 @@ async function chooseFolder() {
     return out ? out.replace(/\/+$/, '') : null;
   }
 
-  // Windows — PowerShell FolderBrowserDialog
+  // Windows — PowerShell FolderBrowserDialog owned by an invisible top-most form
+  // (Win11 dismisses/flickers an ownerless dialog because the spawning process is
+  // not the foreground app; the top-most owner brings it to front and keeps it modal).
   if (plat === 'win32') {
     const ps =
-      'Add-Type -AssemblyName System.Windows.Forms | Out-Null; ' +
+      'Add-Type -AssemblyName System.Windows.Forms,System.Drawing | Out-Null; ' +
+      '$o = New-Object System.Windows.Forms.Form; ' +
+      "$o.TopMost=$true; $o.ShowInTaskbar=$false; $o.Opacity=0; $o.StartPosition='Manual'; " +
+      '$o.Location = New-Object System.Drawing.Point(-3000,-3000); $o.Size = New-Object System.Drawing.Size(1,1); ' +
+      '$o.Show(); $o.Activate(); [System.Windows.Forms.Application]::DoEvents(); ' +
       '$d = New-Object System.Windows.Forms.FolderBrowserDialog; ' +
-      "$d.Description = 'Choose a project folder for Claude'; " +
-      '$d.ShowNewFolderButton = $true; ' +
-      "if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.SelectedPath) }";
+      "$d.Description='Choose a project folder for Claude'; $d.ShowNewFolderButton=$true; " +
+      '$r = $d.ShowDialog($o); ' +
+      '$o.Close(); $o.Dispose(); ' +
+      'if ($r -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.SelectedPath) }';
     return new Promise((resolve, reject) => {
-      execFile('powershell.exe', ['-NoProfile', '-STA', '-Command', ps], { timeout: 180000 }, (err, stdout, stderr) => {
+      execFile('powershell.exe', ['-NoProfile', '-STA', '-Command', ps], { timeout: 300000 }, (err, stdout, stderr) => {
         if (err && !stdout) return reject(new Error((stderr || err.message || '').trim() || 'folder picker failed'));
         const p = (stdout || '').trim();
         resolve(p ? p.replace(/[\\/]+$/, '') : null);
