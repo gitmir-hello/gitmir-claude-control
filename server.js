@@ -579,6 +579,17 @@ const HTML = /* html */ `<!doctype html>
   .mermaid-wrap svg{max-width:none; height:auto}
   .holo-wrap{overflow:auto; border:1px solid var(--line2); border-radius:12px; background:#061021; max-height:74vh; cursor:zoom-in}
   .holo-wrap svg{display:block; max-width:100%; height:auto}
+  /* pan/zoom diagram canvas (ide.gitmir.com style) */
+  .dgm{position:relative; border:1px solid var(--glass-brd); background:#061021}
+  .dgm-bar{display:flex; align-items:center; gap:6px; padding:8px 10px; border-bottom:1px solid var(--line); background:rgba(6,12,24,.72)}
+  .dgm-b{background:transparent; border:1px solid var(--faint); color:var(--ink-1); padding:5px 11px; cursor:pointer; font-size:13px; min-width:34px; line-height:1}
+  .dgm-b:hover{border-color:var(--cyan); color:var(--cyan)}
+  .dgm-hint{flex:1; color:var(--ink-3); font-family:var(--font-mono); font-size:11px; letter-spacing:.02em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:0 6px}
+  .dgm-full{min-width:34px}
+  .dgm-canvas{position:relative; height:60vh; overflow:hidden; background:#061021; cursor:grab; touch-action:none}
+  .dgm-canvas.grab{cursor:grabbing}
+  .dgm-stage{position:absolute; top:0; left:0; transform-origin:0 0; will-change:transform}
+  .dgm-stage svg{display:block}
   .mmsrc{overflow:auto; max-height:220px; background:#0b0c10; border:1px solid var(--line); border-radius:8px; padding:10px; font-size:11px; color:var(--dim); margin-top:10px}
   .ov-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(108px,1fr)); gap:10px; margin-bottom:22px}
   .ov-card{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 12px; text-align:center}
@@ -630,7 +641,7 @@ const HTML = /* html */ `<!doctype html>
   .fs-hint{color:var(--dim2); font-size:12px; margin-left:6px}
   .fs-close{margin-left:auto; color:var(--danger); font-weight:600}
   .fs-canvas{flex:1; overflow:hidden; position:relative; cursor:grab}
-  .fs-canvas.drag{cursor:grabbing}
+  .fs-canvas.drag, .fs-canvas.grab{cursor:grabbing}
   .fs-stage{position:absolute; top:0; left:0; transform-origin:0 0; will-change:transform}
   .fs-stage svg{display:block}
 
@@ -744,7 +755,7 @@ const HTML = /* html */ `<!doctype html>
   /* diagram frame + corner brackets (HUD signature) */
   .holo-wrap{ border:1px solid var(--glass-brd) }
   .mermaid-box{ position:relative }
-  .mermaid-box::before{ content:""; position:absolute; inset:-1px; pointer-events:none; z-index:3;
+  .dgm::before{ content:""; position:absolute; inset:-1px; pointer-events:none; z-index:3;
     --cb:14px; --cw:2px; --cc:var(--cyan);
     background:
       linear-gradient(90deg,transparent,rgba(95,222,255,.5),transparent) 50% 0/calc(100% - 48px) 1px no-repeat,
@@ -1078,15 +1089,49 @@ async function renderElk(container, spec){
   const ekById=new Map(graph.edges.map(e=>[e.id,e.ekind]));
   for(const e of (laid.edges||[])) if(!e.ekind) e.ekind=ekById.get(e.id);
   const svg=svgFromElk(laid);
-  container.innerHTML='<div class="mermaid-box"><button class="fs-open" title="Open fullscreen">⛶ Fullscreen</button>'+
-    '<div class="holo-wrap" title="Click to open fullscreen">'+svg+'</div></div>';
-  const wrap=container.querySelector('.holo-wrap');
-  container.querySelector('.fs-open').addEventListener('click', (e)=>{ e.stopPropagation(); openDiagramFullscreen(wrap.innerHTML); });
-  wrap.addEventListener('click', (e)=>{
-    const node = e.target.closest('[data-cid]');
-    if(node && node.dataset.cid){ e.stopPropagation(); openContextPopup(node.dataset.ck, node.dataset.cid); return; }
-    openDiagramFullscreen(wrap.innerHTML);
+  container.innerHTML=
+    '<div class="dgm">'+
+      '<div class="dgm-bar">'+
+        '<button class="dgm-b" data-a="out" title="Zoom out">−</button>'+
+        '<button class="dgm-b" data-a="in" title="Zoom in">+</button>'+
+        '<button class="dgm-b" data-a="fit" title="Fit to view">Fit</button>'+
+        '<button class="dgm-b" data-a="reset" title="100%">100%</button>'+
+        '<span class="dgm-hint">drag to pan · wheel to zoom · click a node for context</span>'+
+        '<button class="dgm-b dgm-full" data-a="full" title="Fullscreen">⛶</button>'+
+      '</div>'+
+      '<div class="dgm-canvas"><div class="dgm-stage">'+svg+'</div></div>'+
+    '</div>';
+  const canvas=container.querySelector('.dgm-canvas');
+  const stage=container.querySelector('.dgm-stage');
+  const svgEl=stage.querySelector('svg');
+  const pz=attachPanZoom(canvas, stage, svgEl, (ck,cid)=>openContextPopup(ck,cid));
+  container.querySelector('.dgm-bar').addEventListener('click',(e)=>{ const a=e.target&&e.target.dataset&&e.target.dataset.a; if(!a) return;
+    if(a==='in') pz.zoomCenter(1.2); else if(a==='out') pz.zoomCenter(0.83);
+    else if(a==='fit') pz.fit(); else if(a==='reset') pz.reset();
+    else if(a==='full') openDiagramFullscreen(svgEl.outerHTML);
   });
+}
+
+// Pan/zoom canvas like ide.gitmir.com's VisualBuilder: drag to pan, wheel zooms to
+// the cursor, click (not drag) a node fires onNodeClick.
+function attachPanZoom(canvas, stage, svgEl, onNodeClick){
+  let k=1, x=0, y=0;
+  if(svgEl){ svgEl.style.maxWidth='none'; svgEl.style.maxHeight='none'; }
+  const apply=()=>{ stage.style.transform='translate('+x+'px,'+y+'px) scale('+k+')'; };
+  const nat=()=>{ if(svgEl && svgEl.viewBox && svgEl.viewBox.baseVal && svgEl.viewBox.baseVal.width) return {w:svgEl.viewBox.baseVal.width, h:svgEl.viewBox.baseVal.height}; return {w:800,h:600}; };
+  const fit=()=>{ const cw=canvas.clientWidth, ch=canvas.clientHeight, n=nat(); const s=Math.min(cw/n.w, ch/n.h)*0.94; k=Math.min(1.4, Math.max(0.08, (isFinite(s)&&s>0)?s:1)); x=(cw-n.w*k)/2; y=(ch-n.h*k)/2; apply(); };
+  const reset=()=>{ k=1; x=18; y=18; apply(); };
+  const zoomAt=(f,px,py)=>{ const nk=Math.min(2.6, Math.max(0.1, k*f)); const wx=(px-x)/k, wy=(py-y)/k; k=nk; x=px-wx*k; y=py-wy*k; apply(); };
+  const zoomCenter=f=> zoomAt(f, canvas.clientWidth/2, canvas.clientHeight/2);
+  canvas.addEventListener('wheel',(e)=>{ e.preventDefault(); const r=canvas.getBoundingClientRect(); zoomAt(e.deltaY<0?1.12:0.89, e.clientX-r.left, e.clientY-r.top); }, {passive:false});
+  let drag=false, moved=false, lx=0, ly=0;
+  canvas.addEventListener('mousedown',(e)=>{ if(e.button!==0) return; drag=true; moved=false; lx=e.clientX; ly=e.clientY; canvas.classList.add('grab'); });
+  canvas.addEventListener('mousemove',(e)=>{ if(!drag) return; const dx=e.clientX-lx, dy=e.clientY-ly; if(Math.abs(dx)+Math.abs(dy)>4) moved=true; x+=dx; y+=dy; lx=e.clientX; ly=e.clientY; apply(); });
+  const end=()=>{ drag=false; canvas.classList.remove('grab'); };
+  canvas.addEventListener('mouseup', end); canvas.addEventListener('mouseleave', end);
+  canvas.addEventListener('click',(e)=>{ if(moved){ moved=false; return; } const node=e.target.closest('[data-cid]'); if(node && node.dataset.cid && onNodeClick) onNodeClick(node.dataset.ck, node.dataset.cid); });
+  setTimeout(fit, 30);
+  return { fit, reset, zoomCenter };
 }
 
 async function loadModel(pathStr){
@@ -1141,7 +1186,7 @@ function openDiagramFullscreen(svg){
       '<button class="fs-btn" data-a="in">+</button>'+
       '<button class="fs-btn" data-a="fit">Fit</button>'+
       '<button class="fs-btn" data-a="reset">100%</button>'+
-      '<span class="fs-hint">wheel — zoom · drag — pan</span>'+
+      '<span class="fs-hint">drag to pan · wheel to zoom · click a node for context</span>'+
       '<button class="fs-btn fs-close" data-a="close">✕ Esc</button>'+
     '</div>'+
     '<div class="fs-canvas" id="fsCanvas"><div class="fs-stage" id="fsStage">'+svg+'</div></div>';
@@ -1149,26 +1194,12 @@ function openDiagramFullscreen(svg){
   const canvas=ov.querySelector('#fsCanvas');
   const stage=ov.querySelector('#fsStage');
   const svgEl=stage.querySelector('svg');
-  if(svgEl){ svgEl.style.maxWidth='none'; svgEl.style.maxHeight='none'; }
-  let scale=1, tx=0, ty=0;
-  const apply=()=>{ stage.style.transform='translate('+tx+'px,'+ty+'px) scale('+scale+')'; };
-  const natural=()=>{ if(!svgEl) return {w:800,h:600}; const r=svgEl.getBoundingClientRect(); return {w:r.width/scale, h:r.height/scale}; };
-  const fit=()=>{ const cw=canvas.clientWidth, ch=canvas.clientHeight, n=natural(); const s=Math.min(cw/n.w, ch/n.h)*0.94; scale=(isFinite(s)&&s>0)?s:1; tx=(cw-n.w*scale)/2; ty=(ch-n.h*scale)/2; apply(); };
-  const zoomAt=(f,px,py)=>{ const ns=Math.min(12, Math.max(0.05, scale*f)); const wx=(px-tx)/scale, wy=(py-ty)/scale; scale=ns; tx=px-wx*scale; ty=py-wy*scale; apply(); };
-  canvas.addEventListener('wheel', (e)=>{ e.preventDefault(); const r=canvas.getBoundingClientRect(); zoomAt(e.deltaY<0?1.12:0.89, e.clientX-r.left, e.clientY-r.top); }, {passive:false});
-  let drag=false, lx=0, ly=0;
-  canvas.addEventListener('mousedown', (e)=>{ drag=true; lx=e.clientX; ly=e.clientY; canvas.classList.add('drag'); });
-  canvas.addEventListener('mousemove', (e)=>{ if(!drag) return; tx+=e.clientX-lx; ty+=e.clientY-ly; lx=e.clientX; ly=e.clientY; apply(); });
-  const end=()=>{ drag=false; canvas.classList.remove('drag'); };
-  canvas.addEventListener('mouseup', end); canvas.addEventListener('mouseleave', end);
-  ov.querySelector('.fs-bar').addEventListener('click',(e)=>{ const a=e.target.dataset.a; if(!a) return;
-    if(a==='in') zoomAt(1.25, canvas.clientWidth/2, canvas.clientHeight/2);
-    else if(a==='out') zoomAt(0.8, canvas.clientWidth/2, canvas.clientHeight/2);
-    else if(a==='fit') fit();
-    else if(a==='reset'){ scale=1; tx=20; ty=20; apply(); }
+  const pz=attachPanZoom(canvas, stage, svgEl, (ck,cid)=>openContextPopup(ck,cid));
+  ov.querySelector('.fs-bar').addEventListener('click',(e)=>{ const a=e.target&&e.target.dataset&&e.target.dataset.a; if(!a) return;
+    if(a==='in') pz.zoomCenter(1.2); else if(a==='out') pz.zoomCenter(0.83);
+    else if(a==='fit') pz.fit(); else if(a==='reset') pz.reset();
     else if(a==='close') fsClose();
   });
-  setTimeout(fit, 40);
 }
 
 // ----- helpers -----
@@ -1251,16 +1282,17 @@ function openContextPopup(kind,id){
     '</div>';
   ov.classList.add('show');
   const ta=ov.querySelector('.ctx-task');
-  const withTask=()=> ctx + (ta.value.trim()? '\\n\\n---\\n## Task\\n'+ta.value.trim() : '');
+  const CTXPRE='This is deterministic context extracted from the product information model — the GitMir multidimensional object model that lives in the .gitmir/ folder of this project. It maps how this element connects to the rest of the product (data, server logic, API, frontend, events, business processes, status flows, reactions) by stable ids. Use it to fully understand the context, so the task is carried out accurately and completely.';
+  const withTask=()=> CTXPRE+'\\n\\n'+ctx + (ta.value.trim()? '\\n\\n---\\n## Task\\n'+ta.value.trim() : '');
   const close=()=>{ ov.classList.remove('show'); ov.innerHTML=''; };
   ov.querySelector('.ctx-x').addEventListener('click', close);
   ov.querySelector('.ctx-close').addEventListener('click', close);
   ov.addEventListener('click', e=>{ if(e.target===ov) close(); });
-  ov.querySelector('.ctx-copy').addEventListener('click', async ()=>{ await copyToClipboard(ctx); toast('Context copied ✓  paste into claude'); });
+  ov.querySelector('.ctx-copy').addEventListener('click', async ()=>{ await copyToClipboard(CTXPRE+'\\n\\n'+ctx); toast('Context copied ✓  paste into claude'); });
   ov.querySelector('.ctx-copyt').addEventListener('click', async ()=>{ await copyToClipboard(withTask()); toast('Context + task copied ✓'); });
   ov.querySelector('.ctx-create').addEventListener('click', async ()=>{
     const t=ta.value.trim(); if(!t){ toast('Type the task first', true); ta.focus(); return; }
-    const content='# '+title+' — '+t.split('\\n')[0].slice(0,80)+'\\n\\n## Task\\n'+t+'\\n\\n## Context (from the model)\\n'+ctx+'\\n';
+    const content='# '+title+' — '+t.split('\\n')[0].slice(0,80)+'\\n\\n> '+CTXPRE+'\\n\\n## Task\\n'+t+'\\n\\n## Context (from the .gitmir model)\\n'+ctx+'\\n';
     const r=await fetch('/api/task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:selected, title:title+' — '+t.slice(0,40), content})});
     const d=await r.json();
     if(d.ok){ toast('Task created in tasks/todo ✓'); close(); if(activeTab==='queue') loadQueue(selected); }
