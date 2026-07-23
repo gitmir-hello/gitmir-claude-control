@@ -14,6 +14,12 @@
     "prepend": "Build (or, if a model already exists, idempotently update it, keeping stable ids) the multidimensional object model of THIS project by following the specification below in full — including the mandatory standing rule it defines (install/refresh the 'GitMir model — source of truth' section in the project's CLAUDE.md). Write only inside .gitmir/ and that one CLAUDE.md section; do not modify application source.\n\n"
   },
   {
+    "name": "context-distillation",
+    "title": "context-distillation",
+    "desc": "Distils a pile of docs, tickets or chat threads into a small, checkable brief in .gitmir/brief.json — the minimal context Claude needs, and the artifact people can confirm before anything is built.",
+    "file": "skills/context-distillation.md"
+  },
+  {
     "name": "task-planner",
     "title": "task-planner",
     "desc": "Turns a goal into small, self-contained task files in tasks/todo/, each carrying the right model context — ready for the runner to execute one by one.",
@@ -24,5 +30,11 @@
     "title": "task-runner",
     "desc": "Works the task queue autonomously — takes each task, does it, and moves the file todo → in progress → done. Batch work without babysitting.",
     "file": "skills/task-runner.md"
+  },
+  {
+    "name": "legacy-migration",
+    "title": "legacy-migration",
+    "desc": "Onboard an unfamiliar or legacy codebase and change it safely — maps the blast radius from the model, then ships in small reversible steps you can verify.",
+    "file": "skills/legacy-migration.md"
   }
 ]
