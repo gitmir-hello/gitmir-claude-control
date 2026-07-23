@@ -49,8 +49,8 @@ For each item in the blast radius, decide how you will know it still works:
 
 ## Step 5 — Plan small, reversible increments
 
-Break the migration into the smallest steps that each leave the app working, and
-order them so nothing is half-migrated across a boundary. Hand them to the
+Break the change into the smallest steps that each leave the app working, and
+order them so nothing is half-done across a boundary. Hand them to the
 `task-planner` skill — one `tasks/todo/NNN-*.md` per increment — each carrying its
 slice of the blast radius and the acceptance criteria it must meet. Prefer
 parallel-safe changes (add new, migrate readers, remove old) over big-bang

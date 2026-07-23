@@ -32,9 +32,15 @@
     "file": "skills/task-runner.md"
   },
   {
-    "name": "legacy-migration",
-    "title": "legacy-migration",
-    "desc": "Onboard an unfamiliar or legacy codebase and change it safely — maps the blast radius from the model, then ships in small reversible steps you can verify.",
-    "file": "skills/legacy-migration.md"
+    "name": "legacy-maintenance",
+    "title": "legacy-maintenance",
+    "desc": "Change or maintain an existing legacy codebase without breaking the behaviour next to it — maps the blast radius from the model, then ships small reversible steps you can verify. For keeping old projects alive, not rewriting them.",
+    "file": "skills/legacy-maintenance.md"
+  },
+  {
+    "name": "stack-port",
+    "title": "stack-port",
+    "desc": "Port an old, hand-written project onto a new stack with full feature parity — the old app is the spec, a parity ledger keeps anything from being silently dropped, and every slice is verified against the old behaviour, not just a green build.",
+    "file": "skills/stack-port.md"
   }
 ]
