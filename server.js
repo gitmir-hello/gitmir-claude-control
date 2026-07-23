@@ -73,21 +73,15 @@ async function chooseFolder() {
     return out ? out.replace(/\/+$/, '') : null;
   }
 
-  // Windows — PowerShell FolderBrowserDialog owned by an invisible top-most form
-  // (Win11 dismisses/flickers an ownerless dialog because the spawning process is
-  // not the foreground app; the top-most owner brings it to front and keeps it modal).
+  // Windows — Shell COM folder browser (more tolerant of foreground rules on Win11
+  // than WinForms FolderBrowserDialog). If it still can't show, the UI offers a
+  // manual path field.
   if (plat === 'win32') {
     const ps =
-      'Add-Type -AssemblyName System.Windows.Forms,System.Drawing | Out-Null; ' +
-      '$o = New-Object System.Windows.Forms.Form; ' +
-      "$o.TopMost=$true; $o.ShowInTaskbar=$false; $o.Opacity=0; $o.StartPosition='Manual'; " +
-      '$o.Location = New-Object System.Drawing.Point(-3000,-3000); $o.Size = New-Object System.Drawing.Size(1,1); ' +
-      '$o.Show(); $o.Activate(); [System.Windows.Forms.Application]::DoEvents(); ' +
-      '$d = New-Object System.Windows.Forms.FolderBrowserDialog; ' +
-      "$d.Description='Choose a project folder for Claude'; $d.ShowNewFolderButton=$true; " +
-      '$r = $d.ShowDialog($o); ' +
-      '$o.Close(); $o.Dispose(); ' +
-      'if ($r -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.SelectedPath) }';
+      '$ErrorActionPreference="Stop"; ' +
+      '$a = New-Object -ComObject Shell.Application; ' +
+      "$f = $a.BrowseForFolder(0, 'Choose a project folder for Claude', 0x51, 0); " +   // BIF_RETURNONLYFSDIRS|BIF_EDITBOX|BIF_NEWDIALOGSTYLE
+      'if ($f -ne $null -and $f.Self -ne $null) { [Console]::Out.Write($f.Self.Path) }';
     return new Promise((resolve, reject) => {
       execFile('powershell.exe', ['-NoProfile', '-STA', '-Command', ps], { timeout: 300000 }, (err, stdout, stderr) => {
         if (err && !stdout) return reject(new Error((stderr || err.message || '').trim() || 'folder picker failed'));
@@ -325,6 +319,15 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 200, { name, title: s.title || s.name, text });
       } catch {
         return sendJSON(res, 404, { error: 'file not found' });
+      }
+    }
+    if (req.method === 'POST' && url.pathname === '/api/pick') {
+      // just open the native folder picker and return the path (no add)
+      try {
+        const folder = await chooseFolder();
+        return sendJSON(res, 200, folder ? { path: folder } : { cancelled: true });
+      } catch (e) {
+        return sendJSON(res, 200, { pickerFailed: true, error: String(e.message || e) });
       }
     }
     if (req.method === 'POST' && url.pathname === '/api/add') {
@@ -1597,19 +1600,48 @@ async function addProject(bodyObj){
   const r = await fetch('/api/add', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(bodyObj||{})});
   return r.json();
 }
-document.getElementById('addBtn').addEventListener('click', async ()=>{
-  toast('Opening folder picker…');
-  let d = await addProject({});
-  if(d.pickerFailed){
-    const p = prompt('Could not open the folder picker.\\nPaste the full path to the project folder:');
-    if(!p){ document.getElementById('toast').className='toast'; return; }
-    d = await addProject({ path: p });
-  }
-  if(d.added){ selected = d.project.path; await load(); toast('Added: '+displayName(d.project)); }
-  else if(d.duplicate){ selected = d.path; await load(); toast('Already in the list', true); }
-  else if(d.error){ toast(d.error, true); }
-  else { document.getElementById('toast').className='toast'; }
-});
+function openAddModal(){
+  let ov=document.getElementById('addOverlay');
+  if(!ov){ ov=document.createElement('div'); ov.id='addOverlay'; ov.className='ctx-overlay'; document.body.appendChild(ov); }
+  ov.innerHTML=
+    '<div class="ctx-modal" style="max-width:560px">'+
+      '<div class="ctx-head"><div class="ctx-title">Add a project</div><button class="ctx-x" title="Close (Esc)">✕</button></div>'+
+      '<div class="ctx-note">Paste the full path to the project folder — open it in your file manager and copy the path from the address bar. Or use <b>Browse…</b> to pick it.</div>'+
+      '<div class="ctx-taskl" style="margin:14px 18px 0">Folder path</div>'+
+      '<input class="ctx-task" id="addPath" style="min-height:0; height:44px; line-height:22px; font-family:var(--font-mono)" placeholder="e.g.  C:&#92;projects&#92;my-app   or   /Users/you/projects/my-app" autocomplete="off" spellcheck="false">'+
+      '<div class="ctx-actions">'+
+        '<button class="run" id="addGo">＋ Add</button>'+
+        '<button class="ghost" id="addBrowse">🗂 Browse…</button>'+
+        '<button class="del" id="addCancel">Cancel</button>'+
+      '</div>'+
+    '</div>';
+  ov.classList.add('show');
+  const inp=ov.querySelector('#addPath');
+  const close=()=>{ ov.classList.remove('show'); ov.innerHTML=''; };
+  const go=async ()=>{
+    const p=(inp.value||'').trim(); if(!p){ toast('Enter a folder path', true); inp.focus(); return; }
+    const d=await addProject({path:p});
+    if(d.added){ selected=d.project.path; await load(); close(); toast('Added: '+displayName(d.project)); }
+    else if(d.duplicate){ selected=d.path; await load(); close(); toast('Already in the list', true); }
+    else if(d.error){ toast(d.error, true); inp.focus(); }
+    else close();
+  };
+  ov.querySelector('.ctx-x').addEventListener('click', close);
+  ov.querySelector('#addCancel').addEventListener('click', close);
+  ov.addEventListener('click', e=>{ if(e.target===ov) close(); });
+  ov.querySelector('#addGo').addEventListener('click', go);
+  inp.addEventListener('keydown', e=>{ if(e.key==='Enter') go(); });
+  ov.querySelector('#addBrowse').addEventListener('click', async ()=>{
+    toast('Opening folder picker…');
+    let d; try{ d=await (await fetch('/api/pick',{method:'POST'})).json(); }catch{ d={}; }
+    if(d.path){ inp.value=d.path; toast('Picked ✓'); }
+    else if(d.pickerFailed){ toast('Native picker unavailable — paste the path instead', true); }
+    else { document.getElementById('toast').className='toast'; }
+    inp.focus();
+  });
+  setTimeout(()=>inp.focus(), 40);
+}
+document.getElementById('addBtn').addEventListener('click', openAddModal);
 searchEl.addEventListener('input', renderList);
 window.addEventListener('focus', ()=>load(true)); // refresh folder status on return
 
@@ -1633,7 +1665,7 @@ async function saveOrder(){
   projects.sort((a,b)=> paths.indexOf(a.path)-paths.indexOf(b.path));
 }
 
-document.addEventListener('keydown', (e)=>{ if(e.key==='Escape'){ fsClose(); const cx=document.getElementById('ctxOverlay'); if(cx){ cx.classList.remove('show'); cx.innerHTML=''; } } });
+document.addEventListener('keydown', (e)=>{ if(e.key==='Escape'){ fsClose(); for(const id of ['ctxOverlay','addOverlay']){ const o=document.getElementById(id); if(o){ o.classList.remove('show'); o.innerHTML=''; } } } });
 loadSkillsList();
 load();
 </script>
