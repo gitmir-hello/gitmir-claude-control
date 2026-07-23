@@ -2,13 +2,13 @@
   {
     "name": "task-log",
     "title": "task-log",
-    "desc": "Keep a log of the project's completed tasks in .claude/tasks.json (shown on the Tasks tab).",
+    "desc": "Claude logs every task it completes to .claude/tasks.json — so you see at a glance what was done in a project, without asking.",
     "file": "skills/task-log.md"
   },
   {
     "name": "gitmir-model",
     "title": "gitmir-model",
-    "desc": "Build/update the project's multidimensional object model in .gitmir/model/: entities, server logic, API, frontend, events, business processes, status flows, reactions — all linked by id.",
+    "desc": "Builds a living, id-linked model of your product in .gitmir/model/ (data, server logic, API, frontend, events, processes, lifecycles). Claude — and you — grasp the whole product without re-reading the code.",
     "file": "skills/gitmir-model.md",
     "stripFrontmatter": true,
     "prepend": "Build (or, if a model already exists, idempotently update it, keeping stable ids) the multidimensional object model of THIS project by following the specification below in full — including the mandatory standing rule it defines (install/refresh the 'GitMir model — source of truth' section in the project's CLAUDE.md). Write only inside .gitmir/ and that one CLAUDE.md section; do not modify application source.\n\n"
@@ -16,13 +16,13 @@
   {
     "name": "task-planner",
     "title": "task-planner",
-    "desc": "Break a goal into small task files in tasks/todo/ for the runner to execute one by one.",
+    "desc": "Turns a goal into small, self-contained task files in tasks/todo/, each carrying the right model context — ready for the runner to execute one by one.",
     "file": "skills/task-planner.md"
   },
   {
     "name": "task-runner",
     "title": "task-runner",
-    "desc": "Execute the tasks/ queue one at a time, moving each file todo → inprogress → done.",
+    "desc": "Works the task queue autonomously — takes each task, does it, and moves the file todo → in progress → done. Batch work without babysitting.",
     "file": "skills/task-runner.md"
   }
 ]

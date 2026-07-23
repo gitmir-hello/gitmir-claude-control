@@ -569,8 +569,17 @@ const HTML = /* html */ `<!doctype html>
   /* ---------- skills ---------- */
   .skills-box{margin-top:22px; padding-top:20px; border-top:1px solid var(--line)}
   .skills-label{color:var(--dim); font-size:12px; text-transform:uppercase; letter-spacing:.6px; margin-bottom:11px}
-  .skills-btns{display:flex; flex-wrap:wrap; gap:8px}
-  .skill-btn{font-size:13px}
+  .skills-btns{display:flex; flex-direction:column; gap:8px}
+  .skill-item{display:flex; align-items:center; gap:14px; padding:11px 14px; cursor:pointer;
+    background:linear-gradient(165deg,rgba(18,36,66,.4),rgba(9,18,38,.6)); border:1px solid var(--glass-brd);
+    transition:border-color .15s ease, box-shadow .15s ease}
+  .skill-item:hover{border-color:var(--glass-brd-strong); box-shadow:0 0 18px rgba(47,216,255,.1)}
+  .skill-info{flex:1; min-width:0}
+  .skill-name{font-family:var(--font-mono); font-size:13px; font-weight:600; color:var(--cyan-soft); letter-spacing:.02em}
+  .skill-desc{color:var(--ink-2); font-size:12.5px; line-height:1.45; margin-top:4px}
+  .skill-copy{flex:0 0 auto; font-family:var(--font-mono); font-size:12px; color:var(--ink-2);
+    border:1px solid var(--faint); padding:6px 11px; white-space:nowrap}
+  .skill-item:hover .skill-copy{border-color:var(--cyan); color:var(--cyan)}
   .skills-empty{color:var(--dim2); font-size:13px}
 
   /* ---------- task log ---------- */
@@ -991,13 +1000,18 @@ function renderSkillButtons(){
   const box = document.getElementById('skillsBtns');
   if(!box) return;
   box.innerHTML = '';
-  if(!SKILLS.length){ box.innerHTML = '<span class="skills-empty">no skills in skills.json</span>'; return; }
+  if(!SKILLS.length){ box.innerHTML = '<div class="skills-empty">no skills in skills.json</div>'; return; }
   for(const s of SKILLS){
-    const b = document.createElement('button');
-    b.className = 'ghost skill-btn'; b.title = s.desc || '';
-    b.textContent = '📋 ' + (s.title || s.name);
-    b.addEventListener('click', ()=> copySkill(s.name, s.title || s.name));
-    box.appendChild(b);
+    const it = document.createElement('div');
+    it.className = 'skill-item'; it.title = 'Copy — paste into Claude';
+    it.innerHTML =
+      '<div class="skill-info">'+
+        '<div class="skill-name">'+esc(s.title || s.name)+'</div>'+
+        (s.desc ? '<div class="skill-desc">'+esc(s.desc)+'</div>' : '')+
+      '</div>'+
+      '<span class="skill-copy">📋 Copy</span>';
+    it.addEventListener('click', ()=> copySkill(s.name, s.title || s.name));
+    box.appendChild(it);
   }
 }
 async function copySkill(name, title){
