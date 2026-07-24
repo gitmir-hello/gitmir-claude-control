@@ -1,7 +1,7 @@
 // GitMir team bridge — local client.
 //
 // Connects this machine to your team through the GitMir relay. Zero dependencies:
-// Node's built-in global WebSocket (Node 21+) and fs. Nothing about your product
+// Node's built-in global WebSocket (Node 22+) and fs. Nothing about your product
 // is stored on the server — the relay only routes live messages between your
 // team's machines. What flows:
 //   • model  — a builder shares their local .gitmir/model with the team; each
@@ -52,12 +52,34 @@ function readLocalModel() {
   return Object.keys(files).length ? files : null;
 }
 
+// The peer controls these keys, so they are path input. Accept only a plain
+// "<name>.json" basename that resolves inside the destination — otherwise
+// "../../../../.ssh/authorized_keys" would be written wherever this runs.
+function safeModelName(dir, f) {
+  const name = String(f == null ? "" : f);
+  if (!/^[A-Za-z0-9._-]{1,80}$/.test(name)) return null;
+  if (name.startsWith(".") || !name.endsWith(".json")) return null;
+  const dest = path.resolve(dir, name);
+  if (dest !== path.join(path.resolve(dir), name)) return null;
+  if (!dest.startsWith(path.resolve(dir) + path.sep)) return null;
+  return dest;
+}
+
 function saveSharedModel(fromName, files) {
-  if (!projectDir || !files) return;
+  if (!projectDir || !files || typeof files !== "object") return;
   const dir = path.join(projectDir, ".gitmir", "shared", slug(fromName), "model");
-  fs.mkdirSync(dir, { recursive: true });
-  for (const [f, content] of Object.entries(files)) fs.writeFileSync(path.join(dir, f), content);
-  console.log(`  [model] saved ${Object.keys(files).length} file(s) from ${fromName} → .gitmir/shared/${slug(fromName)}/model/`);
+  let written = 0, skipped = 0, total = 0, made = false;
+  for (const [f, content] of Object.entries(files).slice(0, 40)) {
+    const dest = safeModelName(dir, f);
+    if (!dest || typeof content !== "string") { skipped++; continue; }
+    const bytes = Buffer.byteLength(content, "utf8");
+    if (bytes > 2 * 1024 * 1024 || total + bytes > 16 * 1024 * 1024) { skipped++; continue; }
+    if (!made) { fs.mkdirSync(dir, { recursive: true }); made = true; }
+    fs.writeFileSync(dest, content);
+    total += bytes; written++;
+  }
+  console.log(`  [model] saved ${written} file(s) from ${fromName} → .gitmir/shared/${slug(fromName)}/model/` +
+    (skipped ? `  (${skipped} rejected: unsafe name or too large)` : ""));
 }
 
 function writeIncomingTask(fromName, task) {
@@ -76,9 +98,29 @@ const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(
 
 /* ------------------------------- the bridge ------------------------------- */
 
-const url = `${BASE}/?key=${encodeURIComponent(key)}&name=${encodeURIComponent(name)}`;
+if (typeof WebSocket === "undefined") {
+  console.error(`This client needs Node 22+ for the built-in WebSocket (you are on ${process.version}).`);
+  process.exit(1);
+}
+
+// Build with the URL API so a hosted relay works at the root (wss://relay.gitmir.com)
+// or on a path (wss://ide.gitmir.com/relay, with or without a trailing slash).
+let url;
+try {
+  const u = new URL(String(BASE).trim());
+  if (u.protocol === "http:") u.protocol = "ws:";
+  if (u.protocol === "https:") u.protocol = "wss:";
+  if (u.protocol !== "ws:" && u.protocol !== "wss:") throw new Error(`must start with ws:// or wss:// (got "${u.protocol}//")`);
+  u.pathname = u.pathname.replace(/\/+$/, "") || "/";
+  u.searchParams.set("key", key);
+  u.searchParams.set("name", name);
+  url = u.href;
+} catch (e) {
+  console.error(`Bad relay URL "${BASE}": ${e.message}`);
+  process.exit(1);
+}
 const ws = new WebSocket(url);
-let sentModelTo = 0; // resend the model when the team grows, so late joiners get it
+let sharedWith = ""; // ids the model was last pushed to, so late joiners get it
 
 function pushModel() {
   const files = readLocalModel();
@@ -91,33 +133,43 @@ ws.addEventListener("open", () => console.log(`[bridge] connecting as "${name}"�
 
 ws.addEventListener("message", (e) => {
   let m; try { m = JSON.parse(e.data); } catch { return; }
+  try { onFrame(m); } catch (err) { console.log(`  [bridge] bad frame from peer: ${err?.message || err}`); }
+});
+
+const peerName = (m) => (m?.from && typeof m.from.name === "string" && m.from.name) || "a teammate";
+
+function onFrame(m) {
   switch (m.type) {
     case "welcome":
-      console.log(`[bridge] connected · id=${m.self.id} · plan=${m.plan}`);
+      console.log(`[bridge] connected · id=${m.self?.id} · plan=${m.plan}`);
       if (sayText) ws.send(JSON.stringify({ type: "msg", body: { text: sayText } }));
       if (sendTaskTitle) ws.send(JSON.stringify({ type: "task", body: { title: sendTaskTitle, body: sendTaskBody } }));
       break;
     case "presence": {
-      console.log(`[bridge] team online: ${m.members.map((x) => x.name).join(", ")}`);
-      // builder re-shares whenever the team grows, so a member who joins later
-      // still receives the current model (the relay itself keeps nothing)
-      if (shareModel && m.members.length > sentModelTo) { sentModelTo = m.members.length; pushModel(); }
+      const members = Array.isArray(m.members) ? m.members.filter(Boolean) : [];
+      console.log(`[bridge] team online: ${members.map((x) => x.name).join(", ")}`);
+      // Re-share to late joiners, keyed on WHO is present (not a high-water count)
+      // so a member who leaves and rejoins still receives the model.
+      if (shareModel) {
+        const ids = members.map((x) => String(x.id)).sort().join(",");
+        if (ids !== sharedWith && members.length > 1) { sharedWith = ids; pushModel(); }
+      }
       break;
     }
     case "msg":
-      console.log(`  <${m.from.name}> ${JSON.stringify(m.body)}`);
+      console.log(`  <${peerName(m)}> ${JSON.stringify(m.body)}`);
       break;
     case "task":
-      writeIncomingTask(m.from.name, m.body || {});
+      writeIncomingTask(peerName(m), m.body && typeof m.body === "object" ? m.body : {});
       break;
     case "model":
-      saveSharedModel(m.from.name, m.body?.files);
+      saveSharedModel(peerName(m), m.body?.files);
       break;
     case "denied":
       console.log(`[bridge] DENIED: ${m.reason}`);
       break;
   }
-});
+}
 
 ws.addEventListener("close", (e) => console.log(`[bridge] closed (${e.code}${e.reason ? " " + e.reason : ""})`));
 ws.addEventListener("error", () => {});

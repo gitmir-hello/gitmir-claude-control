@@ -146,6 +146,8 @@ node server.js
 
 It starts on **http://localhost:4599** and opens your browser. You can also double-click **`start.command`** (macOS) or **`start.cmd`** (Windows).
 
+**Node 18+** runs the dashboard. The optional **Team bridge** additionally needs **Node 22+**, because it uses Node's built-in `WebSocket` (that keeps the tool at zero dependencies); on an older Node the Team tab tells you so instead of failing silently.
+
 Run it in your normal desktop session so the native folder picker and terminal launch work (macOS Terminal · Windows `cmd` · Linux terminals). Stop with `Ctrl+C`.
 
 ## Skills

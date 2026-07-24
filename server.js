@@ -223,10 +223,33 @@ function readBody(req) {
   });
 }
 
+// The dashboard listens on loopback, which stops the network but NOT the user's own
+// browser: any page they visit could POST to localhost:4599 and drive this tool
+// (open a terminal, repoint the team bridge at a hostile relay, read project paths).
+// Accept API calls only from the dashboard's own origin, and reject a Host header
+// that isn't localhost — that is what closes DNS rebinding.
+function sameOrigin(req) {
+  const host = String(req.headers.host || '');
+  if (!/^(localhost|127\.0\.0\.1|\[::1\]):?/.test(host)) return false;
+  const site = req.headers['sec-fetch-site'];
+  if (site && site !== 'same-origin' && site !== 'none') return false;
+  const origin = req.headers.origin;
+  if (origin) {
+    try {
+      const o = new URL(origin);
+      if (!['localhost', '127.0.0.1', '[::1]', '::1'].includes(o.hostname) || o.port !== String(PORT)) return false;
+    } catch { return false; }
+  }
+  return true;
+}
+
 // ---------- routes ----------
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   try {
+    if (url.pathname.startsWith('/api/') && url.pathname !== '/api/ping' && !sameOrigin(req)) {
+      return sendJSON(res, 403, { error: 'cross-origin request refused' });
+    }
     if (req.method === 'GET' && url.pathname === '/') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       return res.end(HTML);
@@ -766,6 +789,7 @@ const HTML = /* html */ `<!doctype html>
   .ti:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(47,216,255,.12)}
   .team-actions{display:flex; align-items:center; gap:12px; margin-top:12px}
   .team-cstate,.team-connecting{font-family:var(--font-mono); font-size:12px; color:var(--cyan-soft)}
+  .team-err{font-family:var(--font-mono); font-size:12px; color:#ff7080; line-height:1.5; display:block; margin-top:4px}
   .team-status-row{display:flex; align-items:center; gap:14px; flex-wrap:wrap; font-family:var(--font-mono); font-size:12px; letter-spacing:.03em}
   .team-dot{width:9px; height:9px; border-radius:50%; background:var(--dim2); display:inline-block}
   .team-dot.on{background:var(--ok); box-shadow:0 0 10px var(--ok)}
@@ -1908,7 +1932,9 @@ function teamUpdateDynamic(s){
   const dyn=document.getElementById('teamDyn'); if(dyn) dyn.innerHTML=activityHtml(s.activity);
   const mem=document.getElementById('teamMembers');
   if(mem) mem.innerHTML=(s.members||[]).map(x=> '<span class="team-chip'+(s.self&&x.id===s.self.id?' me':'')+'">'+esc(x.name)+'</span>').join('') || '<span class="team-empty">just you — waiting for teammates to join…</span>';
-  const cs=document.getElementById('teamCStatus'); if(cs) cs.innerHTML = s.connecting?'<span class="team-connecting">connecting…</span>':'';
+  const cs=document.getElementById('teamCStatus');
+  if(cs) cs.innerHTML = s.error ? '<span class="team-err">✕ '+esc(s.error)+'</span>'
+                       : (s.connecting?'<span class="team-connecting">connecting…</span>':'');
 }
 function renderTeam(){
   const view=document.getElementById('teamView'); if(!view) return;

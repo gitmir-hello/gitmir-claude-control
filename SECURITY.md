@@ -38,7 +38,9 @@ any other third-party host — is ever contacted.
   tasks, your project names and paths — none of it is sent anywhere unless you
   explicitly opt into the Team bridge and *choose* to share a model or send a task
   (see below). Nothing is uploaded in the background, ever.
-- **No third-party dependencies.** Zero npm packages (`node_modules` is empty).
+- **No third-party dependencies.** Zero npm packages (`node_modules` is empty). The
+  optional Team bridge needs Node 22+ for that built-in `WebSocket`; the dashboard
+  itself runs on Node 18+.
   Everything it needs — ELK for diagram layout, the fonts — is vendored locally
   under `vendor/`. There is no transitive code you can't see running behind your
   back.
@@ -85,6 +87,18 @@ rule as everything else here: **the relay routes, it does not store.**
 - **The key is a local credential.** Your workspace key is entered in the UI and
   kept **locally in your browser only** — it is never written into the repo, never
   committed, and is sent to nowhere except the relay, as the connection credential.
+- **Incoming data from teammates is sandboxed.** A model snapshot arriving over the
+  bridge can only create plain `*.json` files inside
+  `.gitmir/shared/<teammate>/model/` — file names are reduced to a basename, the
+  resolved path is checked to be inside that folder, and size/count caps apply. A
+  peer cannot write outside it, cannot overwrite your own `.gitmir/model/`, and
+  cannot crash the dashboard with a malformed message. An incoming task becomes a
+  file in `tasks/todo/` and is labelled as a request from a teammate — nothing runs
+  by itself; your local Claude only acts on it when you run the queue.
+- **Local API calls are same-origin only.** The dashboard refuses `/api/*` requests
+  carrying a foreign `Origin`, or a `Host` header that isn't localhost, so a web
+  page you happen to visit cannot drive this tool or turn the bridge on behind your
+  back (that also closes DNS-rebinding).
 - **Still zero-dependency.** The bridge uses Node's built-in WebSocket — no added
   npm packages, nothing new to audit beyond the code in `relay.js`.
 - **Gated by your plan, not by us watching you.** Access to the relay requires a
