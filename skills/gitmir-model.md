@@ -216,14 +216,19 @@ entities. `triggerRefId` points at what starts it (a route id, an event id…).
 ### StatusFlow — `statusFlows.json`  (state machine + transition effects)
 ```ts
 { id, name, entityId: ID, fieldName?, description?, moduleId?: ID,
-  states: { key, name, ownerRole?, editedWhere? }[],
-  transitions: { from, to, byRole?, condition?, effects: TransitionEffect[] }[] }
+  states: { key, name, ownerRole?, editedWhere?, description? }[],
+  transitions: { from, to, label?, byRole?, condition?, effects: TransitionEffect[] }[] }
 TransitionEffect = { kind: "create"|"update"|"recalculate"|"sync"|"notify"|"link"
                         |"delete", entityId?: ID, fieldName?, description }
 ```
 The lifecycle of a status field on an entity (`order.status`:
 draft→paid→shipped). Each transition can carry `effects` — what else changes
-when it fires. `from`/`to`/`condition` are state `key`s and expressions.
+when it fires. `from`/`to`/`condition` are state `key`s and expressions. Give each
+**state** a one-line `description` of what that state means, and each **transition**
+a short `label` naming what it does ("Capture payment", "Ship order", "Refund") —
+these are shown on the lifecycle diagram. A transition with no `label`, `condition`
+or `byRole` renders as a nameless "transition", which tells the reader nothing —
+always name it.
 
 ### Reaction — `reactions.json`  (universal cause → effect)
 ```ts
@@ -345,5 +350,11 @@ model itself does not require it.
   not touch application source.
 - The model describes what the code **is**, from the code — it is documentation
   of reality, never a wishlist. Empty dimensions are honest; invented ones are not.
-- Keep descriptions short and concrete (one line). The reader wants the shape of
-  the system, not prose.
+- **Every node-level object needs a real one-line `description`.** It is the text the
+  visualizer prints on each diagram node, so it must be present and meaningful for
+  entities, server units & functions, API routes, frontend units, events, processes,
+  reactions, and status-flow states & transitions. Say what the element does and, where
+  it carries logic, the rule/condition ("advances an order to paid once payment is
+  captured"), not just a restated name. A missing description, a bare "transition", or
+  a name echoed back is a defect — the diagram then shows a labelled box that explains
+  nothing. Keep it to one concrete line, not prose.

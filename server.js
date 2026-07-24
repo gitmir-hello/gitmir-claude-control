@@ -1085,7 +1085,9 @@ function nodeSvg(n){
             '<rect x="0" y="0" width="3" height="'+h+'" rx="1.5" fill="'+acc+'"/>';
   if(md.fields && md.fields.length){
     inner+='<text x="14" y="22" class="hname"><tspan fill="'+acc+'">'+gl+'</tspan> '+esc(trunc(md.label,24))+'</text>';
-    let fy=42; for(const f of md.fields){ inner+='<text x="15" y="'+fy+'" class="hfield">'+esc(trunc(f,26))+'</text>'; fy+=18; }
+    let fy=42;
+    if(md.sub){ inner+='<text x="15" y="38" class="hsub">'+esc(trunc(md.sub,32))+'</text>'; fy=58; }
+    for(const f of md.fields){ inner+='<text x="15" y="'+fy+'" class="hfield">'+esc(trunc(f,26))+'</text>'; fy+=18; }
   } else {
     const ny = md.sub ? 21 : Math.round(h/2+4);
     inner+='<text x="14" y="'+ny+'" class="hname"><tspan fill="'+acc+'">'+gl+'</tspan> '+esc(trunc(md.label,26))+'</text>';
@@ -1257,6 +1259,10 @@ function resolveRef(kind, id, m){
   const maps={function:m.serverFunctions, route:m.apiRoutes, event:m.events, entity:m.entities, frontend:m.frontendUnits};
   const o=(maps[kind]||[]).find(x=>x.id===id); return o ? (o.name||o.id) : id;
 }
+function refDesc(kind, id, m){
+  const maps={function:m.serverFunctions, route:m.apiRoutes, event:m.events, entity:m.entities, frontend:m.frontendUnits};
+  const o=(maps[kind]||[]).find(x=>x.id===id); return o && o.description ? String(o.description) : '';
+}
 
 /* ---------- deterministic context from a clicked schema element ---------- */
 function ctxIx(m){
@@ -1390,8 +1396,9 @@ function graphER(m){
   if(!ents.length) return {nodes,edges};
   for(const e of ents){
     const fs=(e.fields||[]).slice(0,8).map(f=> (f.isPrimary?'● ':(f.type==='ref'?'◇ ':'  '))+f.name+' : '+(f.type||''));
-    const h=32+Math.max(1,fs.length)*18+8;
-    nodes.push({id:e.id, w:216, h, meta:{kind:'entity', label:e.name||e.id, fields:fs, ref:{k:'entity',id:e.id}}});
+    const sub=e.description?String(e.description):'';
+    const h=32+(sub?16:0)+Math.max(1,fs.length)*18+8;
+    nodes.push({id:e.id, w:224, h, meta:{kind:'entity', label:e.name||e.id, sub, fields:fs, ref:{k:'entity',id:e.id}}});
   }
   for(const e of ents){
     for(const f of (e.fields||[])) if(f.type==='ref'&&f.refEntityId&&byId.has(f.refEntityId)) edges.push({from:f.refEntityId, to:e.id, kind:'data', label:f.name});
@@ -1404,15 +1411,16 @@ function graphFlow(m){
   const fe=m.frontendUnits||[], rt=m.apiRoutes||[], sf=m.serverFunctions||[], ent=m.entities||[], ev=m.events||[];
   const nodes=[], edges=[], have=new Set(); const owner=fieldOwner(m);
   const rtById=new Map(rt.map(r=>[r.id,r])), fnById=new Map(sf.map(f=>[f.id,f])), evById=new Map(ev.map(e=>[e.id,e])), entById=new Map(ent.map(e=>[e.id,e]));
-  const add=(id,kind,label,sub)=>{ if(!have.has(id)){ have.add(id); nodes.push({id, w:186, h: sub?52:44, meta:{kind,label,sub:sub||'', ref:{k:kind,id}}}); } };
-  for(const f of fe){ add(f.id,'frontend',f.name); for(const rid of (f.consumesRouteIds||[])) if(rtById.has(rid)){ add(rid,'route', rtLabel(rtById.get(rid))); edges.push({from:f.id,to:rid,kind:'spine'}); } }
-  for(const f of sf){ if(f.routeId&&rtById.has(f.routeId)){ add(f.routeId,'route', rtLabel(rtById.get(f.routeId))); add(f.id,'function',f.name); edges.push({from:f.routeId,to:f.id,kind:'spine'}); } }
+  const D=o=>o&&o.description?String(o.description):'';
+  const add=(id,kind,label,sub)=>{ if(!have.has(id)){ have.add(id); nodes.push({id, w:190, h: sub?56:44, meta:{kind,label,sub:sub||'', ref:{k:kind,id}}}); } };
+  for(const f of fe){ add(f.id,'frontend',f.name,D(f)); for(const rid of (f.consumesRouteIds||[])) if(rtById.has(rid)){ add(rid,'route', rtLabel(rtById.get(rid)), D(rtById.get(rid))); edges.push({from:f.id,to:rid,kind:'spine'}); } }
+  for(const f of sf){ if(f.routeId&&rtById.has(f.routeId)){ add(f.routeId,'route', rtLabel(rtById.get(f.routeId)), D(rtById.get(f.routeId))); add(f.id,'function',f.name,D(f)); edges.push({from:f.routeId,to:f.id,kind:'spine'}); } }
   for(const f of sf){ if(!have.has(f.id)) continue;
     const wr=new Set((f.writesFieldIds||[]).map(x=>owner.get(x)).filter(Boolean));
-    for(const eid of wr){ add(eid,'entity', entById.has(eid)?entById.get(eid).name:eid); edges.push({from:f.id,to:eid,kind:'data',label:'writes'}); }
-    for(const evid of (f.emitsEventIds||[])) if(evById.has(evid)){ add(evid,'event',evById.get(evid).name); edges.push({from:f.id,to:evid,kind:'effect',label:'emit'}); }
-    for(const evid of (f.subscribesEventIds||[])) if(evById.has(evid)){ add(evid,'event',evById.get(evid).name); edges.push({from:evid,to:f.id,kind:'effect',label:'sub'}); }
-    for(const cid of (f.callsFunctionIds||[])) if(fnById.has(cid)){ add(cid,'function',fnById.get(cid).name); edges.push({from:f.id,to:cid,kind:'spine'}); }
+    for(const eid of wr){ add(eid,'entity', entById.has(eid)?entById.get(eid).name:eid, D(entById.get(eid))); edges.push({from:f.id,to:eid,kind:'data',label:'writes'}); }
+    for(const evid of (f.emitsEventIds||[])) if(evById.has(evid)){ add(evid,'event',evById.get(evid).name, D(evById.get(evid))); edges.push({from:f.id,to:evid,kind:'effect',label:'emit'}); }
+    for(const evid of (f.subscribesEventIds||[])) if(evById.has(evid)){ add(evid,'event',evById.get(evid).name, D(evById.get(evid))); edges.push({from:evid,to:f.id,kind:'effect',label:'sub'}); }
+    for(const cid of (f.callsFunctionIds||[])) if(fnById.has(cid)){ add(cid,'function',fnById.get(cid).name, D(fnById.get(cid))); edges.push({from:f.id,to:cid,kind:'spine'}); }
   }
   return {direction:'RIGHT', nodes, edges};
 }
@@ -1540,13 +1548,20 @@ async function renderEntityLogic(container, entId, m){
 function graphLifecycle(fl, m){
   const nodes=[], edges=[]; const states=fl.states||[], trans=fl.transitions||[];
   const sid=k=>'st_'+mSafe(k);
-  for(const st of states) nodes.push({id:sid(st.key), w:162, h:46, meta:{kind:'state', label:st.name||st.key, sub: st.ownerRole||'', ref:{k:'entity',id:fl.entityId}}});
+  for(const st of states) nodes.push({id:sid(st.key), w:168, h: (st.description||st.ownerRole)?50:44, meta:{kind:'state', label:st.name||st.key, sub: st.description||st.ownerRole||'', ref:{k:'entity',id:fl.entityId}}});
   const targets=new Set(trans.map(t=>t.to));
   const initials=states.filter(st=>!targets.has(st.key));
   if(initials.length){ nodes.push({id:'START', w:118, h:38, meta:{kind:'start', label:'created', ref:{k:'entity',id:fl.entityId}}}); for(const st of initials) edges.push({from:'START', to:sid(st.key), kind:'spine'}); }
   trans.forEach((t,i)=>{
-    const trig=[t.byRole,t.condition].filter(Boolean).join(' · ')||'transition';
-    const tn='tr'+i; nodes.push({id:tn, w:Math.max(120,Math.min(250, trig.length*7+30)), h:44, meta:{kind:'trigger', label:trig, ref:{k:'entity',id:fl.entityId}}});
+    // A transition should read as WHAT it does, never a bare "transition".
+    const toName=(states.find(s=>s.key===t.to)||{}).name || t.to;
+    const guard=t.condition || (t.byRole ? ('by '+t.byRole) : '');
+    const named=t.label || t.description || '';
+    const trig = named || guard || ('→ '+toName);
+    const sub  = named ? [guard, '→ '+toName].filter(Boolean).join(' · ')
+                       : (guard ? '→ '+toName : '');
+    const wch=Math.max(trig.length, sub.length);
+    const tn='tr'+i; nodes.push({id:tn, w:Math.max(132,Math.min(262, wch*7+30)), h: sub?50:40, meta:{kind:'trigger', label:trig, sub, ref:{k:'entity',id:fl.entityId}}});
     edges.push({from:sid(t.from), to:tn, kind:'spine'});
     edges.push({from:tn, to:sid(t.to), kind:'branch'});
     (t.effects||[]).forEach((ef,j)=>{ const en='ef'+i+'_'+j, lbl=effLabel(ef,m); nodes.push({id:en, w:Math.max(150,Math.min(270,lbl.length*6.4+28)), h:40, meta:{kind:'effect', label:lbl, ref: ef.entityId?{k:'entity',id:ef.entityId}:{k:'entity',id:fl.entityId}}}); edges.push({from:tn, to:en, kind:'effect'}); });
@@ -1558,7 +1573,8 @@ function graphProcess(p, m, hi){
   const nodes=[], edges=[]; const steps=p.steps||[];
   steps.forEach((st,i)=>{
     const kind = st.refKind==='entity'?'entity' : st.refKind==='route'?'route' : st.refKind==='event'?'event' : st.refKind==='frontend'?'frontend' : 'function';
-    nodes.push({id:'ps'+i, w:186, h:50, meta:{kind, label:resolveRef(st.refKind,st.refId,m), sub: st.refKind+(st.refId===hi?' ◄':''), ref:{k:st.refKind,id:st.refId}}});
+    const desc = st.note || refDesc(st.refKind, st.refId, m) || st.refKind;
+    nodes.push({id:'ps'+i, w:194, h:56, meta:{kind, label:resolveRef(st.refKind,st.refId,m), sub: desc+(st.refId===hi?'  ◄':''), ref:{k:st.refKind,id:st.refId}}});
     if(i>0) edges.push({from:'ps'+(i-1), to:'ps'+i, kind:'spine'});
   });
   return {direction:'RIGHT', nodes, edges};
