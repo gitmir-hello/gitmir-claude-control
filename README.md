@@ -8,6 +8,8 @@
 [![Node](https://img.shields.io/badge/node-%E2%89%A518-2fd8ff.svg)](https://nodejs.org)
 [![Platform](https://img.shields.io/badge/platform-macOS%20·%20Windows%20·%20Linux-2fd8ff.svg)](#requirements)
 [![Dependencies](https://img.shields.io/badge/npm_deps-0-2fd8ff.svg)](#)
+[![Runs 100% local](https://img.shields.io/badge/runs-100%25_local-2fd8ff.svg)](SECURITY.md)
+[![Telemetry](https://img.shields.io/badge/telemetry-none-2fd8ff.svg)](SECURITY.md)
 [![by GITMIR](https://img.shields.io/badge/by-gitmir.com-2fd8ff.svg)](https://gitmir.com)
 
 Launch Claude in any project with one click · copy reusable skills into your session · visualize your product's data, flows, processes and entity lifecycles — all in an offline, dependency-free HUD.
@@ -35,6 +37,28 @@ At **GITMIR** we run Claude Code all day, across dozens of projects scattered ov
 We built it for ourselves. It turned out useful enough to share — **free and open source** under GPL-3.0. If something's missing, you find a bug, or you'd like to contribute, you're very welcome.
 
 **Grab it:** clone and `node server.js` — see [Run](#run). Made in the [GITMIR](https://gitmir.com) lab.
+
+## Your code never leaves your machine
+
+This runs **entirely on your computer**. It launches Claude locally, builds the
+model locally, and stores everything under your own project folders. **It makes no
+network calls to our servers — none.** No account, no sign-in, no telemetry,
+nothing uploaded. It works fully offline.
+
+You don't have to take our word for it:
+
+- **It's open source — read every line.** The whole tool is one `server.js` with
+  **zero npm dependencies**; everything it needs (ELK, fonts) is vendored locally.
+- **Run it air-gapped.** Pull the network cable and it still works.
+- **Watch the traffic.** There is nothing outbound to watch.
+
+The well-known cloud AI dev tools send your source and your tasks to their servers.
+This doesn't — and that isn't a privacy policy you have to trust, it's the
+architecture, and you can verify it yourself in a few minutes. For a team under an
+NDA, that's the difference between "not allowed" and "fine."
+
+See **[SECURITY.md](SECURITY.md)** for exactly what touches the network (your
+machine only) and what never does.
 
 ## What it is
 
