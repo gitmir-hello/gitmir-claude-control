@@ -306,6 +306,22 @@ const server = http.createServer(async (req, res) => {
       }
       return sendJSON(res, 200, out);
     }
+    if (req.method === 'GET' && url.pathname === '/api/task-file') {
+      const p = url.searchParams.get('path') || '';
+      const col = url.searchParams.get('col') || '';
+      const file = path.basename(url.searchParams.get('file') || ''); // basename strips any traversal
+      if (!p || !['todo', 'inprogress', 'done'].includes(col) || !file.endsWith('.md')) {
+        return sendJSON(res, 400, { error: 'bad request' });
+      }
+      const full = path.join(p, 'tasks', col, file);
+      try {
+        const content = fs.readFileSync(full, 'utf8');
+        let mtime = 0; try { mtime = fs.statSync(full).mtimeMs; } catch {}
+        return sendJSON(res, 200, { ok: true, content, file, col, mtime });
+      } catch {
+        return sendJSON(res, 404, { error: 'not found' });
+      }
+    }
     if (req.method === 'GET' && url.pathname === '/api/model') {
       const p = url.searchParams.get('path') || '';
       const dir = path.join(p, '.gitmir', 'model');
@@ -735,6 +751,10 @@ const HTML = /* html */ `<!doctype html>
   .q-card{background:rgba(14,30,58,.5); border:1px solid var(--line); border-left:3px solid; padding:10px 12px}
   .q-t{font-size:13px; color:var(--ink-0); word-break:break-word}
   .q-f{font-family:var(--font-mono); font-size:10.5px; color:var(--ink-3); margin-top:5px; word-break:break-all}
+  .q-clk{cursor:pointer; transition:border-color .15s ease, box-shadow .15s ease, transform .06s ease}
+  .q-clk:hover{border-color:var(--glass-brd-strong); box-shadow:0 0 16px rgba(47,216,255,.12)}
+  .q-clk:active{transform:translateY(1px)}
+  .q-badge{font-family:var(--font-mono); text-transform:uppercase; letter-spacing:.12em; font-size:10px; padding:3px 9px; border:1px solid; border-radius:0; flex-shrink:0}
 
   /* team bridge */
   .team-card{background:linear-gradient(165deg,rgba(18,36,66,.4),rgba(9,18,38,.6)); border:1px solid var(--line); padding:18px; margin-bottom:16px}
@@ -1421,10 +1441,37 @@ async function loadQueue(pathStr){
   for(const [k,label,acc] of cols){ const items=q[k]||[];
     html+='<div class="q-col"><div class="q-col-h" style="color:'+acc+'">'+label+' <span class="q-n">'+items.length+'</span></div><div class="q-list">';
     if(!items.length) html+='<div class="q-empty">—</div>';
-    for(const it of items) html+='<div class="q-card" style="border-left-color:'+acc+'"><div class="q-t">'+esc(it.title)+'</div><div class="q-f">'+esc(it.file)+'</div></div>';
+    for(const it of items) html+='<div class="q-card q-clk" data-col="'+esc(k)+'" data-file="'+esc(it.file)+'" title="Open full task" style="border-left-color:'+acc+'"><div class="q-t">'+esc(it.title)+'</div><div class="q-f">'+esc(it.file)+'</div></div>';
     html+='</div></div>';
   }
   view.innerHTML=html+'</div>';
+  view.querySelectorAll('.q-clk').forEach(c=> c.addEventListener('click', ()=> openTaskPopup(pathStr, c.dataset.col, c.dataset.file)));
+}
+
+async function openTaskPopup(pathStr, col, file){
+  let d; try{ d=await (await fetch('/api/task-file?path='+encodeURIComponent(pathStr)+'&col='+encodeURIComponent(col)+'&file='+encodeURIComponent(file))).json(); }
+  catch{ toast('Failed to read task', true); return; }
+  if(!d || !d.ok){ toast(d&&d.error==='not found'?'Task file no longer exists':'Failed to read task', true); return; }
+  const COLS={todo:['To do','#8aa0ff'], inprogress:['In progress','#ffb86b'], done:['Done','#34f0a6']};
+  const meta=COLS[col]||['Task','#2fd8ff'];
+  let ov=document.getElementById('taskOverlay');
+  if(!ov){ ov=document.createElement('div'); ov.id='taskOverlay'; ov.className='ctx-overlay'; document.body.appendChild(ov); }
+  ov.innerHTML=
+    '<div class="ctx-modal">'+
+      '<div class="ctx-head"><span class="q-badge" style="color:'+meta[1]+'; border-color:'+meta[1]+'">'+esc(meta[0])+'</span>'+
+        '<div class="ctx-title">'+esc(file)+'</div><button class="ctx-x" title="Close (Esc)">✕</button></div>'+
+      '<pre class="ctx-pre">'+esc(d.content||'')+'</pre>'+
+      '<div class="ctx-actions">'+
+        '<button class="ghost tk-copy">📋 Copy task</button>'+
+        '<button class="del tk-close">Close</button>'+
+      '</div>'+
+    '</div>';
+  ov.classList.add('show');
+  const close=()=>{ ov.classList.remove('show'); ov.innerHTML=''; };
+  ov.querySelector('.ctx-x').addEventListener('click', close);
+  ov.querySelector('.tk-close').addEventListener('click', close);
+  ov.addEventListener('click', e=>{ if(e.target===ov) close(); });
+  ov.querySelector('.tk-copy').addEventListener('click', async ()=>{ await copyToClipboard(d.content||''); toast('Task copied ✓'); });
 }
 
 // ----- overview -----
@@ -1894,7 +1941,7 @@ async function teamPoll(){
   if(activeTab==='team') renderTeam();
 }
 
-document.addEventListener('keydown', (e)=>{ if(e.key==='Escape'){ fsClose(); for(const id of ['ctxOverlay','addOverlay']){ const o=document.getElementById(id); if(o){ o.classList.remove('show'); o.innerHTML=''; } } } });
+document.addEventListener('keydown', (e)=>{ if(e.key==='Escape'){ fsClose(); for(const id of ['ctxOverlay','addOverlay','taskOverlay']){ const o=document.getElementById(id); if(o){ o.classList.remove('show'); o.innerHTML=''; } } } });
 fetch('/api/env').then(r=>r.json()).then(d=>{ PICKER_OK = !!d.pickerAvailable; if(d.relayUrl) RELAY_URL_DEFAULT=d.relayUrl; }).catch(()=>{});
 loadSkillsList();
 load();
