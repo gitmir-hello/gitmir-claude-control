@@ -65,24 +65,44 @@ function safeModelName(dir, f) {
   return dest;
 }
 
-function saveSharedModel(from, files) {
+// Folder name must be filesystem-safe AND unique per teammate. slug() strips
+// non-latin entirely, so "Вова" and "Аня" would both collapse to "x" and overwrite
+// each other — keep the real name in meta.json and disambiguate the folder by id.
+function sharedDirName(from, id) {
+  const s = slug(from);
+  const tag = String(id || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 8).toLowerCase();
+  return (s === 'x' || !s) ? (tag ? 'peer-' + tag : 'peer') : (tag ? s + '-' + tag : s);
+}
+
+function saveSharedModel(from, files, fromId) {
   if (!state.projectPath || !files || typeof files !== 'object') return;
-  const dir = path.join(state.projectPath, '.gitmir', 'shared', slug(from), 'model');
+  const who = sharedDirName(from, fromId);
+  const dir = path.join(state.projectPath, '.gitmir', 'shared', who, 'model');
   const entries = Object.entries(files).slice(0, MAX_FILES);
-  let written = 0, skipped = 0, total = 0, made = false;
+  const staged = [];
+  let skipped = 0, total = 0;
   for (const [f, content] of entries) {
     const dest = safeModelName(dir, f);
     if (!dest || typeof content !== 'string') { skipped++; continue; }
     const bytes = Buffer.byteLength(content, 'utf8');
     if (bytes > MAX_FILE_BYTES || total + bytes > MAX_TOTAL_BYTES) { skipped++; continue; }
-    if (!made) { fs.mkdirSync(dir, { recursive: true }); made = true; }
-    fs.writeFileSync(dest, content);
-    total += bytes; written++;
+    staged.push([dest, content, path.basename(dest)]);
+    total += bytes;
   }
-  if (written || skipped) {
-    log('model', `received ${written} file(s) from ${from} → .gitmir/shared/${slug(from)}/` +
-      (skipped ? ` · ${skipped} rejected (unsafe name or too large)` : ''));
-  }
+  if (!staged.length) { if (skipped) log('model', `rejected ${skipped} file(s) from ${from} (unsafe name or too large)`); return; }
+  fs.mkdirSync(dir, { recursive: true });
+  // A snapshot REPLACES the previous one: a dimension the author deleted must not
+  // live on forever in our copy.
+  const keep = new Set(staged.map((s) => s[2]));
+  try { for (const f of fs.readdirSync(dir)) if (f.endsWith('.json') && !keep.has(f)) fs.unlinkSync(path.join(dir, f)); } catch {}
+  for (const [dest, content] of staged) fs.writeFileSync(dest, content);
+  // Remember the real display name (which may be non-latin) and when it arrived.
+  try {
+    fs.writeFileSync(path.join(path.dirname(dir), 'meta.json'),
+      JSON.stringify({ name: String(from).slice(0, 80), id: fromId || null, receivedAt: new Date().toISOString() }, null, 2));
+  } catch {}
+  log('model', `received ${staged.length} file(s) from ${from} → .gitmir/shared/${who}/` +
+    (skipped ? ` · ${skipped} rejected (unsafe name or too large)` : ''));
 }
 
 function writeIncomingTask(from, task) {
@@ -140,7 +160,7 @@ function handle(m) {
     }
     case 'msg': log('msg', `<${peerName(m)}> ${String(JSON.stringify(m.body) || '').slice(0, 300)}`); break;
     case 'task': writeIncomingTask(peerName(m), (m.body && typeof m.body === 'object') ? m.body : {}); break;
-    case 'model': saveSharedModel(peerName(m), m.body && m.body.files); break;
+    case 'model': saveSharedModel(peerName(m), m.body && m.body.files, m.from && m.from.id); break;
     case 'denied':
       state.connected = false; state.connecting = false; denied = true;
       clearTimeout(handshakeTimer);

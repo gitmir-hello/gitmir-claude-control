@@ -347,7 +347,14 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/api/model') {
       const p = url.searchParams.get('path') || '';
-      const dir = path.join(p, '.gitmir', 'model');
+      // `src` selects whose model to read: the project's own, or a teammate's
+      // snapshot relayed into .gitmir/shared/<who>/model by the team bridge.
+      const src = url.searchParams.get('src') || '';
+      const who = src ? path.basename(src) : '';                 // basename — no traversal
+      if (src && (who !== src || !/^[a-z0-9-]{1,40}$/.test(who))) return sendJSON(res, 400, { error: 'bad src' });
+      const dir = who
+        ? path.join(p, '.gitmir', 'shared', who, 'model')
+        : path.join(p, '.gitmir', 'model');
       const dims = ['modules','entities','serverUnits','serverFunctions','apiRoutes','frontendUnits','events','processes','statusFlows','reactions'];
       const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
       const index = readJson(path.join(dir, 'index.json'));
@@ -358,8 +365,33 @@ const server = http.createServer(async (req, res) => {
         model[d] = Array.isArray(arr) ? arr : [];
         if (model[d].length) exists = true;
       }
-      const brief = readJson(path.join(p, '.gitmir', 'brief.json'));
-      return sendJSON(res, 200, { exists, index, model, brief });
+      const brief = who ? null : readJson(path.join(p, '.gitmir', 'brief.json'));
+      // Which teammates' models are on disk for this project (for the source switcher).
+      let shared = [];
+      try {
+        const sdir = path.join(p, '.gitmir', 'shared');
+        shared = fs.readdirSync(sdir, { withFileTypes: true })
+          // Only names the src validator below would accept — otherwise the UI would
+          // offer a pill that 400s.
+          .filter((e) => e.isDirectory() && /^[a-z0-9-]{1,40}$/.test(e.name) && fs.existsSync(path.join(sdir, e.name, 'model')))
+          .map((e) => {
+            let at = 0;
+            try {
+              const md = path.join(sdir, e.name, 'model');
+              for (const f of fs.readdirSync(md)) at = Math.max(at, fs.statSync(path.join(md, f)).mtimeMs);
+            } catch {}
+            // The real display name may be non-latin; the folder name is only a key.
+            let label = e.name, receivedAt = null;
+            try {
+              const meta = readJson(path.join(sdir, e.name, 'meta.json'));
+              if (meta && typeof meta.name === 'string' && meta.name.trim()) label = meta.name.trim().slice(0, 80);
+              if (meta && meta.receivedAt) receivedAt = meta.receivedAt;
+            } catch {}
+            return { name: e.name, label, receivedAt, at };
+          })
+          .sort((a, b) => b.at - a.at);
+      } catch {}
+      return sendJSON(res, 200, { exists, index, model, brief, shared, src: who || null });
     }
     if (req.method === 'GET' && url.pathname === '/api/skills') {
       const skills = loadSkills().map((s) => ({ name: s.name, title: s.title || s.name, desc: s.desc || '' }));
@@ -662,6 +694,12 @@ const HTML = /* html */ `<!doctype html>
   @keyframes pulse{50%{opacity:.35}}
 
   /* ---------- model ---------- */
+  .model-src{display:none; align-items:center; gap:8px; margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid var(--line)}
+  .msrc-l{font-family:var(--font-mono); font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--dim2)}
+  .msrc{background:rgba(8,16,36,.5); border:1px solid var(--line2); color:var(--dim); font-family:var(--font-mono); font-size:12px; padding:5px 12px; cursor:pointer}
+  .msrc:hover{color:var(--txt); border-color:var(--glass-brd-strong)}
+  .msrc.active{background:rgba(47,216,255,.12); border-color:var(--cyan); color:var(--cyan)}
+  .msrc-note{font-family:var(--font-mono); font-size:11px; color:var(--dim2); margin-left:4px}
   .model-head{display:flex; align-items:center; gap:10px; margin-bottom:18px}
   .model-subnav{display:flex; flex-wrap:wrap; gap:6px}
   .mpill{background:var(--panel2); border:1px solid var(--line2); color:var(--dim); font-size:13px; padding:6px 12px; border-radius:8px; cursor:pointer}
@@ -811,7 +849,7 @@ const HTML = /* html */ `<!doctype html>
     position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(30px);
     background:var(--panel2);border:1px solid var(--line2);color:var(--txt);
     padding:12px 18px;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.5);
-    opacity:0;transition:all .22s ease;pointer-events:none;font-size:14px;z-index:20;
+    opacity:0;transition:all .22s ease;pointer-events:none;font-size:14px;z-index:1200;
   }
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
   .toast.err{border-color:var(--danger)}
@@ -985,7 +1023,7 @@ function renderList(){
       '<span class="miss" title="folder not found">⚠</span>';
     el.querySelector('.nm').textContent = displayName(p);
     el.querySelector('.pa').textContent = p.path;
-    el.addEventListener('click', ()=>{ selected = p.path; renderList(); renderDetail(); });
+    el.addEventListener('click', ()=>{ if(selected!==p.path){ modelSrc=null; logicEntityId=null; } selected = p.path; renderList(); renderDetail(); });
     wireDrag(el);
     listEl.appendChild(el);
   }
@@ -1044,6 +1082,7 @@ function renderDetail(){
       '<div id="taskList"></div>' +
     '</div>' +
     '<div class="pane" data-pane="model">' +
+      '<div class="model-src" id="modelSrc"></div>' +
       '<div class="model-head">' +
         '<div class="model-subnav" id="modelNav"></div>' +
         '<span class="upd" id="modelUpd"></span>' +
@@ -1127,6 +1166,7 @@ async function copySkill(name, title){
 let modelData = null;
 let modelView = 'logic';
 let logicEntityId = null;
+let modelSrc = null;   // null = this project's own model; otherwise a teammate's name
 let mermaidReady = null;
 const MODEL_VIEWS = [
   {key:'logic', label:'Business logic'},
@@ -1282,22 +1322,58 @@ function attachPanZoom(canvas, stage, svgEl, onNodeClick){
   return { fit, reset, zoomCenter };
 }
 
+let modelReq = 0;
 async function loadModel(pathStr){
   const view=document.getElementById('modelView'); if(!view) return;
+  const req = ++modelReq, wantSrc = modelSrc;   // this call's identity
   view.innerHTML='<div class="model-empty">Loading model…</div>';
-  let d; try{ d=await (await fetch('/api/model?path='+encodeURIComponent(pathStr))).json(); }
-  catch{ view.innerHTML='<div class="model-empty">Failed to load model.</div>'; return; }
-  if(selected!==pathStr) return;
+  const q='/api/model?path='+encodeURIComponent(pathStr)+(wantSrc?('&src='+encodeURIComponent(wantSrc)):'');
+  let d; try{ d=await (await fetch(q)).json(); }
+  catch{ if(req===modelReq) view.innerHTML='<div class="model-empty">Failed to load model.</div>'; return; }
+  // Drop a superseded response: the user may have switched project OR source while
+  // this was in flight, and a late answer must not overwrite the current model.
+  if(req!==modelReq || selected!==pathStr || wantSrc!==modelSrc) return;
+  // A teammate's snapshot can disappear (project rebound, folder cleaned) — fall
+  // back to our own model rather than showing an empty pane for a missing source.
+  if(modelSrc && !(d.shared||[]).some(s=>s.name===modelSrc)){ modelSrc=null; return loadModel(pathStr); }
   modelData=d;
+  renderModelSrc(d);
   const upd=document.getElementById('modelUpd');
   if(upd) upd.textContent = (d.index && d.index.at) ? ('updated '+fmtTime(d.index.at)) : '';
   const nav=document.getElementById('modelNav');
   if(!d.exists){
     if(nav) nav.innerHTML='';
-    view.innerHTML='<div class="model-empty"><b>No model yet.</b><br>In the <b>Settings</b> tab click <b>📋 gitmir-model</b>, paste into claude (⌘V + Enter) — it will build <code>.gitmir/model/</code>, and diagrams of data, processes and flows will appear here.</div>';
+    const shared=(d.shared||[]).map(s=>s.name);
+    view.innerHTML = modelSrc
+      ? '<div class="model-empty"><b>'+esc(modelSrc)+' has not shared a model yet.</b><br>Their snapshot arrives when they press <b>⇪ Share model</b> in their own dashboard — it lands in <code>.gitmir/shared/'+esc(modelSrc)+'/model/</code> on this machine.</div>'
+      : '<div class="model-empty"><b>This project has no model of its own yet.</b><br>'+
+        (shared.length
+          ? 'Switch to <b>⇪ '+esc(shared[0])+'</b> above to explore the model your teammate shared — it is on this machine, under <code>.gitmir/shared/</code>.'
+          : 'In the <b>Settings</b> tab click <b>📋 gitmir-model</b>, paste into claude (⌘V + Enter) — it will build <code>.gitmir/model/</code>, and diagrams of data, processes and flows will appear here.')+'</div>';
     return;
   }
   renderModelNav(); renderModelView();
+}
+
+// Source switcher: our own model, plus any teammate model the bridge delivered.
+function renderModelSrc(d){
+  const box=document.getElementById('modelSrc'); if(!box) return;
+  const shared=d.shared||[];
+  if(!shared.length){ box.innerHTML=''; box.style.display='none'; return; }
+  box.style.display='flex';
+  let html='<span class="msrc-l">model:</span>'+
+    '<button class="msrc'+(modelSrc?'':' active')+'" data-src="">mine</button>';
+  for(const s of shared) html+='<button class="msrc'+(modelSrc===s.name?' active':'')+'" data-src="'+esc(s.name)+'" title="shared by '+esc(s.label||s.name)+' via the team bridge">⇪ '+esc(s.label||s.name)+'</button>';
+  // A shared model is a point-in-time copy, not a live view — say so, and when it arrived.
+  const cur = modelSrc && shared.find(s=>s.name===modelSrc);
+  if(cur) html+='<span class="msrc-note">snapshot received '+esc(cur.receivedAt?fmtTime(cur.receivedAt):fmtTime(new Date(cur.at).toISOString()))+' — a copy on this machine, not live</span>';
+  box.innerHTML=html;
+  box.querySelectorAll('.msrc').forEach(b=> b.addEventListener('click', ()=>{
+    const v=b.dataset.src||null;
+    if(v===modelSrc) return;
+    modelSrc=v; logicEntityId=null;   // entity picker belongs to the old model
+    if(selected) loadModel(selected);
+  }));
 }
 
 function renderModelNav(){
@@ -1413,6 +1489,12 @@ function gatherContext(kind,id,m){
   return objName(kind,id,m)+' ('+kind+')';
 }
 
+// Display name of the model currently on screen (folder key → real name).
+function srcLabel(){
+  if(!modelSrc) return 'mine';
+  const s=((modelData&&modelData.shared)||[]).find(x=>x.name===modelSrc);
+  return (s&&s.label)||modelSrc;
+}
 function openContextPopup(kind,id){
   if(!modelData) return; const m=modelData.model;
   const ctx=gatherContext(kind,id,m); const title=ctxTitle(kind,id,m);
@@ -1421,12 +1503,16 @@ function openContextPopup(kind,id){
   ov.innerHTML=
     '<div class="ctx-modal">'+
       '<div class="ctx-head"><div class="ctx-title">'+esc(title)+'</div><button class="ctx-x" title="Close (Esc)">✕</button></div>'+
-      '<div class="ctx-note">Deterministic context — assembled from the model by walking id-links. Paste into Claude, or turn it into a queued task.</div>'+
+      '<div class="ctx-note">'+(modelSrc
+        ? 'Deterministic context from the model shared by <b>'+esc(srcLabel())+'</b>. <b>Send to team</b> delivers it to <b>everyone currently online</b> in your workspace (the relay broadcasts — it cannot target one person), landing in their <code>tasks/todo/</code>. <b>Queue here</b> instead writes it into this local project.'
+        : 'Deterministic context — assembled from the model by walking id-links. Paste into Claude, or turn it into a queued task.')+'</div>'+
       '<pre class="ctx-pre">'+esc(ctx)+'</pre>'+
       '<div class="ctx-taskl">Task for this element (optional):</div>'+
       '<textarea class="ctx-task" placeholder="e.g. Add a partial-refund transition from paid, updating Payment and Inventory…"></textarea>'+
       '<div class="ctx-actions">'+
-        '<button class="run ctx-create">＋ Create task</button>'+
+        (modelSrc
+          ? '<button class="run ctx-send">➤ Send to team</button><button class="ghost ctx-create">＋ Queue here</button>'
+          : '<button class="run ctx-create">＋ Create task</button>')+
         '<button class="ghost ctx-copy">📋 Copy context</button>'+
         '<button class="ghost ctx-copyt">📋 Copy context + task</button>'+
         '<button class="del ctx-close">Close</button>'+
@@ -1442,13 +1528,33 @@ function openContextPopup(kind,id){
   ov.addEventListener('click', e=>{ if(e.target===ov) close(); });
   ov.querySelector('.ctx-copy').addEventListener('click', async ()=>{ await copyToClipboard(CTXPRE+'\\n\\n'+ctx); toast('Context copied ✓  paste into claude'); });
   ov.querySelector('.ctx-copyt').addEventListener('click', async ()=>{ await copyToClipboard(withTask()); toast('Context + task copied ✓'); });
+  // When the context came from a teammate's snapshot, say so in the task file —
+  // otherwise the local Claude would read it as a description of THIS project.
+  const origin= modelSrc
+    ? '> NOTE: this context describes the model shared by '+srcLabel()+' (a snapshot in .gitmir/shared/'+modelSrc+'/), NOT this project\\'s own .gitmir/model.\\n\\n'
+    : '';
+  const taskBody=(t)=> origin+'> '+CTXPRE+'\\n\\n## Task\\n'+t+'\\n\\n## Context (from the .gitmir model)\\n'+ctx+'\\n';
   ov.querySelector('.ctx-create').addEventListener('click', async ()=>{
     const t=ta.value.trim(); if(!t){ toast('Type the task first', true); ta.focus(); return; }
-    const content='# '+title+' — '+t.split('\\n')[0].slice(0,80)+'\\n\\n> '+CTXPRE+'\\n\\n## Task\\n'+t+'\\n\\n## Context (from the .gitmir model)\\n'+ctx+'\\n';
+    const content='# '+title+' — '+t.split('\\n')[0].slice(0,80)+'\\n\\n'+taskBody(t);
     const r=await fetch('/api/task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:selected, title:title+' — '+t.slice(0,40), content})});
     const d=await r.json();
     if(d.ok){ toast('Task created in tasks/todo ✓'); close(); if(activeTab==='queue') loadQueue(selected); }
     else toast('Failed: '+(d.error||'error'), true);
+  });
+  // Viewing a teammate's model: the task belongs on THEIR machine, so send it over
+  // the bridge with the same deterministic context attached.
+  const sendBtn=ov.querySelector('.ctx-send');
+  if(sendBtn) sendBtn.addEventListener('click', async ()=>{
+    const t=ta.value.trim(); if(!t){ toast('Type the task first', true); ta.focus(); return; }
+    // The receiving side already writes "# title / ## Context (received from…) / ## Task",
+    // so send the task text plus the model context — no duplicate headings.
+    const body=t+'\\n\\n## Context (from the .gitmir model)\\n> '+CTXPRE+'\\n\\n'+ctx+'\\n';
+    const r=await fetch('/api/team/send-task',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ title: title+' — '+t.split('\\n')[0].slice(0,60), body })});
+    const d=await r.json();
+    if(d.ok){ toast('Task sent to the team ✓'); close(); teamPoll(); }
+    else toast(d.error||'Send failed — connect on the Team tab first', true);
   });
 }
 
@@ -1557,7 +1663,11 @@ async function renderProcesses(view, m){
   const procs=m.processes||[];
   if(!procs.length){ view.innerHTML='<div class="model-empty">No business processes in the model.</div>'; return; }
   view.innerHTML='';
+  // ELK layout is async, so a source/project switch can land mid-loop. Bail out
+  // rather than grafting this model's diagrams onto the newly loaded one's pane.
+  const mine=modelReq;
   for(const p of procs){
+    if(mine!==modelReq || !view.isConnected) return;
     const block=document.createElement('div'); block.className='proc-block';
     block.innerHTML='<div class="proc-title">'+esc(p.name||p.id)+'</div>'+
       (p.description?'<div class="proc-desc">'+esc(p.description)+'</div>':'')+
@@ -1717,7 +1827,10 @@ function copyToClipboard(text){
     }catch(e){ reject(e); }
   });
 }
-function esc(s){ return String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+// Quotes MUST be escaped too: model data (including a teammate's shared model, which
+// arrives over the network) is interpolated into HTML/SVG attributes like data-cid="…",
+// and a value containing a quote would otherwise inject attributes into the page.
+function esc(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fmtTime(iso){ try{ const d=new Date(iso); if(isNaN(d)) return iso; return d.toLocaleString('en-GB',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); }catch{ return iso; } }
 async function refreshTasks(pathStr){
   let d; try{ d = await (await fetch('/api/tasks?path='+encodeURIComponent(pathStr))).json(); }catch{ return; }
@@ -1841,7 +1954,7 @@ async function saveOrder(){
 }
 
 /* ---------------- team bridge (client) ---------------- */
-let teamState=null, teamSeenTaskT=null, RELAY_URL_DEFAULT='ws://localhost:4600';
+let teamState=null, teamSeenTaskT=null, teamSeenModelT=null, RELAY_URL_DEFAULT='ws://localhost:4600';
 function loadTeamMem(){ try{ return JSON.parse(localStorage.getItem('gitmir.team')||'{}'); }catch{ return {}; } }
 function saveTeamMem(o){ try{ localStorage.setItem('gitmir.team', JSON.stringify(o)); }catch{} }
 function taTime(t){ try{ return new Date(t).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }catch{ return ''; } }
@@ -1963,6 +2076,16 @@ async function teamPoll(){
     const who=(inc[0].text.match(/^from (.+?) →/)||[])[1]||'a teammate';
     toast('📥 New task from '+who);
     if(selected){ refreshTasks(selected); if(activeTab==='queue') loadQueue(selected); }
+  }
+  // A teammate's model arriving used to be invisible unless the Model tab was open.
+  const rx=(s.activity||[]).filter(a=> a.kind==='model' && /^received /.test(a.text));
+  const newestM = rx.length ? rx[0].t : null;
+  if(teamSeenModelT===null){ teamSeenModelT=newestM; }
+  else if(newestM && newestM>teamSeenModelT){
+    teamSeenModelT=newestM;
+    const who=(rx[0].text.match(/from (.+?) →/)||[])[1]||'a teammate';
+    toast('⇪ '+who+' shared their model — see the Model tab');
+    if(selected && activeTab==='model') loadModel(selected);   // pick up the new source
   }
   if(activeTab==='team') renderTeam();
 }
