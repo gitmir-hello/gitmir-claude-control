@@ -1,7 +1,11 @@
 # local runtime state (personal — never commit)
 projects.json
+team.json
 .claude/
 /.gitmir/
+
+# internal handoff notes (references the private dev repo — keep out of OSS)
+TEAM_BRIDGE_TASKS.md
 
 # dependencies / env
 node_modules/

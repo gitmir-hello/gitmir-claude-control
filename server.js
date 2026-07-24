@@ -18,6 +18,8 @@ function nativePickerAvailable() {
   return false;
 }
 
+const relay = require('./relay');
+
 const PORT = 4599;
 const DATA_FILE = path.join(__dirname, 'projects.json');
 const SKILLS_FILE = path.join(__dirname, 'skills.json');
@@ -248,7 +250,7 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, { ok: true });
     }
     if (req.method === 'GET' && url.pathname === '/api/env') {
-      return sendJSON(res, 200, { platform: process.platform, pickerAvailable: nativePickerAvailable() });
+      return sendJSON(res, 200, { platform: process.platform, pickerAvailable: nativePickerAvailable(), relayUrl: relay.status().url });
     }
     if (req.method === 'GET' && url.pathname === '/api/projects') {
       const list = loadProjects().map((p) => ({
@@ -409,6 +411,27 @@ const server = http.createServer(async (req, res) => {
         for (const x of list) if (!paths.includes(x.path)) next.push(x);
         saveProjects(next);
       }
+      return sendJSON(res, 200, { ok: true });
+    }
+    // ---- team bridge (connect local machines through the GitMir relay) ----
+    if (req.method === 'POST' && url.pathname === '/api/team/connect') {
+      const { key, name, path: projectPath, url: relayUrl } = await readBody(req);
+      if (!key) return sendJSON(res, 400, { error: 'no key' });
+      relay.connect({ key, name, projectPath, url: relayUrl });
+      return sendJSON(res, 200, { ok: true, status: relay.status() });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/team/status') {
+      return sendJSON(res, 200, relay.status());
+    }
+    if (req.method === 'POST' && url.pathname === '/api/team/share-model') {
+      return sendJSON(res, 200, relay.shareModel());
+    }
+    if (req.method === 'POST' && url.pathname === '/api/team/send-task') {
+      const { title, body } = await readBody(req);
+      return sendJSON(res, 200, relay.sendTask({ title, body }));
+    }
+    if (req.method === 'POST' && url.pathname === '/api/team/disconnect') {
+      relay.disconnect();
       return sendJSON(res, 200, { ok: true });
     }
     res.writeHead(404); res.end('not found');
@@ -713,6 +736,33 @@ const HTML = /* html */ `<!doctype html>
   .q-t{font-size:13px; color:var(--ink-0); word-break:break-word}
   .q-f{font-family:var(--font-mono); font-size:10.5px; color:var(--ink-3); margin-top:5px; word-break:break-all}
 
+  /* team bridge */
+  .team-card{background:linear-gradient(165deg,rgba(18,36,66,.4),rgba(9,18,38,.6)); border:1px solid var(--line); padding:18px; margin-bottom:16px}
+  .team-lede{color:var(--dim); font-size:13px; line-height:1.55; margin-bottom:16px}
+  .team-lede b{color:var(--cyan-soft); font-weight:600}
+  .ti{width:100%; background:rgba(8,16,36,.5); border:1px solid var(--line); color:var(--txt); font-size:14px; padding:10px 12px; outline:none; font-family:inherit; border-radius:8px}
+  select.ti{cursor:pointer}
+  textarea.ti{min-height:74px; resize:vertical; margin-top:8px; line-height:1.5}
+  .ti:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(47,216,255,.12)}
+  .team-actions{display:flex; align-items:center; gap:12px; margin-top:12px}
+  .team-cstate,.team-connecting{font-family:var(--font-mono); font-size:12px; color:var(--cyan-soft)}
+  .team-status-row{display:flex; align-items:center; gap:14px; flex-wrap:wrap; font-family:var(--font-mono); font-size:12px; letter-spacing:.03em}
+  .team-dot{width:9px; height:9px; border-radius:50%; background:var(--dim2); display:inline-block}
+  .team-dot.on{background:var(--ok); box-shadow:0 0 10px var(--ok)}
+  .team-self{color:var(--txt); font-weight:600}
+  .team-plan,.team-bound{color:var(--dim)}
+  .team-members{display:flex; flex-wrap:wrap; gap:8px; margin:14px 0}
+  .team-chip{font-family:var(--font-mono); font-size:12px; padding:4px 10px; border:1px solid var(--line); color:var(--cyan-soft); background:rgba(47,216,255,.06); border-radius:0}
+  .team-chip.me{border-color:rgba(47,216,255,.4); color:var(--cyan)}
+  .team-empty{color:var(--dim2); font-size:12.5px; font-style:italic}
+  .team-ops{display:flex; gap:10px; margin-top:6px}
+  .team-feed-h{font-family:var(--font-mono); text-transform:uppercase; letter-spacing:.14em; font-size:11px; color:var(--cyan-soft); margin-bottom:10px}
+  .team-act{display:flex; align-items:baseline; gap:10px; padding:6px 0; border-bottom:1px solid rgba(47,216,255,.06); font-size:12.5px}
+  .ta-k{font-family:var(--font-mono); font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--cyan); min-width:62px; flex-shrink:0}
+  .ta-t{color:var(--dim); flex:1; word-break:break-word}
+  .ta-time{color:var(--dim2); font-size:11px; font-family:var(--font-mono); flex-shrink:0}
+  .tab-btn .badge.on{background:rgba(52,240,166,.14); color:var(--ok); border-color:rgba(52,240,166,.4)}
+
   .toast{
     position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(30px);
     background:var(--panel2);border:1px solid var(--line2);color:var(--txt);
@@ -907,6 +957,7 @@ function setTab(tab){
   clearInterval(queueTimer);
   if(tab==='model' && selected) loadModel(selected);
   if(tab==='queue' && selected){ loadQueue(selected); queueTimer=setInterval(()=>{ if(selected && activeTab==='queue') loadQueue(selected); }, 4000); }
+  if(tab==='team'){ renderTeam(); teamPoll(); }
 }
 function renderDetail(){
   const p = byPath(selected);
@@ -924,6 +975,7 @@ function renderDetail(){
       '<button class="tab-btn" data-tab="tasks">Tasks <span class="badge" id="taskBadge"></span></button>' +
       '<button class="tab-btn" data-tab="model">Model</button>' +
       '<button class="tab-btn" data-tab="queue">Queue <span class="badge" id="queueBadge"></span></button>' +
+      '<button class="tab-btn" data-tab="team">Team <span class="badge" id="teamBadge"></span></button>' +
     '</div></div>' +
     '<div class="pane" data-pane="settings">' +
       '<div class="field"><div class="row-lbl"><label>Name</label><span class="saved" id="savedN">saved ✓</span></div>' +
@@ -958,6 +1010,10 @@ function renderDetail(){
     '<div class="pane" data-pane="queue">' +
       '<div class="tasks-head"><span class="t">Task queue — tasks/todo · inprogress · done</span></div>' +
       '<div id="queueView"><div class="model-empty">Loading…</div></div>' +
+    '</div>' +
+    '<div class="pane" data-pane="team">' +
+      '<div class="tasks-head"><span class="t">Team Bridge — route model &amp; tasks between your machines</span><span class="upd" id="teamUpd"></span></div>' +
+      '<div id="teamView"><div class="model-empty">Loading…</div></div>' +
     '</div>';
   mainEl.innerHTML = ''; mainEl.appendChild(wrap);
 
@@ -1713,10 +1769,137 @@ async function saveOrder(){
   projects.sort((a,b)=> paths.indexOf(a.path)-paths.indexOf(b.path));
 }
 
+/* ---------------- team bridge (client) ---------------- */
+let teamState=null, teamSeenTaskT=null, RELAY_URL_DEFAULT='ws://localhost:4600';
+function loadTeamMem(){ try{ return JSON.parse(localStorage.getItem('gitmir.team')||'{}'); }catch{ return {}; } }
+function saveTeamMem(o){ try{ localStorage.setItem('gitmir.team', JSON.stringify(o)); }catch{} }
+function taTime(t){ try{ return new Date(t).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }catch{ return ''; } }
+function activityHtml(activity){
+  if(!activity||!activity.length) return '<div class="team-empty">No activity yet.</div>';
+  return activity.map(a=> '<div class="team-act"><span class="ta-k">'+esc(a.kind)+'</span><span class="ta-t">'+esc(a.text)+'</span><span class="ta-time">'+taTime(a.t)+'</span></div>').join('');
+}
+function connectHtml(s){
+  return ''
+  + '<div class="team-card">'
+  +   '<div class="team-lede">Connect this machine to your team through the GitMir relay. The relay only <b>routes</b> — your model and tasks move between your team\\'s machines and nothing is stored on our servers. Requires a paid Team plan.</div>'
+  +   '<div class="field"><label>Workspace key</label><input class="ti" id="teamKey" placeholder="wsk_…" autocomplete="off" spellcheck="false"></div>'
+  +   '<div class="field"><label>Display name</label><input class="ti" id="teamName" placeholder="Your name"></div>'
+  +   '<div class="field"><label>Bind to project</label><select class="ti" id="teamProj"></select></div>'
+  +   '<div class="field"><label>Relay URL</label><input class="ti" id="teamUrl" placeholder="ws://localhost:4600" spellcheck="false"></div>'
+  +   '<div class="team-actions"><button class="run" id="teamConnectBtn">▚ Connect</button><span class="team-cstate" id="teamCStatus"></span></div>'
+  + '</div>'
+  + '<div class="team-card"><div class="team-feed-h">Activity</div><div id="teamDyn"></div></div>';
+}
+function liveHtml(s){
+  var bound = s.projectPath ? ('bound: '+esc(basename(s.projectPath))) : 'no project bound';
+  return ''
+  + '<div class="team-card">'
+  +   '<div class="team-status-row">'
+  +     '<span class="team-dot on"></span>'
+  +     '<span class="team-self">'+esc((s.self&&s.self.name)||s.name||'me')+'</span>'
+  +     '<span class="team-plan">plan: '+esc(s.plan||'—')+'</span>'
+  +     '<span class="team-bound">'+bound+'</span>'
+  +   '</div>'
+  +   '<div class="team-members" id="teamMembers"></div>'
+  +   '<div class="team-ops"><button class="ghost" id="teamShareBtn">⇪ Share model</button><button class="del" id="teamDiscBtn">Disconnect</button></div>'
+  + '</div>'
+  + '<div class="team-card">'
+  +   '<div class="team-feed-h">Send a task to the team</div>'
+  +   '<input class="ti" id="teamTaskTitle" placeholder="Task title">'
+  +   '<textarea class="ti" id="teamTaskBody" placeholder="Optional details (markdown)"></textarea>'
+  +   '<div class="team-actions"><button class="run" id="teamSendBtn">➤ Send task</button></div>'
+  + '</div>'
+  + '<div class="team-card"><div class="team-feed-h">Activity</div><div id="teamDyn"></div></div>';
+}
+function wireConnect(){
+  const view=document.getElementById('teamView'); if(!view) return;
+  const sel=view.querySelector('#teamProj');
+  const mem=loadTeamMem();
+  sel.innerHTML = projects.map(p=> '<option value="'+esc(p.path)+'">'+esc(displayName(p))+'</option>').join('') || '<option value="">— add a project first —</option>';
+  const wantPath = mem.path || selected || (projects[0] && projects[0].path);
+  if(wantPath) sel.value = wantPath;
+  view.querySelector('#teamKey').value = mem.key || '';
+  view.querySelector('#teamName').value = mem.name || '';
+  view.querySelector('#teamUrl').value = mem.url || (teamState && teamState.url) || RELAY_URL_DEFAULT;
+  view.querySelector('#teamConnectBtn').addEventListener('click', teamDoConnect);
+}
+async function teamDoConnect(){
+  const view=document.getElementById('teamView'); if(!view) return;
+  const key=view.querySelector('#teamKey').value.trim();
+  const name=view.querySelector('#teamName').value.trim();
+  const path=view.querySelector('#teamProj').value;
+  const url=view.querySelector('#teamUrl').value.trim();
+  if(!key){ toast('Enter a workspace key', true); return; }
+  saveTeamMem({key,name,url,path});
+  const cs=view.querySelector('#teamCStatus'); if(cs) cs.innerHTML='<span class="team-connecting">connecting…</span>';
+  try{
+    const r=await (await fetch('/api/team/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,name,path,url})})).json();
+    teamState=r.status||teamState;
+  }catch{ toast('Connect failed', true); }
+  teamPoll();
+}
+function wireLive(){
+  const view=document.getElementById('teamView'); if(!view) return;
+  view.querySelector('#teamShareBtn').addEventListener('click', async ()=>{
+    const r=await (await fetch('/api/team/share-model',{method:'POST'})).json();
+    toast(r.ok?'Model shared with the team':(r.error||'No local .gitmir/model to share'), !r.ok);
+    teamPoll();
+  });
+  view.querySelector('#teamDiscBtn').addEventListener('click', async ()=>{
+    await fetch('/api/team/disconnect',{method:'POST'});
+    toast('Disconnected from the team'); teamState=null; teamPoll();
+  });
+  view.querySelector('#teamSendBtn').addEventListener('click', async ()=>{
+    const t=view.querySelector('#teamTaskTitle'), b=view.querySelector('#teamTaskBody');
+    const title=t.value.trim(); if(!title){ toast('Task needs a title', true); return; }
+    const r=await (await fetch('/api/team/send-task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title, body:b.value})})).json();
+    if(r.ok){ toast('Task sent to the team'); t.value=''; b.value=''; } else toast(r.error||'Send failed', true);
+    teamPoll();
+  });
+}
+function teamUpdateDynamic(s){
+  const dyn=document.getElementById('teamDyn'); if(dyn) dyn.innerHTML=activityHtml(s.activity);
+  const mem=document.getElementById('teamMembers');
+  if(mem) mem.innerHTML=(s.members||[]).map(x=> '<span class="team-chip'+(s.self&&x.id===s.self.id?' me':'')+'">'+esc(x.name)+'</span>').join('') || '<span class="team-empty">just you — waiting for teammates to join…</span>';
+  const cs=document.getElementById('teamCStatus'); if(cs) cs.innerHTML = s.connecting?'<span class="team-connecting">connecting…</span>':'';
+}
+function renderTeam(){
+  const view=document.getElementById('teamView'); if(!view) return;
+  const s=teamState||{connected:false};
+  const mode = s.connected ? 'live' : 'connect';
+  if(view.dataset.mode!==mode){
+    view.dataset.mode=mode;
+    view.innerHTML = mode==='live' ? liveHtml(s) : connectHtml(s);
+    if(mode==='live') wireLive(); else wireConnect();
+  }
+  teamUpdateDynamic(s);
+  const upd=document.getElementById('teamUpd');
+  if(upd) upd.textContent = s.connected ? ('online · '+((s.members||[]).length)+' member(s)') : (s.connecting?'connecting…':'offline');
+}
+async function teamPoll(){
+  let s; try{ s=await (await fetch('/api/team/status')).json(); }catch{ return; }
+  teamState=s;
+  const badge=document.getElementById('teamBadge');
+  if(badge){ badge.textContent = s.connected ? ('●'+((s.members||[]).length||'')) : (s.connecting?'…':''); badge.className='badge'+(s.connected?' on':''); }
+  // notify on a NEW incoming task (activity is newest-first; incoming tasks start with "from ")
+  const inc=(s.activity||[]).filter(a=> a.kind==='task' && /^from /.test(a.text));
+  const newestT = inc.length ? inc[0].t : null;
+  if(teamSeenTaskT===null){ teamSeenTaskT=newestT; }
+  else if(newestT && newestT>teamSeenTaskT){
+    teamSeenTaskT=newestT;
+    const who=(inc[0].text.match(/^from (.+?) →/)||[])[1]||'a teammate';
+    toast('📥 New task from '+who);
+    if(selected){ refreshTasks(selected); if(activeTab==='queue') loadQueue(selected); }
+  }
+  if(activeTab==='team') renderTeam();
+}
+
 document.addEventListener('keydown', (e)=>{ if(e.key==='Escape'){ fsClose(); for(const id of ['ctxOverlay','addOverlay']){ const o=document.getElementById(id); if(o){ o.classList.remove('show'); o.innerHTML=''; } } } });
-fetch('/api/env').then(r=>r.json()).then(d=>{ PICKER_OK = !!d.pickerAvailable; }).catch(()=>{});
+fetch('/api/env').then(r=>r.json()).then(d=>{ PICKER_OK = !!d.pickerAvailable; if(d.relayUrl) RELAY_URL_DEFAULT=d.relayUrl; }).catch(()=>{});
 loadSkillsList();
 load();
+teamPoll();
+setInterval(teamPoll, 3500);
 </script>
 </body>
 </html>`;
