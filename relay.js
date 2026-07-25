@@ -65,13 +65,32 @@ function safeModelName(dir, f) {
   return dest;
 }
 
-// Folder name must be filesystem-safe AND unique per teammate. slug() strips
-// non-latin entirely, so "Вова" and "Аня" would both collapse to "x" and overwrite
-// each other — keep the real name in meta.json and disambiguate the folder by id.
+// Folder name must be filesystem-safe, unique per teammate, and STABLE across their
+// reconnects. Two constraints fight here: slug() strips non-latin entirely (so "Вова"
+// and "Аня" would both collapse to "x" and overwrite each other), while the relay
+// hands out a fresh random connection id every time someone reconnects (so keying on
+// the id alone would spawn a duplicate folder per reconnect). Resolve by identity:
+// reuse the folder whose meta.json carries this display name, else mint a new one.
 function sharedDirName(from, id) {
-  const s = slug(from);
-  const tag = String(id || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 8).toLowerCase();
-  return (s === 'x' || !s) ? (tag ? 'peer-' + tag : 'peer') : (tag ? s + '-' + tag : s);
+  const base = path.join(state.projectPath, '.gitmir', 'shared');
+  const name = String(from == null ? '' : from);
+  try {
+    for (const e of fs.readdirSync(base, { withFileTypes: true })) {
+      if (!e.isDirectory()) continue;
+      try {
+        const meta = JSON.parse(fs.readFileSync(path.join(base, e.name, 'meta.json'), 'utf8'));
+        if (meta && meta.name === name) return e.name;      // same teammate, new socket
+      } catch {}
+    }
+  } catch {}
+  const s = slug(name);
+  if (s !== 'x' && s) {
+    // A latin name is already a good key; only disambiguate on a real collision.
+    if (!fs.existsSync(path.join(base, s))) return s;
+  }
+  const tag = String(id || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 8).toLowerCase()
+    || String(Math.abs([...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7))).slice(0, 8);
+  return (s !== 'x' && s) ? s + '-' + tag : 'peer-' + tag;
 }
 
 function saveSharedModel(from, files, fromId) {
