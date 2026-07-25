@@ -1218,20 +1218,36 @@ const HOLO_DEFS='<defs>'+
   '.hfield{fill:#9fb2d0;font:500 11px "JetBrains Mono",ui-monospace,monospace}'+
   '</style>';
 
+// Text must be clipped to the CARD's pixel width, not to a fixed character count —
+// a 32-char description in 11px mono is ~211px and spilled far outside a 168px node.
+// Advance widths: JetBrains Mono 11px is monospace at 0.6em = 6.6px; Onest 600 13px is
+// proportional, ~7.3px on average (rounded up so wide glyphs still fit).
+const CW_NAME = 7.3, CW_MONO = 6.6;
+function fitPx(s, px, cw){
+  const max = Math.floor(px / cw);
+  if (max < 2) return '';
+  return trunc(s, max);
+}
 function nodeSvg(n){
   const x=n.x||0,y=n.y||0,w=n.width,h=n.height,md=n.meta||{};
   const acc=ACCENTS[md.kind]||ACCENTS.entity, gl=GLYPHS[md.kind]||'•';
+  const PAD=11;                      // right-hand breathing room inside the card
+  const nameAvail = w - 14 - PAD - 13;   // 13px for the leading glyph + its space
+  const subAvail  = w - 15 - PAD;
   let inner='<rect x="0" y="0" width="'+w+'" height="'+h+'" rx="8" class="hcard" stroke="'+acc+'"/>'+
             '<rect x="0" y="0" width="3" height="'+h+'" rx="1.5" fill="'+acc+'"/>';
+  // Full text stays reachable on hover, so clipping never loses information.
+  const full=[md.label, md.sub].filter(Boolean).join(' — ');
+  if(full) inner+='<title>'+esc(full)+'</title>';
   if(md.fields && md.fields.length){
-    inner+='<text x="14" y="22" class="hname"><tspan fill="'+acc+'">'+gl+'</tspan> '+esc(trunc(md.label,24))+'</text>';
+    inner+='<text x="14" y="22" class="hname"><tspan fill="'+acc+'">'+gl+'</tspan> '+esc(fitPx(md.label,nameAvail,CW_NAME))+'</text>';
     let fy=42;
-    if(md.sub){ inner+='<text x="15" y="38" class="hsub">'+esc(trunc(md.sub,32))+'</text>'; fy=58; }
-    for(const f of md.fields){ inner+='<text x="15" y="'+fy+'" class="hfield">'+esc(trunc(f,26))+'</text>'; fy+=18; }
+    if(md.sub){ inner+='<text x="15" y="38" class="hsub">'+esc(fitPx(md.sub,subAvail,CW_MONO))+'</text>'; fy=58; }
+    for(const f of md.fields){ inner+='<text x="15" y="'+fy+'" class="hfield">'+esc(fitPx(f,subAvail,CW_MONO))+'</text>'; fy+=18; }
   } else {
     const ny = md.sub ? 21 : Math.round(h/2+4);
-    inner+='<text x="14" y="'+ny+'" class="hname"><tspan fill="'+acc+'">'+gl+'</tspan> '+esc(trunc(md.label,26))+'</text>';
-    if(md.sub) inner+='<text x="15" y="'+(ny+17)+'" class="hsub">'+esc(trunc(md.sub,32))+'</text>';
+    inner+='<text x="14" y="'+ny+'" class="hname"><tspan fill="'+acc+'">'+gl+'</tspan> '+esc(fitPx(md.label,nameAvail,CW_NAME))+'</text>';
+    if(md.sub) inner+='<text x="15" y="'+(ny+17)+'" class="hsub">'+esc(fitPx(md.sub,subAvail,CW_MONO))+'</text>';
   }
   const ref = md.ref && md.ref.id ? ' data-ck="'+esc(md.ref.k)+'" data-cid="'+esc(md.ref.id)+'"' : '';
   return '<g class="hnode'+(ref?' hclk':'')+'"'+ref+' transform="translate('+x+','+y+')">'+inner+'</g>';
@@ -1631,7 +1647,7 @@ function graphER(m){
     const fs=(e.fields||[]).slice(0,8).map(f=> (f.isPrimary?'● ':(f.type==='ref'?'◇ ':'  '))+f.name+' : '+(f.type||''));
     const sub=e.description?String(e.description):'';
     const h=32+(sub?16:0)+Math.max(1,fs.length)*18+8;
-    nodes.push({id:e.id, w:224, h, meta:{kind:'entity', label:e.name||e.id, sub, fields:fs, ref:{k:'entity',id:e.id}}});
+    nodes.push({id:e.id, w: sub?250:224, h, meta:{kind:'entity', label:e.name||e.id, sub, fields:fs, ref:{k:'entity',id:e.id}}});
   }
   for(const e of ents){
     for(const f of (e.fields||[])) if(f.type==='ref'&&f.refEntityId&&byId.has(f.refEntityId)) edges.push({from:f.refEntityId, to:e.id, kind:'data', label:f.name});
@@ -1645,7 +1661,7 @@ function graphFlow(m){
   const nodes=[], edges=[], have=new Set(); const owner=fieldOwner(m);
   const rtById=new Map(rt.map(r=>[r.id,r])), fnById=new Map(sf.map(f=>[f.id,f])), evById=new Map(ev.map(e=>[e.id,e])), entById=new Map(ent.map(e=>[e.id,e]));
   const D=o=>o&&o.description?String(o.description):'';
-  const add=(id,kind,label,sub)=>{ if(!have.has(id)){ have.add(id); nodes.push({id, w:190, h: sub?56:44, meta:{kind,label,sub:sub||'', ref:{k:kind,id}}}); } };
+  const add=(id,kind,label,sub)=>{ if(!have.has(id)){ have.add(id); nodes.push({id, w: sub?218:190, h: sub?56:44, meta:{kind,label,sub:sub||'', ref:{k:kind,id}}}); } };
   for(const f of fe){ add(f.id,'frontend',f.name,D(f)); for(const rid of (f.consumesRouteIds||[])) if(rtById.has(rid)){ add(rid,'route', rtLabel(rtById.get(rid)), D(rtById.get(rid))); edges.push({from:f.id,to:rid,kind:'spine'}); } }
   for(const f of sf){ if(f.routeId&&rtById.has(f.routeId)){ add(f.routeId,'route', rtLabel(rtById.get(f.routeId)), D(rtById.get(f.routeId))); add(f.id,'function',f.name,D(f)); edges.push({from:f.routeId,to:f.id,kind:'spine'}); } }
   for(const f of sf){ if(!have.has(f.id)) continue;
@@ -1785,7 +1801,7 @@ async function renderEntityLogic(container, entId, m){
 function graphLifecycle(fl, m){
   const nodes=[], edges=[]; const states=fl.states||[], trans=fl.transitions||[];
   const sid=k=>'st_'+mSafe(k);
-  for(const st of states) nodes.push({id:sid(st.key), w:168, h: (st.description||st.ownerRole)?50:44, meta:{kind:'state', label:st.name||st.key, sub: st.description||st.ownerRole||'', ref:{k:'entity',id:fl.entityId}}});
+  for(const st of states) nodes.push({id:sid(st.key), w:(st.description||st.ownerRole)?212:168, h: (st.description||st.ownerRole)?50:44, meta:{kind:'state', label:st.name||st.key, sub: st.description||st.ownerRole||'', ref:{k:'entity',id:fl.entityId}}});
   const targets=new Set(trans.map(t=>t.to));
   const initials=states.filter(st=>!targets.has(st.key));
   if(initials.length){ nodes.push({id:'START', w:118, h:38, meta:{kind:'start', label:'created', ref:{k:'entity',id:fl.entityId}}}); for(const st of initials) edges.push({from:'START', to:sid(st.key), kind:'spine'}); }
@@ -1811,7 +1827,7 @@ function graphProcess(p, m, hi){
   steps.forEach((st,i)=>{
     const kind = st.refKind==='entity'?'entity' : st.refKind==='route'?'route' : st.refKind==='event'?'event' : st.refKind==='frontend'?'frontend' : 'function';
     const desc = st.note || refDesc(st.refKind, st.refId, m) || st.refKind;
-    nodes.push({id:'ps'+i, w:194, h:56, meta:{kind, label:resolveRef(st.refKind,st.refId,m), sub: desc+(st.refId===hi?'  ◄':''), ref:{k:st.refKind,id:st.refId}}});
+    nodes.push({id:'ps'+i, w:218, h:56, meta:{kind, label:resolveRef(st.refKind,st.refId,m), sub: desc+(st.refId===hi?'  ◄':''), ref:{k:st.refKind,id:st.refId}}});
     if(i>0) edges.push({from:'ps'+(i-1), to:'ps'+i, kind:'spine'});
   });
   return {direction:'RIGHT', nodes, edges};
