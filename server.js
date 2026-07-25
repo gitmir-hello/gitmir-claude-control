@@ -1223,11 +1223,34 @@ const HOLO_DEFS='<defs>'+
 // Advance widths: JetBrains Mono 11px is monospace at 0.6em = 6.6px; Onest 600 13px is
 // proportional, ~7.3px on average (rounded up so wide glyphs still fit).
 const CW_NAME = 7.3, CW_MONO = 6.6;
+const SUB_LH = 15;                 // line height of a description line
 function fitPx(s, px, cw){
   const max = Math.floor(px / cw);
   if (max < 2) return '';
   return trunc(s, max);
 }
+// Wrap a description across as many lines as it needs, so nothing is lost to an
+// ellipsis. Words that are longer than a line (a long id, a path) are hard-split.
+function wrapPx(s, px, cw){
+  const max = Math.max(6, Math.floor(px / cw));
+  // NOTE: this whole script is emitted from a template literal, so the backslash
+  // must be doubled here — a bare \\s would reach the browser as /s+/ and split
+  // the text on the letter "s" ("workspace" -> "work pace").
+  const words = String(s == null ? '' : s).trim().split(/\\s+/).filter(Boolean);
+  const lines = [];
+  let cur = '';
+  const pushLong = (w) => { let r = w; while (r.length > max) { lines.push(r.slice(0, max)); r = r.slice(max); } return r; };
+  for (const w of words) {
+    if (!cur) { cur = w.length > max ? pushLong(w) : w; continue; }
+    if ((cur + ' ' + w).length <= max) { cur += ' ' + w; continue; }
+    lines.push(cur);
+    cur = w.length > max ? pushLong(w) : w;
+  }
+  if (cur) lines.push(cur);
+  return lines.length ? lines : [];
+}
+// Card height for a node that shows a title plus N description lines.
+const subH = (n) => 50 + Math.max(0, n - 1) * SUB_LH;
 function nodeSvg(n){
   const x=n.x||0,y=n.y||0,w=n.width,h=n.height,md=n.meta||{};
   const acc=ACCENTS[md.kind]||ACCENTS.entity, gl=GLYPHS[md.kind]||'•';
@@ -1239,15 +1262,20 @@ function nodeSvg(n){
   // Full text stays reachable on hover, so clipping never loses information.
   const full=[md.label, md.sub].filter(Boolean).join(' — ');
   if(full) inner+='<title>'+esc(full)+'</title>';
+  // The description is shown in FULL, wrapped over as many lines as it needs; the
+  // builder sized the card from the same line count.
+  const lines = md.subLines && md.subLines.length ? md.subLines
+              : (md.sub ? wrapPx(md.sub, subAvail, CW_MONO) : []);
+  const subText = (startY) => lines.map((l,i)=>'<text x="15" y="'+(startY+i*SUB_LH)+'" class="hsub">'+esc(l)+'</text>').join('');
   if(md.fields && md.fields.length){
     inner+='<text x="14" y="22" class="hname"><tspan fill="'+acc+'">'+gl+'</tspan> '+esc(fitPx(md.label,nameAvail,CW_NAME))+'</text>';
     let fy=42;
-    if(md.sub){ inner+='<text x="15" y="38" class="hsub">'+esc(fitPx(md.sub,subAvail,CW_MONO))+'</text>'; fy=58; }
+    if(lines.length){ inner+=subText(38); fy = 38 + lines.length*SUB_LH + 5; }
     for(const f of md.fields){ inner+='<text x="15" y="'+fy+'" class="hfield">'+esc(fitPx(f,subAvail,CW_MONO))+'</text>'; fy+=18; }
   } else {
-    const ny = md.sub ? 21 : Math.round(h/2+4);
+    const ny = lines.length ? 21 : Math.round(h/2+4);
     inner+='<text x="14" y="'+ny+'" class="hname"><tspan fill="'+acc+'">'+gl+'</tspan> '+esc(fitPx(md.label,nameAvail,CW_NAME))+'</text>';
-    if(md.sub) inner+='<text x="15" y="'+(ny+17)+'" class="hsub">'+esc(fitPx(md.sub,subAvail,CW_MONO))+'</text>';
+    if(lines.length) inner+=subText(ny+17);
   }
   const ref = md.ref && md.ref.id ? ' data-ck="'+esc(md.ref.k)+'" data-cid="'+esc(md.ref.id)+'"' : '';
   return '<g class="hnode'+(ref?' hclk':'')+'"'+ref+' transform="translate('+x+','+y+')">'+inner+'</g>';
@@ -1646,8 +1674,10 @@ function graphER(m){
   for(const e of ents){
     const fs=(e.fields||[]).slice(0,8).map(f=> (f.isPrimary?'● ':(f.type==='ref'?'◇ ':'  '))+f.name+' : '+(f.type||''));
     const sub=e.description?String(e.description):'';
-    const h=32+(sub?16:0)+Math.max(1,fs.length)*18+8;
-    nodes.push({id:e.id, w: sub?250:224, h, meta:{kind:'entity', label:e.name||e.id, sub, fields:fs, ref:{k:'entity',id:e.id}}});
+    const W = sub?250:224;
+    const L = sub ? wrapPx(sub, W-15-11, CW_MONO) : [];
+    const h = 32 + (L.length?L.length*SUB_LH+5:0) + Math.max(1,fs.length)*18 + 8;
+    nodes.push({id:e.id, w:W, h, meta:{kind:'entity', label:e.name||e.id, sub, subLines:L, fields:fs, ref:{k:'entity',id:e.id}}});
   }
   for(const e of ents){
     for(const f of (e.fields||[])) if(f.type==='ref'&&f.refEntityId&&byId.has(f.refEntityId)) edges.push({from:f.refEntityId, to:e.id, kind:'data', label:f.name});
@@ -1661,7 +1691,10 @@ function graphFlow(m){
   const nodes=[], edges=[], have=new Set(); const owner=fieldOwner(m);
   const rtById=new Map(rt.map(r=>[r.id,r])), fnById=new Map(sf.map(f=>[f.id,f])), evById=new Map(ev.map(e=>[e.id,e])), entById=new Map(ent.map(e=>[e.id,e]));
   const D=o=>o&&o.description?String(o.description):'';
-  const add=(id,kind,label,sub)=>{ if(!have.has(id)){ have.add(id); nodes.push({id, w: sub?218:190, h: sub?56:44, meta:{kind,label,sub:sub||'', ref:{k:kind,id}}}); } };
+  const add=(id,kind,label,sub)=>{ if(!have.has(id)){ have.add(id);
+    const W = sub?218:190;
+    const L = sub ? wrapPx(sub, W-15-11, CW_MONO) : [];
+    nodes.push({id, w:W, h: L.length?subH(L.length):44, meta:{kind,label,sub:sub||'', subLines:L, ref:{k:kind,id}}}); } };
   for(const f of fe){ add(f.id,'frontend',f.name,D(f)); for(const rid of (f.consumesRouteIds||[])) if(rtById.has(rid)){ add(rid,'route', rtLabel(rtById.get(rid)), D(rtById.get(rid))); edges.push({from:f.id,to:rid,kind:'spine'}); } }
   for(const f of sf){ if(f.routeId&&rtById.has(f.routeId)){ add(f.routeId,'route', rtLabel(rtById.get(f.routeId)), D(rtById.get(f.routeId))); add(f.id,'function',f.name,D(f)); edges.push({from:f.routeId,to:f.id,kind:'spine'}); } }
   for(const f of sf){ if(!have.has(f.id)) continue;
@@ -1694,10 +1727,14 @@ async function renderProcesses(view, m){
 }
 
 // ----- business logic (entity-centric) -----
-function effLabel(ef, m){
+// "create Payment" — what the effect does, without its prose description.
+function effHead(ef, m){
   const en=ef.entityId ? (((m.entities||[]).find(x=>x.id===ef.entityId)||{}).name||'') : '';
   const tgt=[en, ef.fieldName].filter(Boolean).join('.');
-  return (EFF_RU[ef.kind]||ef.kind)+(tgt?' '+tgt:'')+(ef.description?' — '+ef.description:'');
+  return (EFF_RU[ef.kind]||ef.kind)+(tgt?' '+tgt:'');
+}
+function effLabel(ef, m){
+  return effHead(ef, m)+(ef.description?' — '+ef.description:'');
 }
 function entName(id, m){ const x=(m.entities||[]).find(y=>y.id===id); return x?x.name:id; }
 function fieldOwner(m){ const map=new Map(); for(const e of (m.entities||[])) for(const f of (e.fields||[])) map.set(f.id, e.id); return map; }
@@ -1801,7 +1838,12 @@ async function renderEntityLogic(container, entId, m){
 function graphLifecycle(fl, m){
   const nodes=[], edges=[]; const states=fl.states||[], trans=fl.transitions||[];
   const sid=k=>'st_'+mSafe(k);
-  for(const st of states) nodes.push({id:sid(st.key), w:(st.description||st.ownerRole)?212:168, h: (st.description||st.ownerRole)?50:44, meta:{kind:'state', label:st.name||st.key, sub: st.description||st.ownerRole||'', ref:{k:'entity',id:fl.entityId}}});
+  for(const st of states){
+    const sub = st.description||st.ownerRole||'';
+    const W = sub?212:168;
+    const L = sub ? wrapPx(sub, W-15-11, CW_MONO) : [];
+    nodes.push({id:sid(st.key), w:W, h: L.length?subH(L.length):44, meta:{kind:'state', label:st.name||st.key, sub, subLines:L, ref:{k:'entity',id:fl.entityId}}});
+  }
   const targets=new Set(trans.map(t=>t.to));
   const initials=states.filter(st=>!targets.has(st.key));
   if(initials.length){ nodes.push({id:'START', w:118, h:38, meta:{kind:'start', label:'created', ref:{k:'entity',id:fl.entityId}}}); for(const st of initials) edges.push({from:'START', to:sid(st.key), kind:'spine'}); }
@@ -1813,11 +1855,20 @@ function graphLifecycle(fl, m){
     const trig = named || guard || ('→ '+toName);
     const sub  = named ? [guard, '→ '+toName].filter(Boolean).join(' · ')
                        : (guard ? '→ '+toName : '');
-    const wch=Math.max(trig.length, sub.length);
-    const tn='tr'+i; nodes.push({id:tn, w:Math.max(132,Math.min(262, wch*7+30)), h: sub?50:40, meta:{kind:'trigger', label:trig, sub, ref:{k:'entity',id:fl.entityId}}});
+    const W=Math.max(140,Math.min(262, Math.max(trig.length*7+40, sub.length*6.6+30)));
+    const L = sub ? wrapPx(sub, W-15-11, CW_MONO) : [];
+    const tn='tr'+i; nodes.push({id:tn, w:Math.round(W), h: L.length?subH(L.length):40, meta:{kind:'trigger', label:trig, sub, subLines:L, ref:{k:'entity',id:fl.entityId}}});
     edges.push({from:sid(t.from), to:tn, kind:'spine'});
     edges.push({from:tn, to:sid(t.to), kind:'branch'});
-    (t.effects||[]).forEach((ef,j)=>{ const en='ef'+i+'_'+j, lbl=effLabel(ef,m); nodes.push({id:en, w:Math.max(150,Math.min(270,lbl.length*6.4+28)), h:40, meta:{kind:'effect', label:lbl, ref: ef.entityId?{k:'entity',id:ef.entityId}:{k:'entity',id:fl.entityId}}}); edges.push({from:tn, to:en, kind:'effect'}); });
+    // An effect's own description goes on its own wrapped lines rather than being
+    // glued onto the title, where it used to be cut off with an ellipsis.
+    (t.effects||[]).forEach((ef,j)=>{
+      const en='ef'+i+'_'+j, head=effHead(ef,m), desc=ef.description?String(ef.description):'';
+      const W=Math.max(160,Math.min(272, Math.max(head.length*7+40, desc.length*6.6/2+40)));
+      const L = desc ? wrapPx(desc, W-15-11, CW_MONO) : [];
+      nodes.push({id:en, w:Math.round(W), h: L.length?subH(L.length):40, meta:{kind:'effect', label:head, sub:desc, subLines:L, ref: ef.entityId?{k:'entity',id:ef.entityId}:{k:'entity',id:fl.entityId}}});
+      edges.push({from:tn, to:en, kind:'effect'});
+    });
   });
   return {direction:'DOWN', nodes, edges};
 }
@@ -1827,7 +1878,9 @@ function graphProcess(p, m, hi){
   steps.forEach((st,i)=>{
     const kind = st.refKind==='entity'?'entity' : st.refKind==='route'?'route' : st.refKind==='event'?'event' : st.refKind==='frontend'?'frontend' : 'function';
     const desc = st.note || refDesc(st.refKind, st.refId, m) || st.refKind;
-    nodes.push({id:'ps'+i, w:218, h:56, meta:{kind, label:resolveRef(st.refKind,st.refId,m), sub: desc+(st.refId===hi?'  ◄':''), ref:{k:st.refKind,id:st.refId}}});
+    const sub = desc+(st.refId===hi?'  ◄':'');
+    const L = wrapPx(sub, 218-15-11, CW_MONO);
+    nodes.push({id:'ps'+i, w:218, h: L.length?subH(L.length):44, meta:{kind, label:resolveRef(st.refKind,st.refId,m), sub, subLines:L, ref:{k:st.refKind,id:st.refId}}});
     if(i>0) edges.push({from:'ps'+(i-1), to:'ps'+i, kind:'spine'});
   });
   return {direction:'RIGHT', nodes, edges};
