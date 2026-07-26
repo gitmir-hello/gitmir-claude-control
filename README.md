@@ -6,7 +6,8 @@
 
 A local, single-file dashboard that runs [Claude Code](https://www.anthropic.com/claude-code) across all your projects, builds a living model of each one from the real code, and turns any piece of that model into a precisely-briefed task.
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPL_v3-2fd8ff.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-2fd8ff.svg)](LICENSE)
+[![Commercial license](https://img.shields.io/badge/commercial_license-available-2fd8ff.svg)](LICENSING.md)
 [![Node](https://img.shields.io/badge/node-%E2%89%A518-2fd8ff.svg)](https://nodejs.org)
 [![Platform](https://img.shields.io/badge/platform-macOS%20·%20Windows%20·%20Linux-2fd8ff.svg)](#requirements)
 [![Dependencies](https://img.shields.io/badge/npm_deps-0-2fd8ff.svg)](#)
@@ -199,7 +200,7 @@ cyan `#2fd8ff`, sharp technical plates with glowing corner brackets, `Onest` +
 
 We built this for ourselves. We run Claude Code all day across dozens of projects,
 and these two problems — launching, and losing the thread — were ours first. It
-turned out useful enough to share, free and open source under GPL-3.0.
+turned out useful enough to share, free and open source under AGPL-3.0.
 
 **[GitMir](https://gitmir.com)** is the team layer on top of it: the accounts, the
 teams and the bridge that connects your machines. Your code and your model stay where
@@ -216,4 +217,17 @@ Bundled libraries and fonts ship under their own licenses — see
 
 ## License
 
-[GPL-3.0](LICENSE) © GITMIR
+**Dual-licensed** — pick the one that fits you:
+
+- **[AGPL-3.0](LICENSE)** (free, OSI-approved open source). Run it, read it, fork it.
+  If you distribute it or run a *modified* version as a service for other people, your
+  version's source has to be available under the AGPL too. Using it on your own machine
+  for your own work — including paid work — costs nothing and never will.
+- **[Commercial license](LICENSING.md)** — for organisations whose policy forbids AGPL,
+  for embedding this in a closed-source product, or for offering it as a hosted service
+  with your changes kept private. Also the route to a signed agreement, warranty or
+  support. Write to **hello@gitmir.com**.
+
+Details and the reasoning: **[LICENSING.md](LICENSING.md)**.
+
+© GITMIR. The GITMIR name and logo are trademarks and are not covered by either license.

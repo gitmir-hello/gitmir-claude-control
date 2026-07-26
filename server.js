@@ -1,4 +1,13 @@
 'use strict';
+// GITMIR Claude Control — local dashboard for running Claude Code across projects.
+// Copyright (C) 2026 GITMIR
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This program is free software: you can redistribute it and/or modify it under the
+// terms of the GNU Affero General Public License as published by the Free Software
+// Foundation, either version 3 of the License, or (at your option) any later version.
+// It is distributed WITHOUT ANY WARRANTY; see the LICENSE file for the full text.
+// A commercial license is also available — see LICENSING.md.
 
 const http = require('http');
 const fs = require('fs');
@@ -874,6 +883,11 @@ const HTML = /* html */ `<!doctype html>
   .brand .c{ font-family:var(--font-mono); letter-spacing:.04em; text-transform:none }
   .brand-logo{ height:19px; width:auto; display:block; filter:drop-shadow(0 0 8px rgba(47,216,255,.45)); -webkit-user-select:none; user-select:none }
   .brand-sub{ font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; color:var(--ink-2); text-transform:uppercase; padding-left:10px; border-left:1px solid var(--glass-brd) }
+  /* AGPL-3.0 section 13: anyone using this over a network must be able to get the source. */
+  .side-foot{ display:flex; align-items:center; gap:8px; padding:10px 16px; border-top:1px solid var(--glass-brd); flex-shrink:0 }
+  .brand-src{ font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3); text-decoration:none; border:1px solid var(--faint); padding:3px 8px }
+  .brand-src:hover{ color:var(--cyan); border-color:rgba(47,216,255,.45) }
+  .foot-lic{ font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em; color:var(--ink-3) }
   .dot{ background:var(--cyan); box-shadow:0 0 10px var(--cyan) }
 
   /* buttons */
@@ -966,6 +980,10 @@ const HTML = /* html */ `<!doctype html>
       <input class="search" id="search" placeholder="Search…" autocomplete="off">
     </div>
     <div class="list" id="list"></div>
+    <div class="side-foot">
+      <a class="brand-src" href="https://github.com/gitmir-hello/gitmir-claude-control" target="_blank" rel="noopener">Source</a>
+      <span class="foot-lic">AGPL-3.0</span>
+    </div>
   </aside>
 
   <main class="main" id="main">
