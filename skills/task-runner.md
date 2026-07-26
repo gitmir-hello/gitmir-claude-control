@@ -59,7 +59,8 @@ Rules while verifying:
         # Fix: <what is broken, in a few words>
 
         Type: fix
-        Fixes: <the original task's filename>
+        Fixes: <the original task's id — its filename WITHOUT the .md suffix,
+                e.g. 001-add-refund-button — this is what links the two>
         Attempt: 1
 
         ## Context

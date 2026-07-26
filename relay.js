@@ -224,7 +224,9 @@ function parseCriteria(md) {
   let inSec = false;
   for (const line of lines) {
     if (/^#{1,6}\s/.test(line)) {
-      inSec = /^#{1,6}\s*(verify|verification|acceptance|acceptance criteria|criteria)\s*$/i.test(line.trim());
+      // NB: "## Verification" is the RESULTS section — it must not leak into the
+      // criteria, or the "what does done mean" list fills up with PASS/FAIL lines.
+      inSec = /^#{1,6}\s*(verify|acceptance|acceptance criteria|criteria)\s*$/i.test(line.trim());
       continue;
     }
     if (!inSec) continue;
@@ -233,6 +235,56 @@ function parseCriteria(md) {
     if (out.length >= Q_MAX_CRIT) break;
   }
   return out;
+}
+
+// The runner records what it actually observed under "## Verification":
+//   1. `npm run build` — PASS
+//   3. POST /api/orders with {"items":[]} — FAIL: responded 500, expected 400
+// Turning that into per-criterion results is what lets the web view show proof
+// ("3 of 4 checks passed, failing: …") instead of a status word.
+function parseCriteriaResults(md) {
+  const lines = String(md || '').split('\n');
+  const out = [];
+  let inSec = false;
+  for (const line of lines) {
+    if (/^#{1,6}\s/.test(line)) {
+      inSec = /^#{1,6}\s*(verification|results?)\s*$/i.test(line.trim());
+      continue;
+    }
+    if (!inSec) continue;
+    const m = line.match(/^\s*(?:\d+[.)]|[-*+])\s+(.*\S)/);
+    if (!m) continue;
+    const raw = m[1].trim();
+    const failed = /\bFAIL(ED)?\b/i.test(raw);
+    const passed = !failed && /\bPASS(ED)?\b/i.test(raw);
+    // Everything that is neither a pass nor an explicit fail (not run, BLOCKED,
+    // NEEDS HUMAN) is reported as not-ok with the reason kept in `note` — it must
+    // never read as a pass.
+    const text = raw.replace(/\s*[—–-]?\s*\b(PASS(ED)?|FAIL(ED)?)\b.*$/i, '').trim() || raw.slice(0, 200);
+    const noteM = raw.match(/\b(?:FAIL(?:ED)?|BLOCKED|NEEDS HUMAN)\b:?\s*(.+)$/i);
+    const entry = { text: text.slice(0, Q_MAX_CRIT_LEN), ok: passed };
+    const note = noteM ? noteM[1].trim() : (passed ? '' : raw);
+    if (!passed && note) entry.note = note.slice(0, Q_MAX_CRIT_LEN);
+    out.push(entry);
+    if (out.length >= Q_MAX_CRIT) break;
+  }
+  return out;
+}
+
+// `Type:`, `Fixes:` and `Attempt:` headers the planner/runner write, lifted into
+// structured fields so the web view never has to parse a task body.
+function parseMeta(md) {
+  const head = String(md || '').split('\n').slice(0, 12).join('\n');
+  const kind = (head.match(/^\s*Type:\s*(build|verify|fix)\s*$/im) || [])[1];
+  const fixesRaw = (head.match(/^\s*Fixes:\s*(.+?)\s*$/im) || [])[1];
+  const attempt = parseInt((head.match(/^\s*Attempt:\s*(\d+)\s*$/im) || [])[1], 10);
+  const meta = {};
+  if (kind) meta.kind = kind.toLowerCase();
+  // Always an id (the filename stem), never a filename — that is what links it to
+  // the task the web app already has.
+  if (fixesRaw) meta.fixes = fixesRaw.replace(/\.md$/i, '').trim().slice(0, 200);
+  if (!Number.isNaN(attempt)) meta.attempt = attempt;
+  return meta;
 }
 
 function readQueue() {
@@ -254,6 +306,7 @@ function readQueue() {
       const title = hi >= 0 ? lines[hi].replace(/^#\s+/, '').trim().slice(0, 200) : f.replace(/\.md$/, '');
       const body = (hi >= 0 ? lines.slice(hi + 1) : lines).join('\n').trim().slice(0, Q_MAX_BODY);
       const num = parseInt(f, 10);
+      const results = parseCriteriaResults(raw);
       tasks.push({
         // The id is the filename STEM, so a task keeps its identity as the runner
         // moves it between folders — otherwise the client sees it once per status.
@@ -261,6 +314,8 @@ function readQueue() {
         title, body, status,
         order: Number.isNaN(num) ? 0 : num,
         criteria: parseCriteria(raw),
+        ...(results.length ? { criteriaResults: results } : {}),
+        ...parseMeta(raw),
       });
       if (tasks.length >= Q_MAX_TASKS) break;
     }
