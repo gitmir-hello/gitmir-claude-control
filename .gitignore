@@ -4,8 +4,10 @@ team.json
 .claude/
 /.gitmir/
 
-# internal handoff notes (references the private dev repo — keep out of OSS)
+# internal handoff notes / specs (reference the private dev repo, customers, contracts)
 TEAM_BRIDGE_TASKS.md
+TEAM_BRIDGE_ROUND_2.md
+SPEC.md
 
 # dependencies / env
 node_modules/
