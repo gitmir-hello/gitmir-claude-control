@@ -495,9 +495,9 @@ const server = http.createServer(async (req, res) => {
     }
     // ---- team bridge (connect local machines through the GitMir relay) ----
     if (req.method === 'POST' && url.pathname === '/api/team/connect') {
-      const { key, name, path: projectPath, url: relayUrl } = await readBody(req);
+      const { key, name, path: projectPath, projectId, url: relayUrl } = await readBody(req);
       if (!key) return sendJSON(res, 400, { error: 'no key' });
-      relay.connect({ key, name, projectPath, url: relayUrl });
+      relay.connect({ key, name, projectPath, projectId, url: relayUrl });
       return sendJSON(res, 200, { ok: true, status: relay.status() });
     }
     if (req.method === 'GET' && url.pathname === '/api/team/status') {
@@ -838,6 +838,14 @@ const HTML = /* html */ `<!doctype html>
   .team-cstate,.team-connecting{font-family:var(--font-mono); font-size:12px; color:var(--cyan-soft)}
   .team-err{font-family:var(--font-mono); font-size:12px; color:#ff7080; line-height:1.5; display:block; margin-top:4px}
   .team-status-row{display:flex; align-items:center; gap:14px; flex-wrap:wrap; font-family:var(--font-mono); font-size:12px; letter-spacing:.03em}
+  .team-mirror{margin-top:14px; padding:11px 13px; border:1px solid var(--line); background:rgba(8,16,36,.45)}
+  .mirror-hd{display:flex; align-items:center; gap:9px; font-size:13px; color:var(--txt)}
+  .mirror-dot{width:9px; height:9px; border-radius:50%; flex-shrink:0; background:var(--ok); box-shadow:0 0 9px var(--ok)}
+  .mirror-dot.tasks{background:#ffb86b; box-shadow:0 0 9px #ffb86b}
+  .mirror-dot.full{background:#ff7080; box-shadow:0 0 9px #ff7080}
+  .mirror-lvl{margin-left:auto; font-family:var(--font-mono); font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim2); border:1px solid var(--faint); padding:2px 8px}
+  .mirror-note{margin-top:6px; font-size:12px; line-height:1.5; color:var(--dim)}
+  .lbl-hint{text-transform:none; letter-spacing:0; color:var(--dim2); font-weight:400; margin-left:6px; font-family:var(--font-mono); font-size:10.5px}
   .team-dot{width:9px; height:9px; border-radius:50%; background:var(--dim2); display:inline-block}
   .team-dot.on{background:var(--ok); box-shadow:0 0 10px var(--ok)}
   .team-self{color:var(--txt); font-weight:600}
@@ -2057,7 +2065,8 @@ function connectHtml(s){
   +   '<div class="team-lede">Connect this machine to your team through the GitMir relay. The relay only <b>routes</b> — your model and tasks move between your team\\'s machines and nothing is stored on our servers. Requires a paid Team plan.</div>'
   +   '<div class="field"><label>Workspace key</label><input class="ti" id="teamKey" placeholder="wsk_…" autocomplete="off" spellcheck="false"></div>'
   +   '<div class="field"><label>Display name</label><input class="ti" id="teamName" placeholder="Your name"></div>'
-  +   '<div class="field"><label>Bind to project</label><select class="ti" id="teamProj"></select></div>'
+  +   '<div class="field"><label>Project ID <span class="lbl-hint">from the Team bridge panel at ide.gitmir.com — this is the room</span></label><input class="ti" id="teamPid" placeholder="e.g. cms0a1b2c3" autocomplete="off" spellcheck="false"></div>'
+  +   '<div class="field"><label>Bind to project <span class="lbl-hint">the local folder this machine works in</span></label><select class="ti" id="teamProj"></select></div>'
   +   '<div class="field"><label>Relay URL</label><input class="ti" id="teamUrl" placeholder="ws://localhost:4600" spellcheck="false"></div>'
   +   '<div class="team-actions"><button class="run" id="teamConnectBtn">▚ Connect</button><span class="team-cstate" id="teamCStatus"></span></div>'
   + '</div>'
@@ -2073,6 +2082,7 @@ function liveHtml(s){
   +     '<span class="team-plan">plan: '+esc(s.plan||'—')+'</span>'
   +     '<span class="team-bound">'+bound+'</span>'
   +   '</div>'
+  +   '<div class="team-mirror" id="teamMirror"></div>'
   +   '<div class="team-members" id="teamMembers"></div>'
   +   '<div class="team-ops"><button class="ghost" id="teamShareBtn">⇪ Share model</button><button class="del" id="teamDiscBtn">Disconnect</button></div>'
   + '</div>'
@@ -2093,6 +2103,7 @@ function wireConnect(){
   if(wantPath) sel.value = wantPath;
   view.querySelector('#teamKey').value = mem.key || '';
   view.querySelector('#teamName').value = mem.name || '';
+  view.querySelector('#teamPid').value = mem.projectId || '';
   view.querySelector('#teamUrl').value = mem.url || (teamState && teamState.url) || RELAY_URL_DEFAULT;
   view.querySelector('#teamConnectBtn').addEventListener('click', teamDoConnect);
 }
@@ -2101,12 +2112,13 @@ async function teamDoConnect(){
   const key=view.querySelector('#teamKey').value.trim();
   const name=view.querySelector('#teamName').value.trim();
   const path=view.querySelector('#teamProj').value;
+  const projectId=view.querySelector('#teamPid').value.trim();
   const url=view.querySelector('#teamUrl').value.trim();
   if(!key){ toast('Enter a workspace key', true); return; }
-  saveTeamMem({key,name,url,path});
+  saveTeamMem({key,name,url,path,projectId});
   const cs=view.querySelector('#teamCStatus'); if(cs) cs.innerHTML='<span class="team-connecting">connecting…</span>';
   try{
-    const r=await (await fetch('/api/team/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,name,path,url})})).json();
+    const r=await (await fetch('/api/team/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,name,path,projectId,url})})).json();
     teamState=r.status||teamState;
   }catch{ toast('Connect failed', true); }
   teamPoll();
@@ -2114,6 +2126,11 @@ async function teamDoConnect(){
 function wireLive(){
   const view=document.getElementById('teamView'); if(!view) return;
   view.querySelector('#teamShareBtn').addEventListener('click', async ()=>{
+    // One honest line: at 'full' the snapshot is kept on GitMir, not just passed on.
+    if(teamState && teamState.sharing==='full' && !sessionStorage.getItem('gm.fullWarn')){
+      sessionStorage.setItem('gm.fullWarn','1');
+      toast('Note: this project mirrors at "full" — the model snapshot is stored on GitMir, not only passed to teammates.');
+    }
     const r=await (await fetch('/api/team/share-model',{method:'POST'})).json();
     toast(r.ok?'Model shared with the team':(r.error||'No local .gitmir/model to share'), !r.ok);
     teamPoll();
@@ -2130,7 +2147,21 @@ function wireLive(){
     teamPoll();
   });
 }
+// The owner flips this switch, but it is THIS machine that uploads — so it is stated
+// plainly and always, never behind a tooltip. Spec 4.3.
+function mirrorHtml(s){
+  const lvl=s.sharing||'local';
+  const label={local:'Nothing leaves this machine',tasks:'This project mirrors: the task queue',full:'This project mirrors: the task queue + the product model'}[lvl]
+    || 'Nothing leaves this machine';
+  const note={local:'The relay routes between your machines live and keeps nothing.',
+              tasks:'Task titles, bodies, status and acceptance criteria are stored on GitMir so your team can follow along. Source code never is.',
+              full:'Tasks and a snapshot of .gitmir/model are stored on GitMir. Source code never is.'}[lvl]||'';
+  return '<div class="mirror-hd"><span class="mirror-dot '+esc(lvl)+'"></span><b>'+esc(label)+'</b>'
+    + '<span class="mirror-lvl">'+esc(lvl)+'</span></div>'
+    + '<div class="mirror-note">'+esc(note)+' Set by the project owner at ide.gitmir.com — it cannot be changed from here.</div>';
+}
 function teamUpdateDynamic(s){
+  const mir=document.getElementById('teamMirror'); if(mir) mir.innerHTML=mirrorHtml(s);
   const dyn=document.getElementById('teamDyn'); if(dyn) dyn.innerHTML=activityHtml(s.activity);
   const mem=document.getElementById('teamMembers');
   if(mem) mem.innerHTML=(s.members||[]).map(x=> '<span class="team-chip'+(s.self&&x.id===s.self.id?' me':'')+'">'+esc(x.name)+'</span>').join('') || '<span class="team-empty">just you — waiting for teammates to join…</span>';

@@ -74,12 +74,29 @@ teammates' machines through the GitMir relay. It is **off until you turn it on**
 you enter a workspace key, pick a project, and click Connect. It follows the same
 rule as everything else here: **the relay routes, it does not store.**
 
-- **Only what you choose transits it.** Nothing is shared automatically. A model
-  snapshot (your `.gitmir/model` JSON) leaves your machine only when you click
-  **Share model**; a task (a title and some text) leaves only when you click
-  **Send task**. Incoming items from teammates are written to *your* local disk —
-  a shared model to `.gitmir/shared/<teammate>/`, a task to `tasks/todo/` — so you
-  read and act on them in your own local instance.
+- **While it is connected, your task queue is published to the room — automatically.**
+  This is the point of the bridge: your teammates (and, on a paid plan, the client
+  paying to follow along) see what you are working on and what is next. So be precise
+  about what that means. While the Team panel is connected, the tool watches
+  `tasks/todo`, `tasks/inprogress`, `tasks/verify` and `tasks/done` and sends the room
+  an updated list whenever a file changes: each task's **title, body text, status,
+  order and acceptance criteria**. It is your task notes that travel — **never your
+  source code**. Disconnect and it stops immediately.
+- **The model is shared when you ask, or automatically only at the `full` level.** A
+  snapshot of `.gitmir/model` leaves your machine when you click **Share model**, and —
+  if the project owner set mirroring to `full` — when the model changes. At any lower
+  level a snapshot is not sent.
+- **How much is *stored* is set by the project owner, and the tool always shows it.**
+  The Team panel states the current level in plain words — *"Nothing leaves this
+  machine"*, *"This project mirrors: the task queue"*, or *"…the task queue + the
+  product model"* — and updates the moment the owner changes it. You cannot change the
+  level from here; you can always see it, and you can always disconnect.
+- **Source code is never uploaded, at any level.** Not behind a flag, not as an
+  attachment. There is no code path in this tool that sends file contents from your
+  repository, and no endpoint on the server that would accept them.
+- Incoming items from teammates are written to *your* local disk — a shared model to
+  `.gitmir/shared/<teammate>/`, a task to `tasks/todo/` — so you read and act on them
+  in your own local instance.
 - **The relay stores no business logic.** It forwards live messages between the
   online members of your team and keeps nothing at rest. Your code and your model
   live on your machines; the relay's only job is connectivity. This is what makes
