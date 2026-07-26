@@ -304,7 +304,7 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 200, { tasks: [], updated: null });
       }
     }
-    // ---- file-based task queue: tasks/{todo,inprogress,done}/*.md ----
+    // ---- file-based task queue: tasks/{todo,inprogress,verify,done}/*.md ----
     if (req.method === 'POST' && url.pathname === '/api/task') {
       const { path: p, title, content } = await readBody(req);
       if (!p || !content) return sendJSON(res, 400, { error: 'no path/content' });
@@ -318,7 +318,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/api/queue') {
       const p = url.searchParams.get('path') || '';
-      const cols = ['todo', 'inprogress', 'done'];
+      const cols = ['todo', 'inprogress', 'verify', 'done'];
       const out = {};
       for (const c of cols) {
         const dir = path.join(p, 'tasks', c);
@@ -342,7 +342,7 @@ const server = http.createServer(async (req, res) => {
       const p = url.searchParams.get('path') || '';
       const col = url.searchParams.get('col') || '';
       const file = path.basename(url.searchParams.get('file') || ''); // basename strips any traversal
-      if (!p || !['todo', 'inprogress', 'done'].includes(col) || !file.endsWith('.md')) {
+      if (!p || !['todo', 'inprogress', 'verify', 'done'].includes(col) || !file.endsWith('.md')) {
         return sendJSON(res, 400, { error: 'bad request' });
       }
       const full = path.join(p, 'tasks', col, file);
@@ -812,7 +812,7 @@ const HTML = /* html */ `<!doctype html>
   .ctx-actions .del{margin-left:auto}
 
   /* task queue */
-  .q-cols{display:grid; grid-template-columns:repeat(3,1fr); gap:14px}
+  .q-cols{display:grid; grid-template-columns:repeat(4,1fr); gap:12px}
   .q-col{background:rgba(10,18,36,.5); border:1px solid var(--line); min-height:120px}
   .q-col-h{font-family:var(--font-mono); text-transform:uppercase; letter-spacing:.12em; font-size:12px; padding:12px 14px; border-bottom:1px solid var(--line)}
   .q-col-h .q-n{color:var(--ink-3)}
@@ -1109,7 +1109,7 @@ function renderDetail(){
       '<div id="modelView"><div class="model-empty">Opening model…</div></div>' +
     '</div>' +
     '<div class="pane" data-pane="queue">' +
-      '<div class="tasks-head"><span class="t">Task queue — tasks/todo · inprogress · done</span></div>' +
+      '<div class="tasks-head"><span class="t">Task queue — todo · in progress · verify · done</span></div>' +
       '<div id="queueView"><div class="model-empty">Loading…</div></div>' +
     '</div>' +
     '<div class="pane" data-pane="team">' +
@@ -1625,10 +1625,12 @@ async function loadQueue(pathStr){
   const view=document.getElementById('queueView'); if(!view) return;
   let q; try{ q=await (await fetch('/api/queue?path='+encodeURIComponent(pathStr))).json(); }catch{ return; }
   if(selected!==pathStr) return;
-  const total=(q.todo||[]).length+(q.inprogress||[]).length+(q.done||[]).length;
-  const badge=document.getElementById('queueBadge'); if(badge) badge.textContent = (q.todo||[]).length ? String((q.todo||[]).length) : '';
-  if(!total){ view.innerHTML='<div class="model-empty">No tasks yet.<br>Open <b>Model</b>, click any element in a diagram → <b>＋ Create task</b> (or copy the <b>task-planner</b> skill). Then run <b>📋 task-runner</b> in Claude — it executes them one by one, moving each file todo → inprogress → done.</div>'; return; }
-  const cols=[['todo','To do','#8aa0ff'],['inprogress','In progress','#ffb86b'],['done','Done','#34f0a6']];
+  const total=(q.todo||[]).length+(q.inprogress||[]).length+(q.verify||[]).length+(q.done||[]).length;
+  // Unverified work is still open work, so the badge counts todo + verify.
+  const pending=(q.todo||[]).length+(q.verify||[]).length;
+  const badge=document.getElementById('queueBadge'); if(badge) badge.textContent = pending ? String(pending) : '';
+  if(!total){ view.innerHTML='<div class="model-empty">No tasks yet.<br>Open <b>Model</b>, click any element in a diagram → <b>＋ Create task</b> (or copy the <b>task-planner</b> skill). Then run <b>📋 task-runner</b> in Claude — it executes them one by one, moving each file todo → inprogress → verify → done — a task is only done once its checks actually pass.</div>'; return; }
+  const cols=[['todo','To do','#8aa0ff'],['inprogress','In progress','#ffb86b'],['verify','Verify','#c084fc'],['done','Done','#34f0a6']];
   let html='<div class="q-cols">';
   for(const [k,label,acc] of cols){ const items=q[k]||[];
     html+='<div class="q-col"><div class="q-col-h" style="color:'+acc+'">'+label+' <span class="q-n">'+items.length+'</span></div><div class="q-list">';
@@ -1644,7 +1646,7 @@ async function openTaskPopup(pathStr, col, file){
   let d; try{ d=await (await fetch('/api/task-file?path='+encodeURIComponent(pathStr)+'&col='+encodeURIComponent(col)+'&file='+encodeURIComponent(file))).json(); }
   catch{ toast('Failed to read task', true); return; }
   if(!d || !d.ok){ toast(d&&d.error==='not found'?'Task file no longer exists':'Failed to read task', true); return; }
-  const COLS={todo:['To do','#8aa0ff'], inprogress:['In progress','#ffb86b'], done:['Done','#34f0a6']};
+  const COLS={todo:['To do','#8aa0ff'], inprogress:['In progress','#ffb86b'], verify:['Verify','#c084fc'], done:['Done','#34f0a6']};
   const meta=COLS[col]||['Task','#2fd8ff'];
   let ov=document.getElementById('taskOverlay');
   if(!ov){ ov=document.createElement('div'); ov.id='taskOverlay'; ov.className='ctx-overlay'; document.body.appendChild(ov); }

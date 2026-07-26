@@ -22,13 +22,13 @@
   {
     "name": "task-planner",
     "title": "task-planner",
-    "desc": "Turns a goal into small, self-contained task files in tasks/todo/, each carrying the right model context — ready for the runner to execute one by one.",
+    "desc": "Turns a goal into small, self-contained task files in tasks/todo/ — each carrying the right model context AND the step-by-step checks that prove it works, so nothing is called done on faith.",
     "file": "skills/task-planner.md"
   },
   {
     "name": "task-runner",
     "title": "task-runner",
-    "desc": "Works the task queue autonomously — takes each task, does it, and moves the file todo → in progress → done. Batch work without babysitting.",
+    "desc": "Works the task queue autonomously: todo → in progress → verify → done. It runs each task's checks for real, and when one fails it writes the fix task itself. Batch work without babysitting — and without silent breakage.",
     "file": "skills/task-runner.md"
   },
   {

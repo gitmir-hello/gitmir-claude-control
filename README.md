@@ -64,7 +64,7 @@ No account. No sign-in. No install beyond `git clone` — **zero npm dependencie
 - **Model** — the product's business logic drawn from your real code: entity
   lifecycles, ER, data flow, processes.
 - **Tasks** — a live log of what Claude actually did in this project.
-- **Queue** — the file-based task board (`todo · in progress · done`) your agent works through.
+- **Queue** — the file-based task board (`todo · in progress · verify · done`) your agent works through — nothing reaches *done* until its checks actually pass.
 - **Skills** — reusable instructions you copy into Claude with one click.
 
 | Business logic — entity lifecycle | Data flow |
@@ -102,10 +102,10 @@ guessing — deterministic graph traversal.
 <img src="docs/img/06-context-popup.png" alt="Click an element → deterministic context" width="100%">
 
 From there: **📋 copy the context** into Claude, or **＋ create a task**. Tasks are
-plain markdown under `<project>/tasks/{todo,inprogress,done}/`, each already carrying
+plain markdown under `<project>/tasks/{todo,inprogress,verify,done}/`, each already carrying
 its slice of the model.
 
-<img src="docs/img/07-queue.png" alt="Task queue — todo · in progress · done" width="100%">
+<img src="docs/img/07-queue.png" alt="Task queue — todo · in progress · verify · done" width="100%">
 
 Paste the **`task-runner`** skill and Claude works the queue one task at a time,
 moving each file `todo → in progress → done`. Because every task ships with the right
