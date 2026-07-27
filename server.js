@@ -890,6 +890,9 @@ const HTML = /* html */ `<!doctype html>
   .brand{ font-family:var(--font-ui); text-transform:uppercase; letter-spacing:.16em; font-size:13px; font-weight:600; color:#fff; gap:10px }
   .brand .c{ font-family:var(--font-mono); letter-spacing:.04em; text-transform:none }
   .brand-logo{ height:19px; width:auto; display:block; filter:drop-shadow(0 0 8px rgba(47,216,255,.45)); -webkit-user-select:none; user-select:none }
+  .brand-link{ display:block; line-height:0; cursor:pointer; transition:filter .15s ease, opacity .15s ease }
+  .brand-link:hover .brand-logo{ filter:drop-shadow(0 0 12px rgba(47,216,255,.85)) }
+  .brand-link:active{ opacity:.75 }
   .brand-sub{ font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; color:var(--ink-2); text-transform:uppercase; padding-left:10px; border-left:1px solid var(--glass-brd) }
   /* AGPL-3.0 section 13: anyone using this over a network must be able to get the source. */
   .side-foot{ display:flex; align-items:center; gap:8px; padding:10px 16px; border-top:1px solid var(--glass-brd); flex-shrink:0 }
@@ -983,7 +986,7 @@ const HTML = /* html */ `<!doctype html>
 <body>
   <aside class="side">
     <div class="side-top">
-      <div class="brand"><img class="brand-logo" src="/vendor/gitmir-wordmark.svg" alt="GitMir" draggable="false"><span class="brand-sub">Claude Control</span><span class="c" id="count"></span></div>
+      <div class="brand"><a class="brand-link" href="https://ide.gitmir.com" target="_blank" rel="noopener" title="Open ide.gitmir.com"><img class="brand-logo" src="/vendor/gitmir-wordmark.svg" alt="GitMir IDE" draggable="false"></a><span class="brand-sub">Claude Control</span><span class="c" id="count"></span></div>
       <button class="add" id="addBtn">＋ Add project</button>
       <input class="search" id="search" placeholder="Search…" autocomplete="off">
     </div>
