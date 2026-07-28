@@ -465,6 +465,18 @@ const server = http.createServer(async (req, res) => {
                                        : base + html;
       // The frame's own location is this proxy; the picker must report the page the
       // user is actually looking at, or the task says "picked from localhost:4599".
+      // The frame is sandboxed without allow-same-origin, so its origin is opaque.
+      // Two consequences have to be handled or real sites render as raw HTML:
+      //   1. A subresource marked crossorigin (every Vite/Next build marks its CSS and
+      //      JS that way) is fetched in CORS mode with Origin: null and gets blocked.
+      //      Dropping the attribute makes the browser fetch it no-CORS, which is all a
+      //      stylesheet or a plain script needs.
+      //   2. localStorage/sessionStorage THROW on an opaque origin, and most SPAs touch
+      //      them while booting, so the app dies before it paints. Hand them a working
+      //      in-memory stand-in.
+      html = html.replace(/\scrossorigin(=("[^"]*"|'[^']*'|[^\s>]+))?/gi, '');
+      const shim = 'try{localStorage.getItem("x")}catch(e){var __m={};var __s={getItem:function(k){return __m[k]===undefined?null:__m[k]},setItem:function(k,v){__m[k]=String(v)},removeItem:function(k){delete __m[k]},clear:function(){__m={}},key:function(i){return Object.keys(__m)[i]||null}};Object.defineProperty(__s,"length",{get:function(){return Object.keys(__m).length}});try{Object.defineProperty(window,"localStorage",{value:__s,configurable:true});Object.defineProperty(window,"sessionStorage",{value:__s,configurable:true})}catch(e2){}}';
+      html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + `<script>${shim}</script>`) : `<script>${shim}</script>` + html;
       const inject = `<script>window.__gitmirUrl=${JSON.stringify(got.finalUrl)};${PREVIEW_BRIDGE}</script>`;
       html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, inject + '</body>') : html + inject;
       res.writeHead(200, {
