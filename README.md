@@ -210,7 +210,14 @@ dashboard comes alive.
   instead of failing silently
 
 Run it in your normal desktop session so the folder picker and terminal launch work.
-Stop with `Ctrl+C`. macOS users can double-click `start.command`; Windows, `start.cmd`.
+Stop with `Ctrl+C`. macOS users can double-click `start.command`; Windows, `start.cmd` —
+though those run it in the foreground, so closing the terminal window stops the dashboard.
+
+**Desktop shortcut (macOS).** Run `bash install-shortcut.command` once. It puts a **GITMIR
+Claude Control** app on your Desktop that starts the dashboard *in the background* and
+opens your browser — and if it is already running, simply opens the browser. The dashboard
+then survives closing the browser, the launcher and any terminal; stop it with
+`pkill -f 'node server.js'`. Logs: `~/Library/Logs/gitmir-claude-control.log`.
 
 ## Design
 
