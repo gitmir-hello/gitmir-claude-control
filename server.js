@@ -1256,6 +1256,8 @@ const HTML = /* html */ `<!doctype html>
   /* entrance */
   @keyframes materialize{ 0%{opacity:0; transform:translateY(8px) scale(.985)} 60%{opacity:1} 100%{opacity:1} }
   .pane.active{ animation:materialize .38s cubic-bezier(.2,.7,.3,1) }
+  /* Never animate a live page: re-compositing the frame reads as a flash. */
+  .pane[data-pane="preview"].active{ animation:none }
   @media (prefers-reduced-motion: reduce){ *{ animation-duration:.01ms !important } }
 </style>
 </head>
@@ -1300,11 +1302,27 @@ function basename(p){ return p.replace(/\\/+$/,'').split('/').pop(); }
 function displayName(p){ return (p.name && p.name.trim()) || basename(p.path); }
 function byPath(p){ return projects.find(x=>x.path===p); }
 
+// What the detail panel actually renders from. If none of this changed there is
+// nothing to rebuild.
+function projSig(p){ return p ? [p.path, p.name||'', p.description||'', p.exists?1:0].join('\\u0000') : ''; }
+// The only thing a background refresh can change about the open project is whether
+// its folder is still there — update that in place.
+function refreshDetailBits(){
+  const p = byPath(selected); if(!p) return;
+  const miss = document.getElementById('dMiss'); if(miss) miss.style.display = p.exists ? 'none' : 'block';
+}
 async function load(keepSelection){
   const r = await fetch('/api/projects'); const d = await r.json();
+  const before = projSig(byPath(selected));
   projects = d.projects || [];
   if (keepSelection && !byPath(selected)) selected = null;
-  renderList(); renderDetail();
+  renderList();
+  // Rebuilding the detail panel throws away scroll position, a half-typed field, the
+  // open preview page and the copy you were about to make — and replays the panel
+  // animation, which is the flash. This runs on every window focus, so it must only
+  // rebuild when the selected project really changed.
+  if (before !== projSig(byPath(selected)) || !mainEl.firstChild) renderDetail();
+  else refreshDetailBits();
 }
 
 function renderList(){
