@@ -297,6 +297,7 @@ const PREVIEW_BRIDGE = `(function(){
   var box=null, label=null, on=false, last=null;
   function mk(){
     box=document.createElement('div'); label=document.createElement('div');
+    box.setAttribute('data-gitmir','ui'); label.setAttribute('data-gitmir','ui');
     box.style.cssText='position:fixed;z-index:2147483647;pointer-events:none;border:2px solid #2fd8ff;background:rgba(47,216,255,.10);box-shadow:0 0 0 1px rgba(0,0,0,.4);transition:all .04s linear';
     label.style.cssText='position:fixed;z-index:2147483647;pointer-events:none;background:#04060a;color:#2fd8ff;font:11px/1.6 ui-monospace,monospace;padding:2px 7px;border:1px solid #2fd8ff;white-space:nowrap;max-width:90vw;overflow:hidden;text-overflow:ellipsis';
     document.documentElement.appendChild(box); document.documentElement.appendChild(label);
@@ -347,7 +348,29 @@ const PREVIEW_BRIDGE = `(function(){
     }
     return parts.join(' > ');
   }
+  // Never hand back our own scaffolding: the shim, the <base>, the picker script and
+  // the highlight boxes are ours, not the page's, and they would only mislead.
+  function clean(el){
+    var c;
+    try{ c=el.cloneNode(true); }catch(e){ return null; }
+    try{
+      var kill=c.querySelectorAll?c.querySelectorAll('[data-gitmir]'):[];
+      for(var i=kill.length-1;i>=0;i--) if(kill[i].parentNode) kill[i].parentNode.removeChild(kill[i]);
+      if(c.style && c.style.cursor==='crosshair'){ c.style.cursor=''; if(!c.getAttribute('style')) c.removeAttribute('style'); }
+    }catch(e){}
+    return c;
+  }
+  // Text the user can actually see — style and script contents are not that.
+  function visibleText(node){
+    try{
+      var c=node.cloneNode(true);
+      var junk=c.querySelectorAll?c.querySelectorAll('script,style,noscript,template'):[];
+      for(var i=junk.length-1;i>=0;i--) if(junk[i].parentNode) junk[i].parentNode.removeChild(junk[i]);
+      return (c.textContent||'').trim().replace(/\\s+/g,' ');
+    }catch(e){ return (node.textContent||'').trim().replace(/\\s+/g,' '); }
+  }
   function payload(el){
+    var cl=clean(el);
     var cls=String((el.className&&el.className.baseVal!==undefined?el.className.baseVal:el.className)||'').trim().split(/\\s+/).filter(Boolean);
     var r=el.getBoundingClientRect();
     var anc=[], cur=el.parentElement, d=0;
@@ -356,11 +379,11 @@ const PREVIEW_BRIDGE = `(function(){
       selector:selectorFor(el), tag:el.tagName.toLowerCase(),
       candidates:{ testid:el.getAttribute('data-testid')||el.getAttribute('data-test')||el.getAttribute('data-cy')||null,
         id:el.id||null, classes:cls.slice(0,8),
-        text:(el.textContent||'').trim().replace(/\\s+/g,' ').slice(0,200)||null,
+        text:visibleText(cl||el).slice(0,200)||null,
         aria:el.getAttribute('aria-label')||null },
       attrs:{ type:el.getAttribute('type')||null, href:el.getAttribute('href')||null, name:el.getAttribute('name')||null },
       rect:{ x:Math.round(r.left), y:Math.round(r.top), w:Math.round(r.width), h:Math.round(r.height) },
-      html:(el.outerHTML||'').slice(0,2048), ancestors:anc };
+      html:((cl&&cl.outerHTML)||el.outerHTML||'').slice(0,16384), ancestors:anc };   // the element WITH its subtree
   }
   function click(e){
     if(!on) return;
@@ -438,13 +461,13 @@ function preparePreviewHtml(buf, finalUrl) {
   const fu = new URL(finalUrl);
   // <base> plus rewriting absolute same-site urls keeps every asset on the mirror,
   // which is the same origin as this document — no CORS anywhere.
-  const base = `<base href="${hesc(PREVIEW_ORIGIN + fu.pathname)}">`;
+  const base = `<base data-gitmir="base" href="${hesc(PREVIEW_ORIGIN + fu.pathname)}">`;
   html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + base) : base + html;
   html = html.split(fu.origin + '/').join(PREVIEW_ORIGIN + '/');
   html = html.replace(/\scrossorigin(=("[^"]*"|'[^']*'|[^\s>]+))?/gi, '');
   const shim = 'try{localStorage.getItem("x")}catch(e){var __m={};var __s={getItem:function(k){return __m[k]===undefined?null:__m[k]},setItem:function(k,v){__m[k]=String(v)},removeItem:function(k){delete __m[k]},clear:function(){__m={}},key:function(i){return Object.keys(__m)[i]||null}};Object.defineProperty(__s,"length",{get:function(){return Object.keys(__m).length}});try{Object.defineProperty(window,"localStorage",{value:__s,configurable:true});Object.defineProperty(window,"sessionStorage",{value:__s,configurable:true})}catch(e2){}}try{document.cookie}catch(e){var __ck="";try{Object.defineProperty(document,"cookie",{get:function(){return __ck},set:function(v){var one=String(v).split(";")[0];if(one.indexOf("=")<0)return;var k=one.split("=")[0];var kept=__ck?__ck.split("; ").filter(function(x){return x.split("=")[0]!==k}):[];kept.push(one);__ck=kept.join("; ")},configurable:true})}catch(e2){}}';
-  html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + `<script>${shim}</script>`) : `<script>${shim}</script>` + html;
-  const inject = `<script>window.__gitmirUrl=${JSON.stringify(finalUrl)};${PREVIEW_BRIDGE}</script>`;
+  html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + `<script data-gitmir="shim">${shim}</script>`) : `<script data-gitmir="shim">${shim}</script>` + html;
+  const inject = `<script data-gitmir="picker">window.__gitmirUrl=${JSON.stringify(finalUrl)};${PREVIEW_BRIDGE}</script>`;
   html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, inject + '</body>') : html + inject;
   return html;
 }
@@ -2567,10 +2590,16 @@ window.addEventListener('message', async (e)=>{
 function pvText(d, hits, model, what){
   const c=d.candidates||{};
   const L=[];
-  L.push('I want to change an element on the page ' + (d.url||'') + '.');
+  // The element itself comes first — that is what the agent has to recognise. Then
+  // the facts about it, then where it lives, then what to do.
+  L.push('## The element I picked (with everything inside it)');
+  L.push(TICK+TICK+TICK+'html');   // literal backticks would end the template
+  L.push(d.html || '');
+  L.push(TICK+TICK+TICK);
   L.push('');
-  L.push('## The element');
-  L.push('- tag: ' + (d.tag||'?') + ((c.classes&&c.classes.length) ? ' · classes: ' + c.classes.slice(0,6).join(' ') : ''));
+  L.push('## What it is');
+  L.push('- page: ' + (d.url||''));
+  L.push('- tag: ' + (d.tag||'?') + ((c.classes&&c.classes.length) ? ' · classes: ' + c.classes.slice(0,8).join(' ') : ''));
   if(c.text) L.push('- visible text: "' + c.text.slice(0,200) + '"');
   if(c.testid) L.push('- data-testid: ' + c.testid);
   if(c.id) L.push('- id: ' + c.id);
@@ -2592,14 +2621,9 @@ function pvText(d, hits, model, what){
     L.push('');
     L.push('From the .gitmir model: ' + model.map(f=>f.name).join(', '));
   }
-  if(d.html){
-    L.push('');
-    L.push('## The element as rendered');
-    L.push(d.html.slice(0,1200));
-  }
   L.push('');
-  L.push('## What to change');
-  L.push((what && what.trim()) ? what.trim() : '<describe it here>');
+  L.push('## Do the following');
+  L.push((what && what.trim()) ? what.trim() : '<describe it here, or just type it to Claude after pasting>');
   return L.join('\\n');
 }
 
