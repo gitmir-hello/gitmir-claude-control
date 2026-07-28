@@ -213,6 +213,14 @@ Run it in your normal desktop session so the folder picker and terminal launch w
 Stop with `Ctrl+C`. macOS users can double-click `start.command`; Windows, `start.cmd` —
 though those run it in the foreground, so closing the terminal window stops the dashboard.
 
+**Port.** 4599 by default. If it is taken, or two people share the machine, set
+`GITMIR_PORT=4600 node server.js` — the dashboard says so plainly instead of throwing a
+stack trace when the port is busy.
+
+**Desktop shortcut (Windows).** Double-click `install-shortcut.cmd` once. It puts a
+**GITMIR Claude Control** shortcut on your Desktop that starts the dashboard with no
+console window and opens your browser. Stop it with `taskkill /IM node.exe /F`.
+
 **Desktop shortcut (macOS).** Run `bash install-shortcut.command` once. It puts a **GITMIR
 Claude Control** app on your Desktop that starts the dashboard *in the background* and
 opens your browser — and if it is already running, simply opens the browser. The dashboard

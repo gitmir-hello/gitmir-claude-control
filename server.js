@@ -29,7 +29,9 @@ function nativePickerAvailable() {
 
 const relay = require('./relay');
 
-const PORT = 4599;
+// Fixed by default so the URL is memorable, but overridable: 4599 may be taken, and
+// two people on one machine need different ports.
+const PORT = Number(process.env.GITMIR_PORT || 4599) || 4599;
 const DATA_FILE = path.join(__dirname, 'projects.json');
 const SKILLS_FILE = path.join(__dirname, 'skills.json');
 
@@ -883,6 +885,19 @@ const server = http.createServer(async (req, res) => {
 process.on('uncaughtException', (e) => console.error('uncaught:', (e && e.stack) || e));
 process.on('unhandledRejection', (e) => console.error('unhandled rejection:', (e && e.stack) || e));
 
+server.on('error', (e) => {
+  if (e && e.code === 'EADDRINUSE') {
+    console.error(`\n  Port ${PORT} is already in use.`);
+    console.error(`  If the dashboard is already running, just open  http://localhost:${PORT}`);
+    console.error(`  Otherwise start it elsewhere:  GITMIR_PORT=4600 node server.js\n`);
+  } else if (e && e.code === 'EACCES') {
+    console.error(`\n  Not allowed to listen on port ${PORT}. Pick one above 1024:  GITMIR_PORT=4599 node server.js\n`);
+  } else {
+    console.error('\n  Could not start: ' + ((e && e.message) || e) + '\n');
+  }
+  process.exit(1);
+});
+
 server.listen(PORT, '127.0.0.1', () => {
   // The client script is emitted from a template literal, where an escape like \\s or
   // \\/ silently collapses and can break the whole script for the user while the server
@@ -1272,6 +1287,16 @@ const HTML = /* html */ `<!doctype html>
   .ta-time{color:var(--dim2); font-size:11px; font-family:var(--font-mono); flex-shrink:0}
   .tab-btn .badge.on{background:rgba(52,240,166,.14); color:var(--ok); border-color:rgba(52,240,166,.4)}
 
+  .ph-h{font-size:16px; font-weight:650; color:var(--txt); margin:14px 0 4px}
+  .ph-steps{list-style:none; counter-reset:s; padding:0; margin:14px 0 0; max-width:620px; text-align:left}
+  .ph-steps li{counter-increment:s; position:relative; padding:9px 0 9px 34px; color:var(--dim); font-size:13.5px; line-height:1.6}
+  .ph-steps li::before{content:counter(s); position:absolute; left:0; top:9px; width:22px; height:22px;
+    display:flex; align-items:center; justify-content:center; font-family:var(--font-mono); font-size:11px;
+    color:var(--cyan); border:1px solid rgba(47,216,255,.4); background:rgba(47,216,255,.07)}
+  .ph-steps b{color:var(--txt); font-weight:600}
+  .ph-steps code{font-family:var(--font-mono); font-size:12px; color:var(--cyan-soft)}
+  .ph-note{margin-top:18px; font-family:var(--font-mono); font-size:11.5px; color:var(--dim2)}
+
   .toast{
     position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(30px);
     background:var(--panel2);border:1px solid var(--line2);color:var(--txt);
@@ -1412,7 +1437,16 @@ const HTML = /* html */ `<!doctype html>
   <main class="main" id="main">
     <div class="placeholder" id="placeholder">
       <div class="big">◧</div>
-      <div>Select a project on the left<br>or add one with the button above.</div>
+      <div class="ph-h">Three steps to a living model of your product</div>
+      <ol class="ph-steps">
+        <li><b>＋ Add project</b> — point it at any folder on any disk.</li>
+        <li><b>▶ Run Claude</b> — opens a terminal in that folder with <code>claude</code> running.</li>
+        <li>In <b>Settings</b> copy <b>📋 gitmir-model</b> and paste it into that session (⌘V + Enter).
+            Claude reads the real code and writes <code>.gitmir/model/</code> — then the <b>Model</b> tab fills
+            with your entity lifecycles, data flows and processes, and clicking any of them gives you an exact
+            brief for the next task.</li>
+      </ol>
+      <div class="ph-note">Everything runs and stays on this machine. Nothing is uploaded.</div>
     </div>
   </main>
 
@@ -1503,9 +1537,19 @@ function renderDetail(){
   const p = byPath(selected);
   clearInterval(taskTimer);
   if (!p){
+    // An empty dashboard should say what this is FOR, not just which button exists.
     mainEl.innerHTML =
       '<div class="placeholder"><div class="big">◧</div>' +
-      '<div>Select a project on the left<br>or add one with the button above.</div></div>';
+      '<div class="ph-h">Three steps to a living model of your product</div>' +
+      '<ol class="ph-steps">' +
+        '<li><b>＋ Add project</b> — point it at any folder on any disk.</li>' +
+        '<li><b>▶ Run Claude</b> — opens a terminal in that folder with <code>claude</code> running.</li>' +
+        '<li>In <b>Settings</b> copy <b>📋 gitmir-model</b> and paste it into that session (⌘V + Enter). ' +
+          'Claude reads the real code and writes <code>.gitmir/model/</code> — then the <b>Model</b> tab fills with ' +
+          'your entity lifecycles, data flows and processes, and clicking any of them gives you an exact brief for the next task.</li>' +
+      '</ol>' +
+      '<div class="ph-note">Everything runs and stays on this machine. Nothing is uploaded.</div>' +
+      '</div>';
     return;
   }
   const wrap = document.createElement('div'); wrap.className='detail-wrap';

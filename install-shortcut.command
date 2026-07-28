@@ -12,7 +12,7 @@ set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="GITMIR Claude Control"
 APP="$HOME/Desktop/$APP_NAME.app"
-PORT=4599
+PORT="${GITMIR_PORT:-4599}"   # same override the server honours
 URL="http://localhost:$PORT"
 
 # A GUI-launched app does not inherit your shell's PATH, so resolve node now and bake
@@ -64,7 +64,7 @@ fi
 cd "\$DIR" || { osascript -e 'display alert "GITMIR Claude Control" message "The project folder has moved. Run install-shortcut.command again."'; exit 1; }
 mkdir -p "\$(dirname "\$LOG")"
 # nohup + disown: the dashboard outlives this launcher and anything you close.
-nohup "\$NODE" server.js >>"\$LOG" 2>&1 &
+GITMIR_PORT="$PORT" nohup "\$NODE" server.js >>"\$LOG" 2>&1 &
 disown 2>/dev/null || true
 
 for i in \$(seq 1 60); do
