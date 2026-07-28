@@ -430,6 +430,25 @@ async function previewFetch(rawUrl, allowLoopback) {
   }
 }
 
+// Everything served as HTML on the preview origin goes through here, so the picker
+// survives a redirect or a click on a link inside the site. Serving a second document
+// without the bridge is exactly how "Select" stopped doing anything.
+function preparePreviewHtml(buf, finalUrl) {
+  let html = buf.toString('utf8');
+  const fu = new URL(finalUrl);
+  // <base> plus rewriting absolute same-site urls keeps every asset on the mirror,
+  // which is the same origin as this document — no CORS anywhere.
+  const base = `<base href="${hesc(PREVIEW_ORIGIN + fu.pathname)}">`;
+  html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + base) : base + html;
+  html = html.split(fu.origin + '/').join(PREVIEW_ORIGIN + '/');
+  html = html.replace(/\scrossorigin(=("[^"]*"|'[^']*'|[^\s>]+))?/gi, '');
+  const shim = 'try{localStorage.getItem("x")}catch(e){var __m={};var __s={getItem:function(k){return __m[k]===undefined?null:__m[k]},setItem:function(k,v){__m[k]=String(v)},removeItem:function(k){delete __m[k]},clear:function(){__m={}},key:function(i){return Object.keys(__m)[i]||null}};Object.defineProperty(__s,"length",{get:function(){return Object.keys(__m).length}});try{Object.defineProperty(window,"localStorage",{value:__s,configurable:true});Object.defineProperty(window,"sessionStorage",{value:__s,configurable:true})}catch(e2){}}try{document.cookie}catch(e){var __ck="";try{Object.defineProperty(document,"cookie",{get:function(){return __ck},set:function(v){var one=String(v).split(";")[0];if(one.indexOf("=")<0)return;var k=one.split("=")[0];var kept=__ck?__ck.split("; ").filter(function(x){return x.split("=")[0]!==k}):[];kept.push(one);__ck=kept.join("; ")},configurable:true})}catch(e2){}}';
+  html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + `<script>${shim}</script>`) : `<script>${shim}</script>` + html;
+  const inject = `<script>window.__gitmirUrl=${JSON.stringify(finalUrl)};${PREVIEW_BRIDGE}</script>`;
+  html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, inject + '</body>') : html + inject;
+  return html;
+}
+
 // ---------- routes ----------
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
@@ -472,6 +491,11 @@ const server = http.createServer(async (req, res) => {
       if (got.error) { res.writeHead(502, { 'Access-Control-Allow-Origin': '*' }); return res.end(got.error); }
       let body = got.body;
       const ct = got.contentType || 'application/octet-stream';
+      if (/text\/html|application\/xhtml/i.test(ct)) {
+        // A navigation inside the site lands here — it must get the picker too.
+        res.writeHead(got.status, { 'Content-Type': 'text/html; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+        return res.end(preparePreviewHtml(body, got.finalUrl));
+      }
       if (/text\/css|javascript/i.test(ct)) {
         try { body = Buffer.from(body.toString('utf8').split(previewSite + '/').join(PREVIEW_ORIGIN + '/'), 'utf8'); } catch {}
       }
@@ -529,46 +553,11 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(got.status, { 'Content-Type': got.contentType || 'application/octet-stream' });
         return res.end(got.body);
       }
-      let html = got.body.toString('utf8');
-      // Point <base> at our own mirror rather than at the site. Letting assets load
-      // straight from the site looks simpler, but an ES module is ALWAYS fetched in
-      // CORS mode — no crossorigin attribute involved — and the frame's origin is
-      // opaque, so any site that does not send Access-Control-Allow-Origin has its
-      // app blocked and renders as an empty shell. Going through /api/px lets us
-      // answer with ACAO:* ; keeping the upstream's path shape underneath means a
-      // module's own relative imports still resolve.
-      const fu = new URL(got.finalUrl);
-      const mirror = `${PREVIEW_ORIGIN}${fu.pathname}`;
-      const base = `<base href="${hesc(mirror)}">`;
-      html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + base)
-                                       : base + html;
-      // Absolute same-site URLs bypass <base>, so send those through the mirror too.
-      const origin = fu.origin;
-      html = html.split(origin + '/').join(`${PREVIEW_ORIGIN}/`);
-      // The frame's own location is this proxy; the picker must report the page the
-      // user is actually looking at, or the task says "picked from localhost:4599".
-      // The frame is sandboxed without allow-same-origin, so its origin is opaque.
-      // Two consequences have to be handled or real sites render as raw HTML:
-      //   1. A subresource marked crossorigin (every Vite/Next build marks its CSS and
-      //      JS that way) is fetched in CORS mode with Origin: null and gets blocked.
-      //      Dropping the attribute makes the browser fetch it no-CORS, which is all a
-      //      stylesheet or a plain script needs.
-      //   2. localStorage/sessionStorage THROW on an opaque origin, and most SPAs touch
-      //      them while booting, so the app dies before it paints. Hand them a working
-      //      in-memory stand-in.
-      html = html.replace(/\scrossorigin(=("[^"]*"|'[^']*'|[^\s>]+))?/gi, '');
-      // Everything an opaque origin makes throw, handed a working stand-in: a site
-      // that reads document.cookie or localStorage while booting must not die before
-      // it paints. This is why a page could come back as a black rectangle.
-      const shim = 'try{localStorage.getItem("x")}catch(e){var __m={};var __s={getItem:function(k){return __m[k]===undefined?null:__m[k]},setItem:function(k,v){__m[k]=String(v)},removeItem:function(k){delete __m[k]},clear:function(){__m={}},key:function(i){return Object.keys(__m)[i]||null}};Object.defineProperty(__s,"length",{get:function(){return Object.keys(__m).length}});try{Object.defineProperty(window,"localStorage",{value:__s,configurable:true});Object.defineProperty(window,"sessionStorage",{value:__s,configurable:true})}catch(e2){}}try{document.cookie}catch(e){var __ck="";try{Object.defineProperty(document,"cookie",{get:function(){return __ck},set:function(v){var one=String(v).split(";")[0];if(one.indexOf("=")<0)return;var k=one.split("=")[0];var kept=__ck?__ck.split("; ").filter(function(x){return x.split("=")[0]!==k}):[];kept.push(one);__ck=kept.join("; ")},configurable:true})}catch(e2){}}';
-      html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + `<script>${shim}</script>`) : `<script>${shim}</script>` + html;
-      const inject = `<script>window.__gitmirUrl=${JSON.stringify(got.finalUrl)};${PREVIEW_BRIDGE}</script>`;
-      html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, inject + '</body>') : html + inject;
+      const html = preparePreviewHtml(got.body, got.finalUrl);
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
-        // The framing and script restrictions of the upstream would block both the
-        // iframe and the picker; they are the site's policy for its own origin, and
-        // this copy is served from here for local inspection only.
+        // The upstream's framing and script policy is for its own origin; this copy is
+        // served here for local inspection only.
         'X-GitMir-Preview-Of': got.finalUrl,
       });
       return res.end(html);
@@ -2542,12 +2531,23 @@ function pvOpen(v){
   pvSetPick(false);
   const box=document.getElementById('pvPicked'); if(box) box.innerHTML='';
 }
+let pvAck=null;
 function pvSetPick(on){
   const pick=document.getElementById('pvPick'), frame=document.getElementById('pvFrame');
   if(!pick||!frame) return;
   pick.classList.toggle('on', on);
   pick.textContent = on ? '◉ Click an element…' : '◎ Select';
   try{ frame.contentWindow.postMessage({type: on?'gitmir:pick-on':'gitmir:pick-off'}, '*'); }catch{}
+  // Do not let the button claim it is armed when the picker never answered — that is
+  // indistinguishable from "hovering does nothing" and looks like the feature is broken.
+  clearTimeout(pvAck);
+  if(on) pvAck=setTimeout(()=>{
+    const b=document.getElementById('pvPick');
+    if(b && b.classList.contains('on')){
+      b.classList.remove('on'); b.textContent='◎ Select';
+      toast('The picker is not running on this page — press Go to reload it.', true);
+    }
+  }, 1200);
 }
 // The preview frame is sandboxed without allow-same-origin, so its origin is "null".
 // Trust it by identity (the window we created), not by origin string.
@@ -2555,7 +2555,7 @@ window.addEventListener('message', async (e)=>{
   const frame=document.getElementById('pvFrame');
   if(!frame || e.source!==frame.contentWindow) return;
   const d=e.data||{};
-  if(d.type==='gitmir:pick-state'){ const b=document.getElementById('pvPick');
+  if(d.type==='gitmir:pick-state'){ clearTimeout(pvAck); const b=document.getElementById('pvPick');
     if(b){ b.classList.toggle('on', !!d.on); b.textContent = d.on ? '◉ Click an element…' : '◎ Select'; } return; }
   if(d.type==='gitmir:pick-cancelled'){ pvSetPick(false); return; }
   if(d.type!=='gitmir:picked') return;
