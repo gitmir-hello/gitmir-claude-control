@@ -1547,8 +1547,7 @@ function renderDetail(){
           '<div class="pv-eg" id="pvEg"></div>'+
         '</div>'+
       '</div>'+
-      '<div id="pvPicked"></div>'+
-    '</div>'+
+      '</div>'+
     '<div class="pane" data-pane="team">' +
       '<div class="tasks-head"><span class="t">Team Bridge — route model &amp; tasks between your machines</span><span class="upd" id="teamUpd"></span></div>' +
       '<div id="teamView"><div class="model-empty">Loading…</div></div>' +
@@ -2563,72 +2562,106 @@ window.addEventListener('message', async (e)=>{
   pvPicked=d;
   await pvRenderPicked(d);
 });
-async function pvRenderPicked(d){
-  const box=document.getElementById('pvPicked'); if(!box) return;
+// Picking an element builds the text you paste into Claude Code and puts it straight
+// on the clipboard, then shows it so you can see exactly what was copied.
+function pvText(d, hits, model){
   const c=d.candidates||{};
-  const bits=[];
-  if(c.testid) bits.push('data-testid='+esc(c.testid));
-  if(c.id) bits.push('id='+esc(c.id));
-  if(c.aria) bits.push('aria-label="'+esc(c.aria)+'"');
-  box.innerHTML='<div class="pv-card">'+
-    '<div class="pv-el"><span class="pv-k">Element</span> <b>'+esc(d.tag||'?')+(c.classes&&c.classes.length?'.'+esc(c.classes.slice(0,3).join('.')):'')+'</b>'+
-      (c.text?' — “'+esc(c.text.slice(0,120))+'”':'')+'<br>'+
-      '<span class="pv-k">Selector</span> '+esc(d.selector||'')+
-      (bits.length?'<br><span class="pv-k">Also</span> '+bits.join('  ·  '):'')+
-      '<br><span class="pv-k">Page</span> '+esc(d.url||'')+'</div>'+
-    '<div id="pvWhere"><div class="pv-sec">Where this probably lives</div><div class="pv-hits">searching the project…</div></div>'+
-    '<div class="pv-sec">The task</div>'+
-    '<input class="ti" id="pvTitle" placeholder="What should change about this element?">'+
-    '<textarea class="ti" id="pvDone" placeholder="Done when… (one per line — these become the acceptance criteria)"></textarea>'+
-    '<div class="team-actions"><button class="run" id="pvCreate">＋ Create task</button></div>'+
-  '</div>';
-  document.getElementById('pvCreate').addEventListener('click', pvCreateTask);
-  // The needles that make a text search meaningful — skip utility-class noise.
+  const L=[];
+  L.push('I want to change an element on the page ' + (d.url||'') + '.');
+  L.push('');
+  L.push('## The element');
+  L.push('- tag: ' + (d.tag||'?') + ((c.classes&&c.classes.length) ? ' · classes: ' + c.classes.slice(0,6).join(' ') : ''));
+  if(c.text) L.push('- visible text: "' + c.text.slice(0,200) + '"');
+  if(c.testid) L.push('- data-testid: ' + c.testid);
+  if(c.id) L.push('- id: ' + c.id);
+  if(c.aria) L.push('- aria-label: ' + c.aria);
+  if(d.attrs && d.attrs.href) L.push('- href: ' + d.attrs.href);
+  L.push('- CSS selector: ' + (d.selector||''));
+  if(d.ancestors && d.ancestors.length) L.push('- sits inside: ' + d.ancestors.join(' > '));
+  L.push('');
+  L.push('## Where it probably lives in this project');
+  if(hits && hits.length){
+    for(const h of hits.slice(0,14)) L.push('- ' + h.file + ':' + h.line + '  — matched ' + JSON.stringify(h.needle.slice(0,60)));
+    L.push('');
+    L.push('Those are text matches, not proof — open them and confirm before changing anything.');
+  } else {
+    L.push('- nothing in this project matched its text, id or classes. It may be rendered from data,');
+    L.push('  or this page is not built by this project. Find the source before editing — do not guess a file.');
+  }
+  if(model && model.length){
+    L.push('');
+    L.push('From the .gitmir model: ' + model.map(f=>f.name).join(', '));
+  }
+  if(d.html){
+    L.push('');
+    L.push('## The element as rendered');
+    L.push(d.html.slice(0,1200));
+  }
+  L.push('');
+  L.push('## What to change');
+  L.push('<describe it here>');
+  return L.join('\\n');
+}
+
+async function pvRenderPicked(d){
+  const c=d.candidates||{};
+  // Look the element up in the project first, so the copied text carries the files.
   const UTIL=/^(flex|grid|block|inline|hidden|relative|absolute|fixed|w-|h-|p[xytblr]?-|m[xytblr]?-|text-|bg-|border|rounded|shadow|gap-|items-|justify-|font-|leading-|tracking-|space-|max-|min-|overflow|z-|opacity|transition|duration|cursor|select-)/;
   const needles=[];
   if(c.text) needles.push(c.text.slice(0,80));
-  if(c.text){ const plain=c.text.replace(/[^\\p{L}\\p{N} ]/gu,'').trim(); if(plain && plain!==c.text) needles.push(plain.slice(0,80)); }
+  if(c.text){ const plain=c.text.replace(/[^\p{L}\p{N} ]/gu,'').trim(); if(plain && plain!==c.text) needles.push(plain.slice(0,80)); }
   if(c.testid) needles.push(c.testid);
   if(c.id) needles.push(c.id);
   for(const cl of (c.classes||[])) if(cl.length>3 && !UTIL.test(cl)) needles.push(cl);
-  let r={hits:[],fromModel:[]};
+  let r={hits:[],fromModel:[],searched:0};
   try{ r=await (await fetch('/api/preview-find',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({path:selected, needles})})).json(); }catch{}
-  const w=document.getElementById('pvWhere'); if(!w) return;
-  let html='<div class="pv-sec">Where this probably lives</div>';
-  if((r.hits||[]).length){
-    html+='<div class="pv-hits">'+r.hits.slice(0,14).map(h=>'<div class="pv-hit"><b>'+esc(h.file)+':'+h.line+'</b> — '+esc(h.needle.slice(0,60))+'</div>').join('')+'</div>';
-  } else {
-    // A confident wrong file is worse than saying nothing was found.
-    html+='<div class="pv-hits pv-none">Nothing in this project matched the element\\'s text, id or classes ('+(r.searched||0)+' files searched). It may be rendered from data, or you are pointing at a site this project does not build.</div>';
-  }
-  if((r.fromModel||[]).length) html+='<div class="pv-hits" style="margin-top:8px"><span class="pv-k">From the .gitmir model:</span> '+r.fromModel.map(f=>esc(f.name)).join(', ')+'</div>';
-  w.innerHTML=html;
   pvPicked._hits=r.hits||[]; pvPicked._model=r.fromModel||[];
+  const text=pvText(d, r.hits, r.fromModel);
+  pvPicked._text=text;
+
+  // Try to copy immediately. A message from the frame is not a user gesture, so the
+  // browser may refuse — say which happened instead of claiming success.
+  let copied=false;
+  try{ await copyToClipboard(text); copied=true; }catch{}
+
+  let ov=document.getElementById('pvOverlay');
+  if(!ov){ ov=document.createElement('div'); ov.id='pvOverlay'; ov.className='ctx-overlay'; document.body.appendChild(ov); }
+  ov.innerHTML=
+    '<div class="ctx-modal">'+
+      '<div class="ctx-head"><div class="ctx-title">'+esc(d.tag||'element')+(c.text?' — “'+esc(c.text.slice(0,60))+'”':'')+'</div>'+
+        '<button class="ctx-x" title="Close (Esc)">✕</button></div>'+
+      '<div class="ctx-note">'+(copied
+        ? '✓ Copied to the clipboard — paste it into Claude Code (⌘V + Enter) and it will know which element you mean.'
+        : 'Press <b>Copy</b> below, then paste it into Claude Code (⌘V + Enter).')+'</div>'+
+      '<pre class="ctx-pre">'+esc(text)+'</pre>'+
+      '<div class="ctx-actions">'+
+        '<button class="run pv-copy">📋 '+(copied?'Copy again':'Copy')+'</button>'+
+        '<button class="ghost pv-task">＋ Queue as a task</button>'+
+        '<button class="del pv-close">Close</button>'+
+      '</div>'+
+    '</div>';
+  ov.classList.add('show');
+  const close=()=>{ ov.classList.remove('show'); ov.innerHTML=''; };
+  ov.querySelector('.ctx-x').addEventListener('click', close);
+  ov.querySelector('.pv-close').addEventListener('click', close);
+  ov.addEventListener('click', e=>{ if(e.target===ov) close(); });
+  ov.querySelector('.pv-copy').addEventListener('click', async ()=>{
+    try{ await copyToClipboard(text); toast('Copied ✓  paste into Claude Code'); }catch{ toast('Could not copy — select the text and copy it', true); }
+  });
+  ov.querySelector('.pv-task').addEventListener('click', ()=>{ close(); pvQueueTask(text, d); });
 }
-async function pvCreateTask(){
-  if(!pvPicked || !selected){ toast('Pick an element first', true); return; }
-  const t=document.getElementById('pvTitle').value.trim();
-  if(!t){ toast('Say what should change', true); document.getElementById('pvTitle').focus(); return; }
-  const done=document.getElementById('pvDone').value.trim();
-  const c=pvPicked.candidates||{};
-  const also=[c.testid?'data-testid='+c.testid:'', c.id?'id='+c.id:''].filter(Boolean).join(', ');
-  const hits=(pvPicked._hits||[]).slice(0,14).map(h=>'- '+h.file+':'+h.line+' — '+h.needle).join('\\n');
-  const model=(pvPicked._model||[]).map(f=>'- '+f.name+(f.kind?' ('+f.kind+')':'')+' — from the .gitmir model').join('\\n');
-  const content='# '+t+'\\n\\n'+
-    '## Context\\nPicked from '+pvPicked.url+' on '+new Date().toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})+'.\\n\\n'+
-    'Element: '+TICK+(pvPicked.tag||'')+((c.classes&&c.classes.length)?'.'+c.classes.slice(0,3).join('.'):'')+TICK+(c.text?' — "'+c.text.slice(0,120)+'"':'')+'\\n'+
-    'Selector: '+TICK+(pvPicked.selector||'')+TICK+'\\n'+
-    (also?'Also identifiable by: '+also+'\\n':'')+
-    '\\n## Where this probably lives\\n'+
-    (hits||model ? [hits,model].filter(Boolean).join('\\n') : 'Nothing in this project matched the element\\'s text, id or classes — it may be rendered from data. Do not guess a file; find it before changing anything.')+'\\n'+
-    '\\n## Task\\n'+t+'\\n'+
-    (done ? '\\n## Done when\\n'+done.split('\\n').map(l=>l.trim()).filter(Boolean).map(l=>l.startsWith('-')?l:'- '+l).join('\\n')+'\\n' : '');
+// Optional: the same text, dropped into the queue instead of the clipboard.
+async function pvQueueTask(text, d){
+  const c=(d && d.candidates)||{};
+  const title=(c.text ? c.text.slice(0,60) : (d && d.tag) || 'element') + ' — from the page';
+  const content='# '+title+'\\n\\n## Context\\nPicked from '+((d&&d.url)||'')+' in the Preview tab.\\n\\n'+text+'\\n';
   const r=await (await fetch('/api/task',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({path:selected, title:t, content})})).json();
-  if(r.ok){ toast('Task created in tasks/todo ✓'); document.getElementById('pvPicked').innerHTML=''; pvPicked=null; if(activeTab==='queue') loadQueue(selected); }
+    body:JSON.stringify({path:selected, title, content})})).json();
+  if(r.ok){ toast('Task created in tasks/todo ✓'); if(activeTab==='queue') loadQueue(selected); }
   else toast('Failed: '+(r.error||'error'), true);
 }
+
 
 /* ---------------- team bridge (client) ---------------- */
 let teamState=null, teamSeenTaskT=null, teamSeenModelT=null, RELAY_URL_DEFAULT='ws://localhost:4600';
@@ -2790,7 +2823,7 @@ async function teamPoll(){
   if(activeTab==='team') renderTeam();
 }
 
-document.addEventListener('keydown', (e)=>{ if(e.key==='Escape'){ fsClose(); for(const id of ['ctxOverlay','addOverlay','taskOverlay']){ const o=document.getElementById(id); if(o){ o.classList.remove('show'); o.innerHTML=''; } } } });
+document.addEventListener('keydown', (e)=>{ if(e.key==='Escape'){ fsClose(); for(const id of ['ctxOverlay','addOverlay','taskOverlay','pvOverlay']){ const o=document.getElementById(id); if(o){ o.classList.remove('show'); o.innerHTML=''; } } } });
 fetch('/api/env').then(r=>r.json()).then(d=>{ PICKER_OK = !!d.pickerAvailable; if(d.relayUrl) RELAY_URL_DEFAULT=d.relayUrl; if(d.previewOrigin) PV_ORIGIN=d.previewOrigin; if(d.preview===false){ PREVIEW_OK=false; renderDetail(); } }).catch(()=>{});
 loadSkillsList();
 load();
