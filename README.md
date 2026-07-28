@@ -65,6 +65,8 @@ No account. No sign-in. No install beyond `git clone` — **zero npm dependencie
   lifecycles, ER, data flow, processes.
 - **Tasks** — a live log of what Claude actually did in this project.
 - **Queue** — the file-based task board (`todo · in progress · verify · done`) your agent works through — nothing reaches *done* until its checks actually pass.
+- **Preview** — open any URL, click an element on the page, and get a prompt that names
+  it and the files it probably lives in. No more "the second button under the pricing table".
 - **Skills** — reusable instructions you copy into Claude with one click.
 
 | Business logic — entity lifecycle | Data flow |
@@ -107,11 +109,30 @@ its slice of the model.
 
 <img src="docs/img/07-queue.png" alt="Task queue — todo · in progress · verify · done" width="100%">
 
-Paste the **`task-runner`** skill and Claude works the queue one task at a time,
-moving each file `todo → in progress → done`. Because every task ships with the right
-context, it executes precisely instead of improvising.
+Paste the **`task-runner`** skill and Claude works the queue one task at a time, moving
+each file `todo → in progress → verify → done`. Because every task ships with the right
+context, it executes precisely instead of improvising — and because writing the code does
+not finish a task, it then **runs that task's acceptance checks for real** and records what
+each one actually did. All pass → *done*. One fails → the task stays unproven and the runner
+writes the fix task itself, carrying the failed step and the observed result.
 
 <img src="docs/img/demo-tasks.gif" alt="Click a schema element → create a task → queue" width="920">
+
+## Point at it instead of describing it
+
+<img src="docs/img/08-preview-pick.png" alt="Preview — click an element, get a prompt" width="100%">
+
+Some things are easier to point at than to write down. Open any URL in the **Preview** tab,
+press **◎ Select**, and click the thing you want changed. You get a prompt — already on your
+clipboard — carrying the element's own HTML with everything inside it, what it is (text, id,
+`data-testid`, a shortest-unique CSS selector, what it sits inside), and **the files in your
+project where it probably lives**, found by searching for its distinctive strings. When
+nothing matches, it says so rather than naming a plausible file — a confident wrong file is
+worse than none.
+
+The page is fetched by your machine and served from it, so a site that refuses to be framed
+still opens. It runs in its own origin, sandboxed away from the dashboard, and pointing it at
+your own network is refused.
 
 ## Your code never leaves your machine
 
@@ -168,9 +189,10 @@ They live in [`skills.json`](skills.json) — point an entry at your own `.md` t
 | Skill | What it does |
 |---|---|
 | **`gitmir-model`** | Builds/updates the multidimensional model in `.gitmir/model/` from real code, and installs the standing rule that keeps it current. |
+| **`product-docs-spec`** | At the start of a product: turns raw input — a client's description, specs, a dataset, a design export — into a `docs/` folder of 12 files that works as the actual build spec, written before any code. |
 | **`context-distillation`** | Turns a pile of docs, tickets or a chat thread into a small brief with checkable acceptance criteria — the context, not the noise. |
-| **`task-planner`** | Breaks a goal into small self-contained task files, each carrying the right slice of the model. |
-| **`task-runner`** | Works the queue autonomously: `todo → in progress → done`, with an outcome appended. |
+| **`task-planner`** | Breaks a goal into small self-contained task files, each carrying the right slice of the model **and the step-by-step checks that prove it works**. |
+| **`task-runner`** | Works the queue autonomously: `todo → in progress → verify → done`. It runs each task's checks for real, and when one fails it writes the fix task itself. |
 | **`task-log`** | Keeps a human-readable log of what Claude completed, shown in the **Tasks** tab. |
 | **`legacy-maintenance`** | Change an old codebase without breaking what's next to it: maps the blast radius from the model, then ships small reversible steps. |
 | **`stack-port`** | Port a hand-written project to a new stack at full parity — the old app is the spec, a parity ledger stops anything being silently dropped. |
