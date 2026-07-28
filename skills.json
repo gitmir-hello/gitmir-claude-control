@@ -20,6 +20,14 @@
     "file": "skills/context-distillation.md"
   },
   {
+    "name": "product-docs-spec",
+    "title": "product-docs-spec",
+    "desc": "Turns raw input — a client's description, specs, a CSV, a design export, existing code — into a docs/ folder of 12 files that works as the actual build spec: data model with types, roles matrix, every screen, processes, API, invariants, and open questions with defaults. Written before any code, so the product gets built right the first time.",
+    "file": "skills/product-docs-spec.md",
+    "stripFrontmatter": true,
+    "prepend": "Build the docs/ specification for THIS project by following the specification below in full. Read every input available first — the client's description, any .md/.docx/.pdf specs, datasets, design or code exports, the existing repository — and ground every statement in them; never invent. Write only inside docs/ in this pass: no application code yet.\n\n"
+  },
+  {
     "name": "task-planner",
     "title": "task-planner",
     "desc": "Turns a goal into small, self-contained task files in tasks/todo/ — each carrying the right model context AND the step-by-step checks that prove it works, so nothing is called done on faith.",
