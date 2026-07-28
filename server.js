@@ -240,6 +240,9 @@ function readBody(req) {
 function sameOrigin(req) {
   const host = String(req.headers.host || '');
   if (!/^(localhost|127\.0\.0\.1|\[::1\]):?/.test(host)) return false;
+  // Anything arriving on the preview origin is the framed site talking, not the
+  // dashboard. It may use the preview endpoints and nothing else.
+  if (host === PREVIEW_HOST + ':' + PORT) return false;
   const site = req.headers['sec-fetch-site'];
   if (site && site !== 'same-origin' && site !== 'none') return false;
   const origin = req.headers.origin;
@@ -259,7 +262,13 @@ function sameOrigin(req) {
  * injected picker and postMessage back, but it cannot touch this dashboard's DOM
  * or call these APIs (its Origin is "null", which sameOrigin() refuses).
  */
+// The dashboard is served on localhost; the preview is served on 127.0.0.1. Same
+// server, same port, DIFFERENT ORIGIN — which is the whole trick. The framed site
+// gets a real origin (so cookies, storage and ES modules all behave normally) while
+// the same-origin policy still keeps it away from the dashboard's DOM and its APIs.
 const PREVIEW_ON = process.env.GITMIR_PREVIEW !== '0';
+const PREVIEW_HOST = '127.0.0.1';
+const PREVIEW_ORIGIN = 'http://' + PREVIEW_HOST + ':' + PORT;
 // Server-side escape: esc() further down lives inside the HTML template and is
 // only defined in the browser.
 const hesc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
@@ -375,11 +384,24 @@ const PREVIEW_BRIDGE = `(function(){
   parent.postMessage({type:'gitmir:bridge-ready',url:(window.__gitmirUrl||location.href)},'*');
 })();`;
 
-async function previewFetch(rawUrl) {
+// Loopback is the machine itself: previewing your own dev server is the main use, but
+// a framed page must not be able to aim the proxy at localhost and read this
+// dashboard's API through it. So it is allowed only for URLs the user opened, and the
+// mirror then serves that page's own assets.
+const loopbackOk = new Set();
+// Only one preview runs at a time, so the preview origin can act as a transparent
+// mirror of that one site: every path on it maps to the same path upstream. This is
+// what makes ROOT-RELATIVE urls work — /css/style.css resolves against the origin
+// and ignores <base> entirely, which is why prefixing paths could never be enough.
+let previewSite = null;   // e.g. 'https://example.com'
+async function previewFetch(rawUrl, allowLoopback) {
   let u;
   try { u = new URL(rawUrl); } catch { return { error: 'That is not a valid URL.' }; }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return { error: 'Only http:// and https:// can be previewed.' };
   const firstIsLoopback = isLoopback(u.hostname);
+  if (firstIsLoopback && !allowLoopback && !loopbackOk.has(u.host)) {
+    return { error: `Refused ${u.host} — a page inside the preview cannot point it at this machine.` };
+  }
   let hops = 0;
   for (;;) {
     const why = blockedHost(u.hostname);
@@ -415,7 +437,8 @@ const server = http.createServer(async (req, res) => {
     // The injected picker is fetched by the sandboxed preview frame, whose origin is
     // opaque — it carries no secrets and must stay reachable from there.
     if (url.pathname.startsWith('/api/') && url.pathname !== '/api/ping'
-        && url.pathname !== '/api/preview-bridge.js' && !sameOrigin(req)) {
+        && url.pathname !== '/api/preview-bridge.js' && url.pathname !== '/api/preview'
+        && !url.pathname.startsWith('/api/px/') && !sameOrigin(req)) {
       return sendJSON(res, 403, { error: 'cross-origin request refused' });
     }
     if (req.method === 'GET' && url.pathname === '/') {
@@ -440,6 +463,50 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/ping') {
       return sendJSON(res, 200, { ok: true });
     }
+    // Transparent mirror: on the preview origin, any non-API path is the same path on
+    // the site being previewed. Served with ACAO so module scripts load.
+    if (req.method === 'GET' && req.headers.host === PREVIEW_HOST + ':' + PORT
+        && !url.pathname.startsWith('/api/')) {
+      if (!PREVIEW_ON || !previewSite) { res.writeHead(404); return res.end('no preview'); }
+      const got = await previewFetch(previewSite + url.pathname + (url.search || ''), true);
+      if (got.error) { res.writeHead(502, { 'Access-Control-Allow-Origin': '*' }); return res.end(got.error); }
+      let body = got.body;
+      const ct = got.contentType || 'application/octet-stream';
+      if (/text\/css|javascript/i.test(ct)) {
+        try { body = Buffer.from(body.toString('utf8').split(previewSite + '/').join(PREVIEW_ORIGIN + '/'), 'utf8'); } catch {}
+      }
+      res.writeHead(got.status, { 'Content-Type': ct, 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+      return res.end(body);
+    }
+    // Subresource mirror: /api/px/<scheme>/<host>/<path>. Serving the site's own
+    // assets from here — with Access-Control-Allow-Origin — is what lets a module
+    // script load into a sandboxed frame whose origin is null.
+    if (req.method === 'GET' && url.pathname.startsWith('/api/px/')) {
+      if (!PREVIEW_ON) { res.writeHead(404); return res.end('preview disabled'); }
+      const rest = url.pathname.slice('/api/px/'.length);
+      const slash = rest.indexOf('/');
+      const scheme = slash < 0 ? '' : rest.slice(0, slash);
+      if (scheme !== 'http' && scheme !== 'https') { res.writeHead(400); return res.end('bad target'); }
+      const upstream = scheme + '://' + rest.slice(slash + 1) + (url.search || '');
+      const got = await previewFetch(upstream);
+      if (got.error) { res.writeHead(502, { 'Access-Control-Allow-Origin': '*' }); return res.end(got.error); }
+      const ct = got.contentType || 'application/octet-stream';
+      // Rewrite same-site absolute URLs inside CSS so its @imports and url()s keep
+      // flowing through the mirror as well.
+      let body = got.body;
+      if (/text\/css/i.test(ct)) {
+        try {
+          const fu2 = new URL(got.finalUrl);
+          body = Buffer.from(body.toString('utf8').split(fu2.origin + '/').join(`${PREVIEW_ORIGIN}/api/px/${fu2.protocol.replace(':', '')}/${fu2.host}/`), 'utf8');
+        } catch {}
+      }
+      res.writeHead(got.status, {
+        'Content-Type': ct,
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'no-store',
+      });
+      return res.end(body);
+    }
     if (req.method === 'GET' && url.pathname === '/api/preview-bridge.js') {
       res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8' });
       return res.end(PREVIEW_BRIDGE);
@@ -447,7 +514,12 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/preview') {
       if (!PREVIEW_ON) { res.writeHead(404); return res.end('preview disabled'); }
       const target = url.searchParams.get('url') || '';
-      const got = await previewFetch(target);
+      // Only a real frame navigation counts as "the user opened this". A fetch from
+      // inside the framed page carries a different Sec-Fetch-Dest and cannot forge it.
+      const dest = req.headers['sec-fetch-dest'];
+      const userOpened = dest === 'iframe' || dest === 'document' || dest === undefined;
+      const got = await previewFetch(target, userOpened);
+      if (userOpened && !got.error) { try { const f = new URL(got.finalUrl); loopbackOk.add(f.host); previewSite = f.origin; } catch {} }
       if (got.error) {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         return res.end(`<!doctype html><meta charset="utf-8"><body style="margin:0;font:14px/1.6 -apple-system,sans-serif;background:#04060a;color:#8497b8;display:flex;align-items:center;justify-content:center;height:100vh;padding:30px;text-align:center">${hesc(got.error)}</body>`);
@@ -458,11 +530,21 @@ const server = http.createServer(async (req, res) => {
         return res.end(got.body);
       }
       let html = got.body.toString('utf8');
-      // <base> makes the site's own relative assets load straight from the site
-      // instead of 404ing against this origin.
-      const base = `<base href="${hesc(got.finalUrl)}">`;
+      // Point <base> at our own mirror rather than at the site. Letting assets load
+      // straight from the site looks simpler, but an ES module is ALWAYS fetched in
+      // CORS mode — no crossorigin attribute involved — and the frame's origin is
+      // opaque, so any site that does not send Access-Control-Allow-Origin has its
+      // app blocked and renders as an empty shell. Going through /api/px lets us
+      // answer with ACAO:* ; keeping the upstream's path shape underneath means a
+      // module's own relative imports still resolve.
+      const fu = new URL(got.finalUrl);
+      const mirror = `${PREVIEW_ORIGIN}${fu.pathname}`;
+      const base = `<base href="${hesc(mirror)}">`;
       html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + base)
                                        : base + html;
+      // Absolute same-site URLs bypass <base>, so send those through the mirror too.
+      const origin = fu.origin;
+      html = html.split(origin + '/').join(`${PREVIEW_ORIGIN}/`);
       // The frame's own location is this proxy; the picker must report the page the
       // user is actually looking at, or the task says "picked from localhost:4599".
       // The frame is sandboxed without allow-same-origin, so its origin is opaque.
@@ -475,7 +557,10 @@ const server = http.createServer(async (req, res) => {
       //      them while booting, so the app dies before it paints. Hand them a working
       //      in-memory stand-in.
       html = html.replace(/\scrossorigin(=("[^"]*"|'[^']*'|[^\s>]+))?/gi, '');
-      const shim = 'try{localStorage.getItem("x")}catch(e){var __m={};var __s={getItem:function(k){return __m[k]===undefined?null:__m[k]},setItem:function(k,v){__m[k]=String(v)},removeItem:function(k){delete __m[k]},clear:function(){__m={}},key:function(i){return Object.keys(__m)[i]||null}};Object.defineProperty(__s,"length",{get:function(){return Object.keys(__m).length}});try{Object.defineProperty(window,"localStorage",{value:__s,configurable:true});Object.defineProperty(window,"sessionStorage",{value:__s,configurable:true})}catch(e2){}}';
+      // Everything an opaque origin makes throw, handed a working stand-in: a site
+      // that reads document.cookie or localStorage while booting must not die before
+      // it paints. This is why a page could come back as a black rectangle.
+      const shim = 'try{localStorage.getItem("x")}catch(e){var __m={};var __s={getItem:function(k){return __m[k]===undefined?null:__m[k]},setItem:function(k,v){__m[k]=String(v)},removeItem:function(k){delete __m[k]},clear:function(){__m={}},key:function(i){return Object.keys(__m)[i]||null}};Object.defineProperty(__s,"length",{get:function(){return Object.keys(__m).length}});try{Object.defineProperty(window,"localStorage",{value:__s,configurable:true});Object.defineProperty(window,"sessionStorage",{value:__s,configurable:true})}catch(e2){}}try{document.cookie}catch(e){var __ck="";try{Object.defineProperty(document,"cookie",{get:function(){return __ck},set:function(v){var one=String(v).split(";")[0];if(one.indexOf("=")<0)return;var k=one.split("=")[0];var kept=__ck?__ck.split("; ").filter(function(x){return x.split("=")[0]!==k}):[];kept.push(one);__ck=kept.join("; ")},configurable:true})}catch(e2){}}';
       html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + `<script>${shim}</script>`) : `<script>${shim}</script>` + html;
       const inject = `<script>window.__gitmirUrl=${JSON.stringify(got.finalUrl)};${PREVIEW_BRIDGE}</script>`;
       html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, inject + '</body>') : html + inject;
@@ -539,7 +624,7 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, { hits, searched, fromModel });
     }
     if (req.method === 'GET' && url.pathname === '/api/env') {
-      return sendJSON(res, 200, { platform: process.platform, pickerAvailable: nativePickerAvailable(), relayUrl: relay.status().url, preview: PREVIEW_ON });
+      return sendJSON(res, 200, { platform: process.platform, pickerAvailable: nativePickerAvailable(), relayUrl: relay.status().url, preview: PREVIEW_ON, previewOrigin: PREVIEW_ORIGIN });
     }
     if (req.method === 'GET' && url.pathname === '/api/projects') {
       const list = loadProjects().map((p) => ({
@@ -1463,7 +1548,7 @@ function renderDetail(){
         '<button class="ghost" id="pvGo">Go</button>'+
         '<button class="ghost pv-pick" id="pvPick" disabled>◎ Select</button>'+
       '</div>'+
-      '<div class="pv-frame-wrap"><iframe class="pv-frame" id="pvFrame" sandbox="allow-scripts allow-forms allow-popups"></iframe>'+
+      '<div class="pv-frame-wrap"><iframe class="pv-frame" id="pvFrame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>'+
         '<div class="pv-empty" id="pvEmpty">'+
           '<div class="pv-glyph">⌖</div>'+
           '<div class="pv-lead">nothing loaded</div>'+
@@ -2407,6 +2492,7 @@ async function saveOrder(){
 
 /* ---------------- preview & pick (client) ---------------- */
 let PREVIEW_OK = true;
+let PV_ORIGIN = '';   // preview is served from a different host, see /api/env
 let pvPicked = null;
 // A literal backtick would terminate the HTML template this script is emitted from.
 const TICK = String.fromCharCode(96);
@@ -2451,7 +2537,7 @@ function pvOpen(v){
   if(empty) empty.style.display='none';
   const wrap=frame.parentElement; if(wrap) wrap.classList.add('loaded');
   frame.classList.add('on');
-  frame.src='/api/preview?url='+encodeURIComponent(v);
+  frame.src=PV_ORIGIN+'/api/preview?url='+encodeURIComponent(v);
   if(pick) pick.disabled=false;
   pvSetPick(false);
   const box=document.getElementById('pvPicked'); if(box) box.innerHTML='';
@@ -2705,7 +2791,7 @@ async function teamPoll(){
 }
 
 document.addEventListener('keydown', (e)=>{ if(e.key==='Escape'){ fsClose(); for(const id of ['ctxOverlay','addOverlay','taskOverlay']){ const o=document.getElementById(id); if(o){ o.classList.remove('show'); o.innerHTML=''; } } } });
-fetch('/api/env').then(r=>r.json()).then(d=>{ PICKER_OK = !!d.pickerAvailable; if(d.relayUrl) RELAY_URL_DEFAULT=d.relayUrl; if(d.preview===false){ PREVIEW_OK=false; renderDetail(); } }).catch(()=>{});
+fetch('/api/env').then(r=>r.json()).then(d=>{ PICKER_OK = !!d.pickerAvailable; if(d.relayUrl) RELAY_URL_DEFAULT=d.relayUrl; if(d.previewOrigin) PV_ORIGIN=d.previewOrigin; if(d.preview===false){ PREVIEW_OK=false; renderDetail(); } }).catch(()=>{});
 loadSkillsList();
 load();
 teamPoll();
