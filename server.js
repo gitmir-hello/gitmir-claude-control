@@ -1084,7 +1084,10 @@ const HTML = /* html */ `<!doctype html>
   .pv-bar{display:flex; gap:9px; margin-bottom:12px}
   .pv-url{flex:1}
   .pv-pick.on{background:rgba(47,216,255,.14); border-color:var(--cyan); color:var(--cyan)}
-  .pv-frame-wrap{position:relative; height:56vh; min-height:320px; border:1px solid var(--line); background:#fff}
+  /* The preview pane fills the window: a fixed vh left dead space below the frame. */
+  .detail-wrap{display:flex; flex-direction:column; min-height:100%}
+  .pane[data-pane="preview"].active{display:flex; flex-direction:column; flex:1; min-height:0; padding-bottom:26px}
+  .pv-frame-wrap{position:relative; flex:1; min-height:280px; border:1px solid var(--line); background:#fff}
   .pv-frame{width:100%; height:100%; border:0; display:none; background:#fff}
   .pv-frame.on{display:block}
   .pv-empty{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:30px; color:var(--dim); font-size:13.5px; line-height:1.6; background:var(--panel2)}
@@ -2345,22 +2348,38 @@ let PREVIEW_OK = true;
 let pvPicked = null;
 // A literal backtick would terminate the HTML template this script is emitted from.
 const TICK = String.fromCharCode(96);
+function pvMem(){ try{ return JSON.parse(localStorage.getItem('gitmir.preview')||'{}'); }catch{ return {}; } }
+function pvRemember(u){ if(!selected) return; const m=pvMem(); m[selected]=u; try{ localStorage.setItem('gitmir.preview', JSON.stringify(m)); }catch{} }
 function pvInit(){
   const go=document.getElementById('pvGo'), pick=document.getElementById('pvPick'),
         input=document.getElementById('pvUrl'), frame=document.getElementById('pvFrame');
   if(!go) return;
-  const load=()=>{
-    let v=input.value.trim(); if(!v) return;
-    if(!/^https?:\\/\\//i.test(v)) { v='https://'+v; input.value=v; }
-    document.getElementById('pvEmpty').style.display='none';
-    frame.classList.add('on');
-    frame.src='/api/preview?url='+encodeURIComponent(v);
-    pick.disabled=false; pvSetPick(false);
-    document.getElementById('pvPicked').innerHTML='';
-  };
+  if(go.dataset.wired){                       // already bound; just restore what was open
+    if(!frame.src && input.value.trim()) pvOpen(input.value.trim());
+    return;
+  }
+  go.dataset.wired='1';
+  // Reopen whatever this project was last pointed at, so switching tabs or projects
+  // does not throw the page away.
+  const last=pvMem()[selected];
+  if(last && !input.value){ input.value=last; pvOpen(last); }
+  const load=()=>{ const v=input.value.trim(); if(v) pvOpen(v); };
   go.addEventListener('click', load);
   input.addEventListener('keydown', e=>{ if(e.key==='Enter') load(); });
   pick.addEventListener('click', ()=> pvSetPick(!pick.classList.contains('on')));
+}
+function pvOpen(v){
+  const input=document.getElementById('pvUrl'), frame=document.getElementById('pvFrame'),
+        pick=document.getElementById('pvPick'), empty=document.getElementById('pvEmpty');
+  if(!frame) return;
+  if(!/^https?:/i.test(v)) v='https://'+v;   // no slashes: an escaped / would not survive the template
+  input.value=v; pvRemember(v);
+  if(empty) empty.style.display='none';
+  frame.classList.add('on');
+  frame.src='/api/preview?url='+encodeURIComponent(v);
+  if(pick) pick.disabled=false;
+  pvSetPick(false);
+  const box=document.getElementById('pvPicked'); if(box) box.innerHTML='';
 }
 function pvSetPick(on){
   const pick=document.getElementById('pvPick'), frame=document.getElementById('pvFrame');
