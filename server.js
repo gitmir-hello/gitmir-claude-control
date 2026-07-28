@@ -775,6 +775,18 @@ process.on('uncaughtException', (e) => console.error('uncaught:', (e && e.stack)
 process.on('unhandledRejection', (e) => console.error('unhandled rejection:', (e && e.stack) || e));
 
 server.listen(PORT, '127.0.0.1', () => {
+  // The client script is emitted from a template literal, where an escape like \\s or
+  // \\/ silently collapses and can break the whole script for the user while the server
+  // still starts happily. Parse it (compile only, never run) and say so loudly.
+  try {
+    const m = HTML.match(/<script>([\s\S]*?)<\/script>\s*<\/body>/);
+    if (!m) console.error('WARNING: could not find the client script to verify.');
+    else new Function(m[1]);
+  } catch (e) {
+    console.error('\n  *** THE DASHBOARD SCRIPT IS BROKEN: ' + ((e && e.message) || e));
+    console.error('  *** The UI will not work. Usually a backslash escape that did not survive');
+    console.error('  *** the HTML template literal (\\s, \\/, or a backtick).\n');
+  }
   const addr = `http://localhost:${PORT}`;
   console.log(`\n  GITMIR Claude Control  ->  ${addr}\n  (Ctrl+C to stop)\n`);
   const opener = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', addr]]
@@ -1087,11 +1099,24 @@ const HTML = /* html */ `<!doctype html>
   /* The preview pane fills the window: a fixed vh left dead space below the frame. */
   .detail-wrap{display:flex; flex-direction:column; min-height:100%}
   .pane[data-pane="preview"].active{display:flex; flex-direction:column; flex:1; min-height:0; padding-bottom:26px}
-  .pv-frame-wrap{position:relative; flex:1; min-height:280px; border:1px solid var(--line); background:#fff}
+  .pv-frame-wrap{position:relative; flex:1; min-height:280px; border:1px solid var(--glass-brd);
+    background-color:#061021;
+    background-image:linear-gradient(rgba(120,210,255,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(120,210,255,.05) 1px, transparent 1px);
+    background-size:28px 28px}
+  /* white only once a real page is in there — an empty canvas should read as ours */
+  .pv-frame-wrap.loaded{background-color:#fff; background-image:none}
   .pv-frame{width:100%; height:100%; border:0; display:none; background:#fff}
   .pv-frame.on{display:block}
-  .pv-empty{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:30px; color:var(--dim); font-size:13.5px; line-height:1.6; background:var(--panel2)}
-  .pv-note{color:var(--dim2); font-size:12px}
+  .pv-empty{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:34px}
+  .pv-glyph{font-size:26px; line-height:1; color:var(--cyan); text-shadow:0 0 22px rgba(47,216,255,.55); margin-bottom:16px}
+  .pv-lead{font-family:var(--font-mono); font-size:11px; letter-spacing:.2em; text-transform:uppercase; color:var(--cyan-soft); margin-bottom:12px}
+  .pv-h{font-size:16.5px; font-weight:650; color:var(--txt); margin-bottom:9px}
+  .pv-sub{color:var(--dim); font-size:13px; line-height:1.7; max-width:540px}
+  .pv-note{display:block; color:var(--dim2); font-size:12px; margin-top:10px; line-height:1.6}
+  .pv-eg{display:flex; gap:8px; margin-top:20px; flex-wrap:wrap; justify-content:center}
+  .pv-egb{font-family:var(--font-mono); font-size:11.5px; color:var(--ink-2); background:rgba(8,16,36,.6);
+    border:1px solid var(--faint); padding:6px 12px; cursor:pointer}
+  .pv-egb:hover{color:var(--cyan); border-color:rgba(47,216,255,.5)}
   .pv-card{margin-top:16px; padding:16px; border:1px solid var(--line); background:linear-gradient(165deg,rgba(18,36,66,.4),rgba(9,18,38,.6))}
   .pv-el{font-family:var(--font-mono); font-size:12.5px; color:var(--cyan-soft); word-break:break-all; line-height:1.7}
   .pv-el b{color:var(--txt)}
@@ -1229,7 +1254,7 @@ const HTML = /* html */ `<!doctype html>
   /* diagram frame + corner brackets (HUD signature) */
   .holo-wrap{ border:1px solid var(--glass-brd) }
   .mermaid-box{ position:relative }
-  .dgm::before{ content:""; position:absolute; inset:-1px; pointer-events:none; z-index:3;
+  .dgm::before, .pv-frame-wrap::before{ content:""; position:absolute; inset:-1px; pointer-events:none; z-index:3;
     --cb:14px; --cw:2px; --cc:var(--cyan);
     background:
       linear-gradient(90deg,transparent,rgba(95,222,255,.5),transparent) 50% 0/calc(100% - 48px) 1px no-repeat,
@@ -1427,7 +1452,14 @@ function renderDetail(){
         '<button class="ghost pv-pick" id="pvPick" disabled>◎ Select</button>'+
       '</div>'+
       '<div class="pv-frame-wrap"><iframe class="pv-frame" id="pvFrame" sandbox="allow-scripts allow-forms allow-popups"></iframe>'+
-        '<div class="pv-empty" id="pvEmpty">Type a URL and press <b>Go</b>. The page is fetched here and shown from this machine, so framing restrictions do not block it.<br><span class="pv-note">The frame is sandboxed: the site runs the picker but cannot reach this dashboard. Logged-in pages will render logged out.</span></div>'+
+        '<div class="pv-empty" id="pvEmpty">'+
+          '<div class="pv-glyph">⌖</div>'+
+          '<div class="pv-lead">nothing loaded</div>'+
+          '<div class="pv-h">Open a page, then click the thing you want changed</div>'+
+          '<div class="pv-sub">The page is fetched by this machine and shown from here, so a site that refuses to be framed still opens. Press <b>◎ Select</b>, click an element, and you get a task that names it — and the files it probably lives in.'+
+          '<span class="pv-note">Sandboxed: the site runs the picker but cannot reach this dashboard. Pages behind a login render logged out.</span></div>'+
+          '<div class="pv-eg" id="pvEg"></div>'+
+        '</div>'+
       '</div>'+
       '<div id="pvPicked"></div>'+
     '</div>'+
@@ -2379,6 +2411,18 @@ function pvInit(){
   go.dataset.wired='1';
   // Reopen whatever this project was last pointed at, so switching tabs or projects
   // does not throw the page away.
+  const eg=document.getElementById('pvEg');
+  if(eg && !eg.childElementCount){
+    // Starting points that actually work: this dashboard, and the usual dev-server port.
+    for(const u of ['http://localhost:4599/', 'http://localhost:3000/', 'https://example.com/']){
+      // Plain string ops on purpose: a slash escape in a regex would not survive
+      // being emitted from the HTML template literal below.
+      let lbl=u; const q=lbl.indexOf('://'); if(q>=0) lbl=lbl.slice(q+3);
+      if(lbl.endsWith('/')) lbl=lbl.slice(0,-1);
+      const b2=document.createElement('button'); b2.className='pv-egb'; b2.textContent=lbl;
+      b2.addEventListener('click', ()=>pvOpen(u)); eg.appendChild(b2);
+    }
+  }
   const last=pvMem()[selected];
   if(last && !input.value){ input.value=last; pvOpen(last); }
   const load=()=>{ const v=input.value.trim(); if(v) pvOpen(v); };
@@ -2393,6 +2437,7 @@ function pvOpen(v){
   if(!/^https?:/i.test(v)) v='https://'+v;   // no slashes: an escaped / would not survive the template
   input.value=v; pvRemember(v);
   if(empty) empty.style.display='none';
+  const wrap=frame.parentElement; if(wrap) wrap.classList.add('loaded');
   frame.classList.add('on');
   frame.src='/api/preview?url='+encodeURIComponent(v);
   if(pick) pick.disabled=false;
