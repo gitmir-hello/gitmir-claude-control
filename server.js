@@ -2564,7 +2564,7 @@ window.addEventListener('message', async (e)=>{
 });
 // Picking an element builds the text you paste into Claude Code and puts it straight
 // on the clipboard, then shows it so you can see exactly what was copied.
-function pvText(d, hits, model){
+function pvText(d, hits, model, what){
   const c=d.candidates||{};
   const L=[];
   L.push('I want to change an element on the page ' + (d.url||'') + '.');
@@ -2599,7 +2599,7 @@ function pvText(d, hits, model){
   }
   L.push('');
   L.push('## What to change');
-  L.push('<describe it here>');
+  L.push((what && what.trim()) ? what.trim() : '<describe it here>');
   return L.join('\\n');
 }
 
@@ -2634,7 +2634,9 @@ async function pvRenderPicked(d){
       '<div class="ctx-note">'+(copied
         ? '✓ Copied to the clipboard — paste it into Claude Code (⌘V + Enter) and it will know which element you mean.'
         : 'Press <b>Copy</b> below, then paste it into Claude Code (⌘V + Enter).')+'</div>'+
-      '<pre class="ctx-pre">'+esc(text)+'</pre>'+
+      '<pre class="ctx-pre" id="pvPre">'+esc(text)+'</pre>'+
+      '<div class="ctx-taskl">What should change about this element?</div>'+
+      '<textarea class="ctx-task" id="pvWhat" placeholder="e.g. make this image lazy-load and give it an alt text"></textarea>'+
       '<div class="ctx-actions">'+
         '<button class="run pv-copy">📋 '+(copied?'Copy again':'Copy')+'</button>'+
         '<button class="ghost pv-task">＋ Queue as a task</button>'+
@@ -2646,15 +2648,25 @@ async function pvRenderPicked(d){
   ov.querySelector('.ctx-x').addEventListener('click', close);
   ov.querySelector('.pv-close').addEventListener('click', close);
   ov.addEventListener('click', e=>{ if(e.target===ov) close(); });
+  const what=ov.querySelector('#pvWhat'), pre=ov.querySelector('#pvPre');
+  const current=()=> pvText(d, r.hits, r.fromModel, what.value);
+  // Keep the preview honest: it shows exactly what a copy would put on the clipboard.
+  what.addEventListener('input', ()=>{ pre.textContent=current(); });
   ov.querySelector('.pv-copy').addEventListener('click', async ()=>{
-    try{ await copyToClipboard(text); toast('Copied ✓  paste into Claude Code'); }catch{ toast('Could not copy — select the text and copy it', true); }
+    try{ await copyToClipboard(current()); toast('Copied ✓  paste into Claude Code'); }catch{ toast('Could not copy — select the text and copy it', true); }
   });
-  ov.querySelector('.pv-task').addEventListener('click', ()=>{ close(); pvQueueTask(text, d); });
+  ov.querySelector('.pv-task').addEventListener('click', ()=>{
+    const w=what.value.trim();
+    if(!w){ toast('Say what should change first', true); what.focus(); return; }
+    close(); pvQueueTask(current(), d, w);
+  });
+  setTimeout(()=>{ try{ what.focus(); }catch{} }, 30);
 }
 // Optional: the same text, dropped into the queue instead of the clipboard.
-async function pvQueueTask(text, d){
+async function pvQueueTask(text, d, what){
   const c=(d && d.candidates)||{};
-  const title=(c.text ? c.text.slice(0,60) : (d && d.tag) || 'element') + ' — from the page';
+  const title=(what && what.trim()) ? what.trim().split('\\n')[0].slice(0,80)
+            : ((c.text ? c.text.slice(0,60) : (d && d.tag) || 'element') + ' — from the page');
   const content='# '+title+'\\n\\n## Context\\nPicked from '+((d&&d.url)||'')+' in the Preview tab.\\n\\n'+text+'\\n';
   const r=await (await fetch('/api/task',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({path:selected, title, content})})).json();
