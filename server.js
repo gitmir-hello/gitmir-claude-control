@@ -252,11 +252,170 @@ function sameOrigin(req) {
   return true;
 }
 
+/* ------------------------------ preview & pick ------------------------------
+ * Fetch any URL, serve it from here with the picker injected, and let the user
+ * click an element to describe it. The frame is sandboxed WITHOUT
+ * allow-same-origin, so the proxied site gets an opaque origin: it can run the
+ * injected picker and postMessage back, but it cannot touch this dashboard's DOM
+ * or call these APIs (its Origin is "null", which sameOrigin() refuses).
+ */
+const PREVIEW_ON = process.env.GITMIR_PREVIEW !== '0';
+// Server-side escape: esc() further down lives inside the HTML template and is
+// only defined in the browser.
+const hesc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+const PREVIEW_MAX = 2 * 1024 * 1024;   // documents only; this is not a CDN
+const PREVIEW_TIMEOUT = 15000;
+
+// The machine's own network is not ours to reach. Loopback IS allowed: pointing
+// the preview at your own dev server (or at this dashboard) is the main use.
+function blockedHost(hostname) {
+  const h = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (/^169\.254\./.test(h)) return 'link-local addresses (cloud metadata lives there)';
+  if (/^10\./.test(h)) return 'private network addresses';
+  if (/^192\.168\./.test(h)) return 'private network addresses';
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return 'private network addresses';
+  if (/^(fc|fd)[0-9a-f]{2}:/.test(h)) return 'private network addresses';
+  if (h === 'fe80::' || /^fe80:/.test(h)) return 'link-local addresses';
+  if (/\.internal$|\.local$/.test(h)) return 'internal network names';
+  return null;
+}
+const isLoopback = (h) => /^(localhost|127\.|::1$|0\.0\.0\.0$)/.test(String(h || '').toLowerCase().replace(/^\[|\]$/g, ''));
+
+// The picker. Injected into the proxied document; namespaced so it cannot collide
+// with the page it lands in, and it removes everything it added when it turns off.
+const PREVIEW_BRIDGE = `(function(){
+  if (window.__gitmirPick) return;
+  var box=null, label=null, on=false, last=null;
+  function mk(){
+    box=document.createElement('div'); label=document.createElement('div');
+    box.style.cssText='position:fixed;z-index:2147483647;pointer-events:none;border:2px solid #2fd8ff;background:rgba(47,216,255,.10);box-shadow:0 0 0 1px rgba(0,0,0,.4);transition:all .04s linear';
+    label.style.cssText='position:fixed;z-index:2147483647;pointer-events:none;background:#04060a;color:#2fd8ff;font:11px/1.6 ui-monospace,monospace;padding:2px 7px;border:1px solid #2fd8ff;white-space:nowrap;max-width:90vw;overflow:hidden;text-overflow:ellipsis';
+    document.documentElement.appendChild(box); document.documentElement.appendChild(label);
+  }
+  function rm(){ if(box&&box.parentNode)box.parentNode.removeChild(box); if(label&&label.parentNode)label.parentNode.removeChild(label); box=label=null; }
+  function desc(el){
+    var t=el.tagName.toLowerCase();
+    if(el.id) return t+'#'+el.id;
+    var c=(el.className&&el.className.baseVal!==undefined?el.className.baseVal:el.className)||'';
+    c=String(c).trim().split(/\\s+/).filter(Boolean).slice(0,2).join('.');
+    return c? t+'.'+c : t;
+  }
+  function paint(el){
+    if(!box) mk();
+    var r=el.getBoundingClientRect();
+    box.style.left=r.left+'px'; box.style.top=r.top+'px'; box.style.width=r.width+'px'; box.style.height=r.height+'px';
+    label.textContent=desc(el)+'  '+Math.round(r.width)+'×'+Math.round(r.height);
+    var ly=r.top>22?r.top-22:r.bottom+2;
+    label.style.left=r.left+'px'; label.style.top=ly+'px';
+  }
+  function over(e){ if(!on) return; var el=e.target; if(!el||el===last) return; last=el; paint(el); }
+  // Build the shortest selector that still matches exactly one element. An
+  // nth-child chain from <body> is what a naive version produces and it breaks the
+  // moment anything above it moves.
+  function uniq(sel){ try{ return document.querySelectorAll(sel).length===1; }catch(e){ return false; } }
+  function cssEsc(s){ return (window.CSS&&CSS.escape)?CSS.escape(s):String(s).replace(/[^a-zA-Z0-9_-]/g,'\\\\$&'); }
+  function selectorFor(el){
+    var tid=el.getAttribute('data-testid')||el.getAttribute('data-test')||el.getAttribute('data-cy');
+    if(tid){ var s='[data-testid="'+tid+'"]'; if(uniq(s)) return s;
+             s='[data-test="'+tid+'"]'; if(uniq(s)) return s; }
+    if(el.id){ var si='#'+cssEsc(el.id); if(uniq(si)) return si; }
+    var t=el.tagName.toLowerCase();
+    var cls=String((el.className&&el.className.baseVal!==undefined?el.className.baseVal:el.className)||'').trim().split(/\\s+/).filter(Boolean);
+    for(var n=1;n<=Math.min(3,cls.length);n++){
+      var s2=t+'.'+cls.slice(0,n).map(cssEsc).join('.');
+      if(uniq(s2)) return s2;
+    }
+    var parts=[], cur=el, depth=0;
+    while(cur&&cur.nodeType===1&&depth<5){
+      var p=cur.tagName.toLowerCase();
+      if(cur.id){ parts.unshift('#'+cssEsc(cur.id)); break; }
+      var par=cur.parentElement;
+      if(par){ var same=Array.prototype.filter.call(par.children,function(x){return x.tagName===cur.tagName;});
+        if(same.length>1) p+=':nth-of-type('+(same.indexOf(cur)+1)+')'; }
+      parts.unshift(p); cur=par; depth++;
+      var joined=parts.join(' > ');
+      if(uniq(joined)) return joined;
+    }
+    return parts.join(' > ');
+  }
+  function payload(el){
+    var cls=String((el.className&&el.className.baseVal!==undefined?el.className.baseVal:el.className)||'').trim().split(/\\s+/).filter(Boolean);
+    var r=el.getBoundingClientRect();
+    var anc=[], cur=el.parentElement, d=0;
+    while(cur&&cur.nodeType===1&&d<3){ anc.unshift(desc(cur)); cur=cur.parentElement; d++; }
+    return { type:'gitmir:picked', url:(window.__gitmirUrl||location.href),
+      selector:selectorFor(el), tag:el.tagName.toLowerCase(),
+      candidates:{ testid:el.getAttribute('data-testid')||el.getAttribute('data-test')||el.getAttribute('data-cy')||null,
+        id:el.id||null, classes:cls.slice(0,8),
+        text:(el.textContent||'').trim().replace(/\\s+/g,' ').slice(0,200)||null,
+        aria:el.getAttribute('aria-label')||null },
+      attrs:{ type:el.getAttribute('type')||null, href:el.getAttribute('href')||null, name:el.getAttribute('name')||null },
+      rect:{ x:Math.round(r.left), y:Math.round(r.top), w:Math.round(r.width), h:Math.round(r.height) },
+      html:(el.outerHTML||'').slice(0,2048), ancestors:anc };
+  }
+  function click(e){
+    if(!on) return;
+    e.preventDefault(); e.stopPropagation();
+    if(e.stopImmediatePropagation) e.stopImmediatePropagation();
+    var data; try{ data=payload(e.target); }catch(err){ data={type:'gitmir:picked',error:String(err&&err.message||err)}; }
+    off(); parent.postMessage(data,'*');
+  }
+  function key(e){ if(on&&e.key==='Escape'){ off(); parent.postMessage({type:'gitmir:pick-cancelled'},'*'); } }
+  function tell(){ try{ parent.postMessage({type:'gitmir:pick-state', on:on}, '*'); }catch(e){} }
+  function onMode(){ on=true; last=null; document.documentElement.style.cursor='crosshair'; tell(); }
+  function off(){ on=false; last=null; rm(); document.documentElement.style.cursor=''; tell(); }
+  document.addEventListener('mouseover',over,true);
+  document.addEventListener('click',click,true);
+  document.addEventListener('keydown',key,true);
+  window.addEventListener('message',function(e){
+    var t=e.data&&e.data.type;
+    if(t==='gitmir:pick-on') onMode(); else if(t==='gitmir:pick-off') off();
+  });
+  window.__gitmirPick=true;
+  parent.postMessage({type:'gitmir:bridge-ready',url:(window.__gitmirUrl||location.href)},'*');
+})();`;
+
+async function previewFetch(rawUrl) {
+  let u;
+  try { u = new URL(rawUrl); } catch { return { error: 'That is not a valid URL.' }; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return { error: 'Only http:// and https:// can be previewed.' };
+  const firstIsLoopback = isLoopback(u.hostname);
+  let hops = 0;
+  for (;;) {
+    const why = blockedHost(u.hostname);
+    if (why) return { error: `Refused ${u.hostname} — ${why} are not fetched, to keep this from being pointed at your own network.` };
+    // A public page must not be able to redirect us onto the loopback interface.
+    if (!firstIsLoopback && isLoopback(u.hostname) && hops > 0) return { error: `Refused a redirect to ${u.hostname} — a public page cannot send the preview to your local machine.` };
+    let r;
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), PREVIEW_TIMEOUT);
+    try {
+      r = await fetch(u.href, { redirect: 'manual', signal: ctl.signal, headers: { 'user-agent': 'GitMirClaudeControl/preview', accept: 'text/html,*/*' } });
+    } catch (e) {
+      clearTimeout(timer);
+      return { error: `Could not reach ${u.hostname}: ${(e && e.message) || e}` };
+    }
+    clearTimeout(timer);
+    if ([301, 302, 303, 307, 308].includes(r.status)) {
+      const loc = r.headers.get('location');
+      if (!loc || ++hops > 5) return { error: 'Too many redirects.' };
+      try { u = new URL(loc, u.href); } catch { return { error: 'Bad redirect target.' }; }
+      continue;
+    }
+    const ct = r.headers.get('content-type') || '';
+    const buf = Buffer.from(await r.arrayBuffer());
+    return { status: r.status, contentType: ct, body: buf.slice(0, PREVIEW_MAX), finalUrl: u.href };
+  }
+}
+
 // ---------- routes ----------
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   try {
-    if (url.pathname.startsWith('/api/') && url.pathname !== '/api/ping' && !sameOrigin(req)) {
+    // The injected picker is fetched by the sandboxed preview frame, whose origin is
+    // opaque — it carries no secrets and must stay reachable from there.
+    if (url.pathname.startsWith('/api/') && url.pathname !== '/api/ping'
+        && url.pathname !== '/api/preview-bridge.js' && !sameOrigin(req)) {
       return sendJSON(res, 403, { error: 'cross-origin request refused' });
     }
     if (req.method === 'GET' && url.pathname === '/') {
@@ -281,8 +440,94 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/ping') {
       return sendJSON(res, 200, { ok: true });
     }
+    if (req.method === 'GET' && url.pathname === '/api/preview-bridge.js') {
+      res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8' });
+      return res.end(PREVIEW_BRIDGE);
+    }
+    if (req.method === 'GET' && url.pathname === '/api/preview') {
+      if (!PREVIEW_ON) { res.writeHead(404); return res.end('preview disabled'); }
+      const target = url.searchParams.get('url') || '';
+      const got = await previewFetch(target);
+      if (got.error) {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        return res.end(`<!doctype html><meta charset="utf-8"><body style="margin:0;font:14px/1.6 -apple-system,sans-serif;background:#04060a;color:#8497b8;display:flex;align-items:center;justify-content:center;height:100vh;padding:30px;text-align:center">${hesc(got.error)}</body>`);
+      }
+      const isHtml = /text\/html|application\/xhtml/i.test(got.contentType);
+      if (!isHtml) {
+        res.writeHead(got.status, { 'Content-Type': got.contentType || 'application/octet-stream' });
+        return res.end(got.body);
+      }
+      let html = got.body.toString('utf8');
+      // <base> makes the site's own relative assets load straight from the site
+      // instead of 404ing against this origin.
+      const base = `<base href="${hesc(got.finalUrl)}">`;
+      html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + base)
+                                       : base + html;
+      // The frame's own location is this proxy; the picker must report the page the
+      // user is actually looking at, or the task says "picked from localhost:4599".
+      const inject = `<script>window.__gitmirUrl=${JSON.stringify(got.finalUrl)};${PREVIEW_BRIDGE}</script>`;
+      html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, inject + '</body>') : html + inject;
+      res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        // The framing and script restrictions of the upstream would block both the
+        // iframe and the picker; they are the site's policy for its own origin, and
+        // this copy is served from here for local inspection only.
+        'X-GitMir-Preview-Of': got.finalUrl,
+      });
+      return res.end(html);
+    }
+    // The part that turns a DOM selector into something actionable: find where the
+    // element's distinctive strings actually appear in the project's source.
+    if (req.method === 'POST' && url.pathname === '/api/preview-find') {
+      const { path: p, needles } = await readBody(req);
+      if (!p || !Array.isArray(needles)) return sendJSON(res, 400, { error: 'bad request' });
+      const SKIP = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'out', 'vendor', 'coverage', '.cache', '.venv', '__pycache__', '.gitmir']);
+      const EXT = /\.(js|jsx|ts|tsx|vue|svelte|astro|html|htm|php|erb|hbs|ejs|pug|jade|css|scss|sass|less|styl|json|md|py|rb|go|java|kt|cs|swift|dart|elm|twig|liquid)$/i;
+      const wanted = needles.map((n) => String(n || '').trim()).filter((n) => n.length >= 3).slice(0, 12);
+      if (!wanted.length) return sendJSON(res, 200, { hits: [], searched: 0 });
+      const hits = []; let searched = 0;
+      const walk = (dir, depth) => {
+        if (depth > 8 || searched > 4000 || hits.length >= 60) return;
+        let ents = [];
+        try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+        for (const e of ents) {
+          if (hits.length >= 60 || searched > 4000) return;
+          if (e.name.startsWith('.') && e.name !== '.gitmir') { if (e.isDirectory()) continue; }
+          if (e.isDirectory()) { if (!SKIP.has(e.name)) walk(path.join(dir, e.name), depth + 1); continue; }
+          if (!EXT.test(e.name)) continue;
+          const full = path.join(dir, e.name);
+          let st; try { st = fs.statSync(full); } catch { continue; }
+          if (st.size > 1024 * 1024) continue;
+          searched++;
+          let text; try { text = fs.readFileSync(full, 'utf8'); } catch { continue; }
+          const lines = text.split('\n');
+          for (const n of wanted) {
+            if (!text.includes(n)) continue;
+            for (let i = 0; i < lines.length; i++) {
+              if (!lines[i].includes(n)) continue;
+              hits.push({ file: path.relative(p, full), line: i + 1, needle: n, text: lines[i].trim().slice(0, 200) });
+              break;                       // one line per needle per file is enough
+            }
+            if (hits.length >= 60) break;
+          }
+        }
+      };
+      walk(p, 0);
+      // If the project has a model, name the frontend units that consume this route
+      // — that is a stronger signal than a text match.
+      let fromModel = [];
+      try {
+        const fe = JSON.parse(fs.readFileSync(path.join(p, '.gitmir', 'model', 'frontendUnits.json'), 'utf8'));
+        const route = String(url.searchParams.get('route') || '');
+        if (Array.isArray(fe)) {
+          fromModel = fe.filter((f) => f && f.name && (!route || String(f.name).toLowerCase().includes(route.toLowerCase())))
+            .slice(0, 8).map((f) => ({ name: f.name, kind: f.kind || '', description: f.description || '' }));
+        }
+      } catch {}
+      return sendJSON(res, 200, { hits, searched, fromModel });
+    }
     if (req.method === 'GET' && url.pathname === '/api/env') {
-      return sendJSON(res, 200, { platform: process.platform, pickerAvailable: nativePickerAvailable(), relayUrl: relay.status().url });
+      return sendJSON(res, 200, { platform: process.platform, pickerAvailable: nativePickerAvailable(), relayUrl: relay.status().url, preview: PREVIEW_ON });
     }
     if (req.method === 'GET' && url.pathname === '/api/projects') {
       const list = loadProjects().map((p) => ({
@@ -516,9 +761,18 @@ const server = http.createServer(async (req, res) => {
     }
     res.writeHead(404); res.end('not found');
   } catch (e) {
-    sendJSON(res, 500, { error: String(e.message || e) });
+    // A throw AFTER the headers went out used to take the whole dashboard down with
+    // ERR_HTTP_HEADERS_SENT. Report what we still can and keep serving.
+    console.error('request failed:', (e && e.stack) || e);
+    if (res.headersSent) { try { res.end(); } catch {} return; }
+    try { sendJSON(res, 500, { error: String((e && e.message) || e) }); } catch {}
   }
 });
+
+// Nothing in a request handler, a relay frame or a timer should be able to stop the
+// dashboard — it is the only process the user has running.
+process.on('uncaughtException', (e) => console.error('uncaught:', (e && e.stack) || e));
+process.on('unhandledRejection', (e) => console.error('unhandled rejection:', (e && e.stack) || e));
 
 server.listen(PORT, '127.0.0.1', () => {
   const addr = `http://localhost:${PORT}`;
@@ -826,6 +1080,25 @@ const HTML = /* html */ `<!doctype html>
   .q-clk:active{transform:translateY(1px)}
   .q-badge{font-family:var(--font-mono); text-transform:uppercase; letter-spacing:.12em; font-size:10px; padding:3px 9px; border:1px solid; border-radius:0; flex-shrink:0}
 
+  /* preview & pick */
+  .pv-bar{display:flex; gap:9px; margin-bottom:12px}
+  .pv-url{flex:1}
+  .pv-pick.on{background:rgba(47,216,255,.14); border-color:var(--cyan); color:var(--cyan)}
+  .pv-frame-wrap{position:relative; height:56vh; min-height:320px; border:1px solid var(--line); background:#fff}
+  .pv-frame{width:100%; height:100%; border:0; display:none; background:#fff}
+  .pv-frame.on{display:block}
+  .pv-empty{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:30px; color:var(--dim); font-size:13.5px; line-height:1.6; background:var(--panel2)}
+  .pv-note{color:var(--dim2); font-size:12px}
+  .pv-card{margin-top:16px; padding:16px; border:1px solid var(--line); background:linear-gradient(165deg,rgba(18,36,66,.4),rgba(9,18,38,.6))}
+  .pv-el{font-family:var(--font-mono); font-size:12.5px; color:var(--cyan-soft); word-break:break-all; line-height:1.7}
+  .pv-el b{color:var(--txt)}
+  .pv-k{color:var(--dim2)}
+  .pv-hits{margin-top:12px; font-family:var(--font-mono); font-size:12px; line-height:1.7}
+  .pv-hit{color:var(--dim); word-break:break-all}
+  .pv-hit b{color:var(--ok); font-weight:500}
+  .pv-none{color:#ffb86b}
+  .pv-sec{font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--cyan-soft); margin:14px 0 7px}
+
   /* team bridge */
   .team-card{background:linear-gradient(165deg,rgba(18,36,66,.4),rgba(9,18,38,.6)); border:1px solid var(--line); padding:18px; margin-bottom:16px}
   .team-lede{color:var(--dim); font-size:13px; line-height:1.55; margin-bottom:16px}
@@ -1069,6 +1342,7 @@ function setTab(tab){
   if(tab==='model' && selected) loadModel(selected);
   if(tab==='queue' && selected){ loadQueue(selected); queueTimer=setInterval(()=>{ if(selected && activeTab==='queue') loadQueue(selected); }, 4000); }
   if(tab==='team'){ renderTeam(); teamPoll(); }
+  if(tab==='preview') pvInit();
 }
 function renderDetail(){
   const p = byPath(selected);
@@ -1087,6 +1361,7 @@ function renderDetail(){
       '<button class="tab-btn" data-tab="model">Model</button>' +
       '<button class="tab-btn" data-tab="queue">Queue <span class="badge" id="queueBadge"></span></button>' +
       '<button class="tab-btn" data-tab="team">Team <span class="badge" id="teamBadge"></span></button>' +
+      (PREVIEW_OK ? '<button class="tab-btn" data-tab="preview">Preview</button>' : '') +
     '</div></div>' +
     '<div class="pane" data-pane="settings">' +
       '<div class="field"><div class="row-lbl"><label>Name</label><span class="saved" id="savedN">saved ✓</span></div>' +
@@ -1123,6 +1398,18 @@ function renderDetail(){
       '<div class="tasks-head"><span class="t">Task queue — todo · in progress · verify · done</span></div>' +
       '<div id="queueView"><div class="model-empty">Loading…</div></div>' +
     '</div>' +
+    '<div class="pane" data-pane="preview">'+
+      '<div class="tasks-head"><span class="t">Preview &amp; pick — open a page, click an element, get a task</span><span class="upd" id="pvUrlNow"></span></div>'+
+      '<div class="pv-bar">'+
+        '<input class="ti pv-url" id="pvUrl" placeholder="https://example.com/pricing" autocomplete="off" spellcheck="false">'+
+        '<button class="ghost" id="pvGo">Go</button>'+
+        '<button class="ghost pv-pick" id="pvPick" disabled>◎ Select</button>'+
+      '</div>'+
+      '<div class="pv-frame-wrap"><iframe class="pv-frame" id="pvFrame" sandbox="allow-scripts allow-forms allow-popups"></iframe>'+
+        '<div class="pv-empty" id="pvEmpty">Type a URL and press <b>Go</b>. The page is fetched here and shown from this machine, so framing restrictions do not block it.<br><span class="pv-note">The frame is sandboxed: the site runs the picker but cannot reach this dashboard. Logged-in pages will render logged out.</span></div>'+
+      '</div>'+
+      '<div id="pvPicked"></div>'+
+    '</div>'+
     '<div class="pane" data-pane="team">' +
       '<div class="tasks-head"><span class="t">Team Bridge — route model &amp; tasks between your machines</span><span class="upd" id="teamUpd"></span></div>' +
       '<div id="teamView"><div class="model-empty">Loading…</div></div>' +
@@ -2053,6 +2340,116 @@ async function saveOrder(){
   projects.sort((a,b)=> paths.indexOf(a.path)-paths.indexOf(b.path));
 }
 
+/* ---------------- preview & pick (client) ---------------- */
+let PREVIEW_OK = true;
+let pvPicked = null;
+// A literal backtick would terminate the HTML template this script is emitted from.
+const TICK = String.fromCharCode(96);
+function pvInit(){
+  const go=document.getElementById('pvGo'), pick=document.getElementById('pvPick'),
+        input=document.getElementById('pvUrl'), frame=document.getElementById('pvFrame');
+  if(!go) return;
+  const load=()=>{
+    let v=input.value.trim(); if(!v) return;
+    if(!/^https?:\\/\\//i.test(v)) { v='https://'+v; input.value=v; }
+    document.getElementById('pvEmpty').style.display='none';
+    frame.classList.add('on');
+    frame.src='/api/preview?url='+encodeURIComponent(v);
+    pick.disabled=false; pvSetPick(false);
+    document.getElementById('pvPicked').innerHTML='';
+  };
+  go.addEventListener('click', load);
+  input.addEventListener('keydown', e=>{ if(e.key==='Enter') load(); });
+  pick.addEventListener('click', ()=> pvSetPick(!pick.classList.contains('on')));
+}
+function pvSetPick(on){
+  const pick=document.getElementById('pvPick'), frame=document.getElementById('pvFrame');
+  if(!pick||!frame) return;
+  pick.classList.toggle('on', on);
+  pick.textContent = on ? '◉ Click an element…' : '◎ Select';
+  try{ frame.contentWindow.postMessage({type: on?'gitmir:pick-on':'gitmir:pick-off'}, '*'); }catch{}
+}
+// The preview frame is sandboxed without allow-same-origin, so its origin is "null".
+// Trust it by identity (the window we created), not by origin string.
+window.addEventListener('message', async (e)=>{
+  const frame=document.getElementById('pvFrame');
+  if(!frame || e.source!==frame.contentWindow) return;
+  const d=e.data||{};
+  if(d.type==='gitmir:pick-state'){ const b=document.getElementById('pvPick');
+    if(b){ b.classList.toggle('on', !!d.on); b.textContent = d.on ? '◉ Click an element…' : '◎ Select'; } return; }
+  if(d.type==='gitmir:pick-cancelled'){ pvSetPick(false); return; }
+  if(d.type!=='gitmir:picked') return;
+  pvSetPick(false);
+  pvPicked=d;
+  await pvRenderPicked(d);
+});
+async function pvRenderPicked(d){
+  const box=document.getElementById('pvPicked'); if(!box) return;
+  const c=d.candidates||{};
+  const bits=[];
+  if(c.testid) bits.push('data-testid='+esc(c.testid));
+  if(c.id) bits.push('id='+esc(c.id));
+  if(c.aria) bits.push('aria-label="'+esc(c.aria)+'"');
+  box.innerHTML='<div class="pv-card">'+
+    '<div class="pv-el"><span class="pv-k">Element</span> <b>'+esc(d.tag||'?')+(c.classes&&c.classes.length?'.'+esc(c.classes.slice(0,3).join('.')):'')+'</b>'+
+      (c.text?' — “'+esc(c.text.slice(0,120))+'”':'')+'<br>'+
+      '<span class="pv-k">Selector</span> '+esc(d.selector||'')+
+      (bits.length?'<br><span class="pv-k">Also</span> '+bits.join('  ·  '):'')+
+      '<br><span class="pv-k">Page</span> '+esc(d.url||'')+'</div>'+
+    '<div id="pvWhere"><div class="pv-sec">Where this probably lives</div><div class="pv-hits">searching the project…</div></div>'+
+    '<div class="pv-sec">The task</div>'+
+    '<input class="ti" id="pvTitle" placeholder="What should change about this element?">'+
+    '<textarea class="ti" id="pvDone" placeholder="Done when… (one per line — these become the acceptance criteria)"></textarea>'+
+    '<div class="team-actions"><button class="run" id="pvCreate">＋ Create task</button></div>'+
+  '</div>';
+  document.getElementById('pvCreate').addEventListener('click', pvCreateTask);
+  // The needles that make a text search meaningful — skip utility-class noise.
+  const UTIL=/^(flex|grid|block|inline|hidden|relative|absolute|fixed|w-|h-|p[xytblr]?-|m[xytblr]?-|text-|bg-|border|rounded|shadow|gap-|items-|justify-|font-|leading-|tracking-|space-|max-|min-|overflow|z-|opacity|transition|duration|cursor|select-)/;
+  const needles=[];
+  if(c.text) needles.push(c.text.slice(0,80));
+  if(c.text){ const plain=c.text.replace(/[^\\p{L}\\p{N} ]/gu,'').trim(); if(plain && plain!==c.text) needles.push(plain.slice(0,80)); }
+  if(c.testid) needles.push(c.testid);
+  if(c.id) needles.push(c.id);
+  for(const cl of (c.classes||[])) if(cl.length>3 && !UTIL.test(cl)) needles.push(cl);
+  let r={hits:[],fromModel:[]};
+  try{ r=await (await fetch('/api/preview-find',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({path:selected, needles})})).json(); }catch{}
+  const w=document.getElementById('pvWhere'); if(!w) return;
+  let html='<div class="pv-sec">Where this probably lives</div>';
+  if((r.hits||[]).length){
+    html+='<div class="pv-hits">'+r.hits.slice(0,14).map(h=>'<div class="pv-hit"><b>'+esc(h.file)+':'+h.line+'</b> — '+esc(h.needle.slice(0,60))+'</div>').join('')+'</div>';
+  } else {
+    // A confident wrong file is worse than saying nothing was found.
+    html+='<div class="pv-hits pv-none">Nothing in this project matched the element\\'s text, id or classes ('+(r.searched||0)+' files searched). It may be rendered from data, or you are pointing at a site this project does not build.</div>';
+  }
+  if((r.fromModel||[]).length) html+='<div class="pv-hits" style="margin-top:8px"><span class="pv-k">From the .gitmir model:</span> '+r.fromModel.map(f=>esc(f.name)).join(', ')+'</div>';
+  w.innerHTML=html;
+  pvPicked._hits=r.hits||[]; pvPicked._model=r.fromModel||[];
+}
+async function pvCreateTask(){
+  if(!pvPicked || !selected){ toast('Pick an element first', true); return; }
+  const t=document.getElementById('pvTitle').value.trim();
+  if(!t){ toast('Say what should change', true); document.getElementById('pvTitle').focus(); return; }
+  const done=document.getElementById('pvDone').value.trim();
+  const c=pvPicked.candidates||{};
+  const also=[c.testid?'data-testid='+c.testid:'', c.id?'id='+c.id:''].filter(Boolean).join(', ');
+  const hits=(pvPicked._hits||[]).slice(0,14).map(h=>'- '+h.file+':'+h.line+' — '+h.needle).join('\\n');
+  const model=(pvPicked._model||[]).map(f=>'- '+f.name+(f.kind?' ('+f.kind+')':'')+' — from the .gitmir model').join('\\n');
+  const content='# '+t+'\\n\\n'+
+    '## Context\\nPicked from '+pvPicked.url+' on '+new Date().toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})+'.\\n\\n'+
+    'Element: '+TICK+(pvPicked.tag||'')+((c.classes&&c.classes.length)?'.'+c.classes.slice(0,3).join('.'):'')+TICK+(c.text?' — "'+c.text.slice(0,120)+'"':'')+'\\n'+
+    'Selector: '+TICK+(pvPicked.selector||'')+TICK+'\\n'+
+    (also?'Also identifiable by: '+also+'\\n':'')+
+    '\\n## Where this probably lives\\n'+
+    (hits||model ? [hits,model].filter(Boolean).join('\\n') : 'Nothing in this project matched the element\\'s text, id or classes — it may be rendered from data. Do not guess a file; find it before changing anything.')+'\\n'+
+    '\\n## Task\\n'+t+'\\n'+
+    (done ? '\\n## Done when\\n'+done.split('\\n').map(l=>l.trim()).filter(Boolean).map(l=>l.startsWith('-')?l:'- '+l).join('\\n')+'\\n' : '');
+  const r=await (await fetch('/api/task',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({path:selected, title:t, content})})).json();
+  if(r.ok){ toast('Task created in tasks/todo ✓'); document.getElementById('pvPicked').innerHTML=''; pvPicked=null; if(activeTab==='queue') loadQueue(selected); }
+  else toast('Failed: '+(r.error||'error'), true);
+}
+
 /* ---------------- team bridge (client) ---------------- */
 let teamState=null, teamSeenTaskT=null, teamSeenModelT=null, RELAY_URL_DEFAULT='ws://localhost:4600';
 function loadTeamMem(){ try{ return JSON.parse(localStorage.getItem('gitmir.team')||'{}'); }catch{ return {}; } }
@@ -2214,7 +2611,7 @@ async function teamPoll(){
 }
 
 document.addEventListener('keydown', (e)=>{ if(e.key==='Escape'){ fsClose(); for(const id of ['ctxOverlay','addOverlay','taskOverlay']){ const o=document.getElementById(id); if(o){ o.classList.remove('show'); o.innerHTML=''; } } } });
-fetch('/api/env').then(r=>r.json()).then(d=>{ PICKER_OK = !!d.pickerAvailable; if(d.relayUrl) RELAY_URL_DEFAULT=d.relayUrl; }).catch(()=>{});
+fetch('/api/env').then(r=>r.json()).then(d=>{ PICKER_OK = !!d.pickerAvailable; if(d.relayUrl) RELAY_URL_DEFAULT=d.relayUrl; if(d.preview===false){ PREVIEW_OK=false; renderDetail(); } }).catch(()=>{});
 loadSkillsList();
 load();
 teamPoll();
