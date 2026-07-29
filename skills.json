@@ -36,7 +36,7 @@
   {
     "name": "task-runner",
     "title": "task-runner",
-    "desc": "Works the task queue autonomously: todo → in progress → verify → done. It runs each task's checks for real, and when one fails it writes the fix task itself. Batch work without babysitting — and without silent breakage.",
+    "desc": "Works the whole task queue to empty, autonomously: todo → in progress → verify → done. It runs each task's checks for real, and when one fails it writes the fix task itself. Batch work without babysitting — and without silent breakage.",
     "file": "skills/task-runner.md"
   },
   {

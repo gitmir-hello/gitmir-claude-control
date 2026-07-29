@@ -1,5 +1,6 @@
-Process the file-based task queue in this project's `tasks/` folder. Tasks are
-individual markdown files that move between **four** folders as their status changes:
+Run the file-based task queue in this project's `tasks/` folder **until it is empty** —
+every task, in one go, not the first one and a summary. Tasks are individual markdown
+files that move between **four** folders as their status changes:
 
     tasks/todo/  →  tasks/inprogress/  →  tasks/verify/  →  tasks/done/
 
@@ -9,19 +10,54 @@ straight from `inprogress` to `done`.
 
 ## The loop
 
-Work one task at a time, **oldest first** (files are named with a sortable number
-prefix):
+You are running the **whole queue**, not one task. Work one task at a time, **oldest
+first** (files are named with a sortable number prefix), and keep going:
 
 1. **Resume first.** If `tasks/inprogress/` contains a file, finish that one before
-   anything else. If `tasks/verify/` contains files, verify those before starting
-   new work — unproven work is the oldest debt in the queue.
-2. **Claim.** Take the OLDEST file in `tasks/todo/` and **move** (rename) it into
+   anything else.
+2. **Verify before you build.** If `tasks/verify/` contains files, verify the oldest
+   one (see below) before claiming new work — unproven work is the oldest debt in the
+   queue.
+3. **Claim.** Take the OLDEST file in `tasks/todo/` and **move** (rename) it into
    `tasks/inprogress/` before you start, so the dashboard shows it as active.
-3. **Do it.** Read the file — it carries the model context and what to do. Follow it
+4. **Do it.** Read the file — it carries the model context and what to do. Follow it
    exactly. If the project has a `.gitmir/model/`, treat it as the source of truth
    and update it after any code change (per the GitMir model rule).
-4. **Hand off to verification.** Append a short `## Outcome` (what changed, files
+5. **Hand off to verification.** Append a short `## Outcome` (what changed, files
    touched) and **move the file to `tasks/verify/`**. Never to `tasks/done/`.
+6. **Count what is left, out loud**, in one line — nothing more:
+
+        queue: 4 todo, 2 verify — continuing
+
+   Then **go back to step 1** and take the next one. Do not summarise, do not review
+   what you have built, do not ask whether to continue — see below. That one line is
+   the only thing you say between tasks; it keeps the remaining count in front of both
+   of us, so a run that ends early is obvious instead of invisible.
+
+## When you may stop
+
+Finishing a task is not finishing the queue. This is the instruction agents skip most
+often: they complete one task, write a tidy summary, hand back — and leave work sitting
+in `todo/` that nobody asked them to leave.
+
+There are exactly **four** reasons to stop before both folders are empty. If none of
+them applies you are not finished: return to step 1 immediately, without pausing to
+report and without asking permission to continue.
+
+1. `tasks/todo/` and `tasks/verify/` are **both** empty.
+2. A `(manual)` step needs a judgement only a human can make.
+3. A third attempt at the same failure has failed — you are going in circles.
+4. A task is blocked and you have decided it needs the user.
+
+Not on that list, and therefore not a reason to stop: "the task I picked up is done",
+"this is a natural place to check in", "that was a lot of work", or a long run. A queue
+of twelve tasks is **one** run, not twelve. The user started the runner so they would
+not have to nudge it after every file.
+
+**Check the folders before you report.** Immediately before writing your final message,
+list `tasks/todo/` and `tasks/verify/`. If either still has files and none of reasons
+2–4 applies, throw the report away and go back to step 1. The listing is the check —
+not your memory of what you did.
 
 ## Verifying (this is the point)
 
@@ -88,21 +124,28 @@ quietly misleads every session after this one, and the dashboard will show it as
    `## Verify` steps; if they now pass, move the parent from `tasks/verify/` to
    `tasks/done/` too.
 
+A failed verification is **not** a reason to stop — it is ordinary queue work. Write the
+fix task and carry on with the loop.
+
 **Do not loop forever.** Copy `Attempt:` from the fix task you are repairing and
-increase it by one. If a third attempt at the same failure fails, stop, leave
-everything where it is, and ask the user — you are going in circles and need a human.
+increase it by one. If a third attempt at the same failure fails, stop (stop reason 3),
+leave everything where it is, and ask the user — you are going in circles and need a
+human.
 
 ## Blocked work
 
 If a task cannot be done at all, append a `## Blocked` note explaining why and either
 move it to `tasks/done/` or leave it in `tasks/inprogress/` and stop to ask — your
-judgement.
+judgement. If you can keep going without it, prefer to: park that one file, go back to
+step 1, and raise it in the final report with everything else.
 
-## Finishing
+## The final report
 
-Repeat until `tasks/todo/` is empty **and** `tasks/verify/` is empty. Then report:
+Only once you have listed both folders and confirmed you are allowed to stop. Report:
 one line per finished task, plus an explicit list of anything left in `tasks/verify/`
-(unproven), any `NEEDS HUMAN` steps, and any fix tasks you created.
+(unproven), any `NEEDS HUMAN` steps, any fix tasks you created, and — if you stopped
+for reason 2, 3 or 4 — exactly what is still in `tasks/todo/` and what you need from
+the user to finish it.
 
 Rules: never work two tasks at once; keep each task as its own file; don't rewrite
 files already in `tasks/done/`; never mark a verification step PASS that you did not
