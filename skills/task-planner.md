@@ -68,6 +68,10 @@ Rules for the steps:
   empty list, the unauthorised call.
 - **Cover what the change could break nearby.** Use `.gitmir/model/` to see what else
   reads or writes the fields you touched, and add a step for it.
+- **If the task changes code and the project has a `.gitmir/model/`, add a step for the
+  model itself** — "`.gitmir/model/` describes the new field / route / transition, ids
+  unchanged, `index.json` refreshed". The model is what every later task is briefed from;
+  if it silently lags, every one of them is briefed from fiction.
 - Mark a step `(manual)` when only a human can judge it. The runner will stop and
   ask rather than guess.
 - If a task genuinely cannot be verified by anything but a person, say so in the step

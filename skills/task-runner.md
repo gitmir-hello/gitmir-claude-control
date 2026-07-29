@@ -47,6 +47,14 @@ Rules while verifying:
 - If a step cannot run at all (no test runner, service won't start), say so plainly
   as `BLOCKED: <reason>` — do not silently skip it.
 
+**The model is one of the checks.** If the project has a `.gitmir/model/` and this task
+changed code, verify that too, as its own line in `## Verification`: does the model still
+describe what the code now does — the entity, field, function, route, screen, event or
+status flow you touched? If it does not, that is a FAILED step like any other. Fix it by
+updating the affected `.gitmir/model/*.json` (stable ids, refresh `index.json`) and record
+it. A model that lags the code is worse than no model: it reads as authoritative and
+quietly misleads every session after this one, and the dashboard will show it as stale.
+
 **All steps passed** → move the file to `tasks/done/`.
 
 **Any step failed** → do NOT move it to done:

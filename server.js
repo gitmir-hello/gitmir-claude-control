@@ -731,6 +731,39 @@ const server = http.createServer(async (req, res) => {
         if (model[d].length) exists = true;
       }
       const brief = who ? null : readJson(path.join(p, '.gitmir', 'brief.json'));
+      // A model that is older than the code is worse than no model: it looks
+      // authoritative and quietly lies. Find that out here rather than trusting that
+      // every session remembered to refresh it.
+      let stale = null;
+      if (!who && exists) {
+        try {
+          let modelAt = 0;
+          for (const f of fs.readdirSync(dir)) if (f.endsWith('.json')) {
+            const st = fs.statSync(path.join(dir, f)); if (st.mtimeMs > modelAt) modelAt = st.mtimeMs;
+          }
+          const SKIP = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'out', 'vendor',
+            'coverage', '.cache', '.venv', '__pycache__', '.gitmir', 'tasks', 'docs', '.claude']);
+          const EXT = /\.(js|jsx|ts|tsx|vue|svelte|astro|mjs|cjs|py|rb|go|java|kt|cs|swift|php|rs|sql|prisma)$/i;
+          let newest = 0, changed = 0, seen = 0, newestFile = '';
+          const walk = (d, depth) => {
+            if (depth > 7 || seen > 6000) return;
+            let ents = []; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+            for (const e of ents) {
+              if (seen > 6000) return;
+              if (e.name.startsWith('.')) continue;
+              const full = path.join(d, e.name);
+              if (e.isDirectory()) { if (!SKIP.has(e.name)) walk(full, depth + 1); continue; }
+              if (!EXT.test(e.name)) continue;
+              seen++;
+              let st; try { st = fs.statSync(full); } catch { continue; }
+              if (st.mtimeMs > newest) { newest = st.mtimeMs; newestFile = path.relative(p, full); }
+              if (st.mtimeMs > modelAt + 1000) changed++;
+            }
+          };
+          walk(p, 0);
+          stale = { is: changed > 0, changed, scanned: seen, modelAt, newest, newestFile };
+        } catch {}
+      }
       // Which teammates' models are on disk for this project (for the source switcher).
       let shared = [];
       try {
@@ -756,7 +789,7 @@ const server = http.createServer(async (req, res) => {
           })
           .sort((a, b) => b.at - a.at);
       } catch {}
-      return sendJSON(res, 200, { exists, index, model, brief, shared, src: who || null });
+      return sendJSON(res, 200, { exists, index, model, brief, shared, stale, src: who || null });
     }
     if (req.method === 'GET' && url.pathname === '/api/skills') {
       const skills = loadSkills().map((s) => ({ name: s.name, title: s.title || s.name, desc: s.desc || '' }));
@@ -1220,6 +1253,13 @@ const HTML = /* html */ `<!doctype html>
   .map-cap b{color:var(--cyan-soft); font-weight:500; font-family:var(--font-mono); font-size:12px}
   .map-cap2{display:block; margin-top:8px; color:var(--dim2); font-size:12.5px}
 
+  .model-stale{display:none; margin-bottom:14px; padding:13px 15px; border:1px solid rgba(255,184,107,.45); background:rgba(255,184,107,.07)}
+  .stale-hd{font-size:13.5px; font-weight:650; color:#ffb86b}
+  .stale-b{margin-top:5px; color:var(--dim); font-size:12.5px; line-height:1.6}
+  .stale-b code{font-family:var(--font-mono); font-size:11.5px; color:var(--cyan-soft)}
+  .stale-fix{margin-top:11px; font-size:13px; padding:9px 14px}
+  .tab-btn .badge.stale{ background:#ffb86b; color:#1a0f0a; border-color:#ffb86b }
+
   /* preview & pick */
   .pv-bar{display:flex; gap:9px; margin-bottom:12px}
   .pv-url{flex:1}
@@ -1561,7 +1601,7 @@ function renderDetail(){
     '<div class="tabs"><div class="tabs-inner">' +
       '<button class="tab-btn" data-tab="settings">Settings</button>' +
       '<button class="tab-btn" data-tab="tasks">Tasks <span class="badge" id="taskBadge"></span></button>' +
-      '<button class="tab-btn" data-tab="model">Model</button>' +
+      '<button class="tab-btn" data-tab="model">Model <span class="badge" id="modelBadge"></span></button>' +
       '<button class="tab-btn" data-tab="queue">Queue <span class="badge" id="queueBadge"></span></button>' +
       '<button class="tab-btn" data-tab="team">Team <span class="badge" id="teamBadge"></span></button>' +
       (PREVIEW_OK ? '<button class="tab-btn" data-tab="preview">Preview</button>' : '') +
@@ -1589,6 +1629,7 @@ function renderDetail(){
       '<div id="taskList"></div>' +
     '</div>' +
     '<div class="pane" data-pane="model">' +
+      '<div class="model-stale" id="modelStale"></div>' +
       '<div class="model-src" id="modelSrc"></div>' +
       '<div class="model-head">' +
         '<div class="model-subnav" id="modelNav"></div>' +
@@ -1908,6 +1949,7 @@ async function loadModel(pathStr){
   if(modelSrc && !(d.shared||[]).some(s=>s.name===modelSrc)){ modelSrc=null; return loadModel(pathStr); }
   modelData=d;
   renderModelSrc(d);
+  renderModelStale(d);
   const upd=document.getElementById('modelUpd');
   if(upd) upd.textContent = (d.index && d.index.at) ? ('updated '+fmtTime(d.index.at)) : '';
   const nav=document.getElementById('modelNav');
@@ -1923,6 +1965,27 @@ async function loadModel(pathStr){
     return;
   }
   renderModelNav(); renderModelView();
+}
+
+// A model older than the code is the one failure mode that makes the whole thing
+// untrustworthy, so it is stated at the top of the view, not hidden in a corner.
+function renderModelStale(d){
+  const box=document.getElementById('modelStale'); if(!box) return;
+  const t=d.stale;
+  const badge=document.getElementById('modelBadge');
+  if(!t || !t.is || modelSrc){
+    box.innerHTML=''; box.style.display='none';
+    if(badge){ badge.textContent=''; badge.className='badge'; }
+    return;
+  }
+  box.style.display='block';
+  box.innerHTML='<div class="stale-hd">⚠ This model is older than the code</div>'+
+    '<div class="stale-b">'+t.changed+' file'+(t.changed>1?'s':'')+' changed since it was built'+
+      (t.newestFile?' — most recently <code>'+esc(t.newestFile)+'</code>':'')+
+      '. Everything below still describes the product as it was on '+esc(fmtTime(new Date(t.modelAt).toISOString()))+'.</div>'+
+    '<button class="run stale-fix">📋 Copy gitmir-model — paste into Claude to refresh</button>';
+  box.querySelector('.stale-fix').addEventListener('click', ()=>copySkill('gitmir-model','gitmir-model'));
+  if(badge){ badge.textContent='!'; badge.className='badge stale'; }
 }
 
 // Source switcher: our own model, plus any teammate model the bridge delivered.
