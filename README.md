@@ -245,7 +245,15 @@ they belong — on your machines.
 
 - 🌐 **[gitmir.com](https://gitmir.com)** · 🚀 **[ide.gitmir.com](https://ide.gitmir.com)** · ✉️ **hello@gitmir.com**
 
-Issues and pull requests are welcome — if something's missing or broken, tell us.
+## Tell us if it worked
+
+There's no telemetry in this tool and there never will be — which means the only way we
+learn anything is if you say something. **[Did it run on your
+machine?](https://github.com/gitmir-hello/gitmir-claude-control/discussions/1)** is the
+thread for it: whether it started, and — the part we most want to hear — whether the model
+it built actually matched your product, and where it got it wrong.
+
+Issues and pull requests are welcome too — if something's missing or broken, tell us.
 
 ## Third-party & credits
 
