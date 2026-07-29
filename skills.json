@@ -14,6 +14,18 @@
     "prepend": "Build (or, if a model already exists, idempotently update it, keeping stable ids) the multidimensional object model of THIS project by following the specification below in full — including the mandatory standing rule it defines (install/refresh the 'GitMir model — source of truth' section in the project's CLAUDE.md). Write only inside .gitmir/ and that one CLAUDE.md section; do not modify application source.\n\n"
   },
   {
+    "name": "model-ingest",
+    "title": "model-ingest",
+    "desc": "Builds the model from a source too big to read in one pass — a legacy codebase with dense coupling, a large spreadsheet, a data dump. It measures the source, cuts it into fragments that each fit in context, and turns every fragment into a queue task, so the model grows piece by piece instead of coming out shallow and half-invented.",
+    "file": "skills/model-ingest.md"
+  },
+  {
+    "name": "model-navigate",
+    "title": "model-navigate",
+    "desc": "Answers architectural questions by walking the model's id links instead of reading the repository — resolve an entry point, expand by hops, follow inbound references to find what breaks, open only the files the model named, and state the path taken so it can be checked.",
+    "file": "skills/model-navigate.md"
+  },
+  {
     "name": "context-distillation",
     "title": "context-distillation",
     "desc": "Distils a pile of docs, tickets or chat threads into a small, checkable brief in .gitmir/brief.json — the minimal context Claude needs, and the artifact people can confirm before anything is built.",

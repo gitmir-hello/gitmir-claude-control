@@ -94,6 +94,34 @@ skill also installs a standing rule in the project's `CLAUDE.md`, so every futur
 session reads the model first and refreshes it after changing code — it stays true
 without you remembering to update it.
 
+## When the product is too big to fit
+
+On a legacy system with thousands of cross-references, or a spreadsheet where the logic
+lives in the columns, an agent asked to "map this" does not fail with an error. It reads
+part of the source, summarises what it read, and hands you a model that looks complete.
+The entities survive that treatment; **the links between things in different folders do
+not** — and in a legacy system those links *are* the product.
+
+So don't read it. **`model-ingest`** measures the source instead — file and line counts per
+folder, or a computed census of a CSV's columns, fill rates and distinct values — then cuts
+it into fragments that each fit in one context, orders them so that the things everything
+else points at get built first, and writes **one queue task per fragment**. `task-runner`
+works through them, each with a fresh context holding only its own slice, and the model
+grows additively. A reference a fragment cannot resolve yet — fragment 7 calling a function
+that fragment 24 will define — is recorded with its file:line evidence in
+`.gitmir/ingest/unresolved.json`, never invented and never dropped. A final stitch pass
+closes them and reports what stayed open.
+
+That last part matters more than it sounds: **a model with twelve recorded unknowns is
+trustworthy, and a model with twelve invented links is not — and they look identical.**
+
+Then **`model-navigate`** is how a task uses it: resolve the entry id, expand by hops, and
+follow the **inbound** references — the ones that answer "what breaks if I change this",
+which is the question that gets forgotten. It states the path it walked, so you can see
+which link it didn't follow. The code gets opened last, and only the files the model named.
+
+For a normal-sized repo you don't need any of this — run `gitmir-model` and you're done.
+
 ## Brief your agent from the schema, not from memory
 
 Click any element in a diagram and the tool walks its id-links to assemble the
@@ -189,6 +217,8 @@ They live in [`skills.json`](skills.json) — point an entry at your own `.md` t
 | Skill | What it does |
 |---|---|
 | **`gitmir-model`** | Builds/updates the multidimensional model in `.gitmir/model/` from real code, and installs the standing rule that keeps it current. |
+| **`model-ingest`** | For a source too big to read in one pass — a legacy system, a large spreadsheet. Measures it, cuts it into fragments that fit, and makes each one a queue task, so the model is built piece by piece instead of sampled. |
+| **`model-navigate`** | Answers architectural questions by walking the model's id links instead of reading the repo — including the inbound links, which is what tells you what breaks. |
 | **`product-docs-spec`** | At the start of a product: turns raw input — a client's description, specs, a dataset, a design export — into a `docs/` folder of 12 files that works as the actual build spec, written before any code. |
 | **`context-distillation`** | Turns a pile of docs, tickets or a chat thread into a small brief with checkable acceptance criteria — the context, not the noise. |
 | **`task-planner`** | Breaks a goal into small self-contained task files, each carrying the right slice of the model **and the step-by-step checks that prove it works**. |
