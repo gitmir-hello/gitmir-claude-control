@@ -764,6 +764,61 @@ const server = http.createServer(async (req, res) => {
           stale = { is: changed > 0, changed, scanned: seen, modelAt, newest, newestFile };
         } catch {}
       }
+      // A big source is modelled one fragment at a time (the model-ingest skill), which
+      // can mean forty tasks over several sessions. Without this the user is watching an
+      // opaque queue; with it they see how far along the model is, which fragments are
+      // blocked, and — the honest part — which references it still cannot resolve.
+      let ingest = null;
+      if (!who) {
+        const led = readJson(path.join(p, '.gitmir', 'ingest', 'ledger.json'));
+        if (led && Array.isArray(led.fragments) && led.fragments.length) {
+          const st = { done: 0, pending: 0, blocked: 0, skipped: 0 };
+          let linesTotal = 0, linesDone = 0, filesTotal = 0;
+          const added = {}, frags = [];
+          for (const f of led.fragments.slice(0, 800)) {
+            if (!f || typeof f !== 'object') continue;
+            const status = st.hasOwnProperty(f.status) ? f.status : 'pending';
+            st[status]++;
+            const lines = Number(f.size && f.size.lines) || 0;
+            const files = Number(f.size && f.size.files) || 0;
+            linesTotal += lines; filesTotal += files;
+            if (status === 'done') linesDone += lines;
+            // Per-dimension counts, summed, are the model visibly growing.
+            if (f.added && typeof f.added === 'object') for (const k of Object.keys(f.added).slice(0, 20)) {
+              const n = Number(f.added[k]);
+              if (Number.isFinite(n) && n >= 0) added[String(k).slice(0, 40)] = (added[String(k).slice(0, 40)] || 0) + n;
+            }
+            frags.push({
+              n: Number(f.n) || frags.length + 1,
+              id: String(f.id == null ? '' : f.id).slice(0, 80),
+              owns: Array.isArray(f.owns) ? f.owns.slice(0, 12).map((o) => String(o).slice(0, 200)) : [],
+              files, lines, status,
+              dimensions: Array.isArray(f.dimensions) ? f.dimensions.slice(0, 12).map((x) => String(x).slice(0, 40)) : [],
+              added: f.added && typeof f.added === 'object' ? f.added : null,
+              note: String(f.note == null ? '' : f.note).slice(0, 300),
+            });
+          }
+          const un = readJson(path.join(p, '.gitmir', 'ingest', 'unresolved.json'));
+          const open = (Array.isArray(un) ? un : []).filter((u) => u && typeof u === 'object' && !u.resolvedTo);
+          ingest = {
+            source: String(led.source == null ? '' : led.source).slice(0, 300),
+            kind: String(led.kind == null ? '' : led.kind).slice(0, 40),
+            at: typeof led.at === 'string' ? led.at.slice(0, 40) : null,
+            counts: { total: frags.length, done: st.done, pending: st.pending, blocked: st.blocked, skipped: st.skipped },
+            files: filesTotal, linesTotal, linesDone, added, fragments: frags,
+            unresolved: {
+              open: open.length,
+              items: open.slice(0, 80).map((u) => ({
+                fragment: Number(u.fragment) || null,
+                from: String(u.from == null ? '' : u.from).slice(0, 80),
+                field: String(u.field == null ? '' : u.field).slice(0, 60),
+                wanted: String(u.wanted == null ? '' : u.wanted).slice(0, 160),
+                evidence: String(u.evidence == null ? '' : u.evidence).slice(0, 300),
+              })),
+            },
+          };
+        }
+      }
       // Which teammates' models are on disk for this project (for the source switcher).
       let shared = [];
       try {
@@ -789,7 +844,7 @@ const server = http.createServer(async (req, res) => {
           })
           .sort((a, b) => b.at - a.at);
       } catch {}
-      return sendJSON(res, 200, { exists, index, model, brief, shared, stale, src: who || null });
+      return sendJSON(res, 200, { exists, index, model, brief, shared, stale, ingest, src: who || null });
     }
     if (req.method === 'GET' && url.pathname === '/api/skills') {
       const skills = loadSkills().map((s) => ({ name: s.name, title: s.title || s.name, desc: s.desc || '' }));
@@ -1260,6 +1315,39 @@ const HTML = /* html */ `<!doctype html>
   .stale-fix{margin-top:11px; font-size:13px; padding:9px 14px}
   .tab-btn .badge.stale{ background:#ffb86b; color:#1a0f0a; border-color:#ffb86b }
 
+  /* model ingest — a big source being eaten one fragment at a time */
+  .ingest{display:none; margin-bottom:14px; padding:13px 15px; border:1px solid rgba(47,216,255,.32); background:linear-gradient(180deg,rgba(47,216,255,.07),rgba(47,216,255,.02))}
+  .ingest.ing-done{border-color:var(--line); background:none; padding:10px 13px}
+  .ing-hd{display:flex; align-items:baseline; gap:11px; flex-wrap:wrap}
+  .ing-t{font-family:var(--font-mono); text-transform:uppercase; letter-spacing:.16em; font-size:11px; color:var(--cyan-soft)}
+  .ing-n{font-size:13.5px; font-weight:650; color:var(--txt)}
+  .ing-pct{margin-left:auto; font-family:var(--font-mono); font-size:12px; color:var(--cyan)}
+  .ing-bar{margin-top:9px; height:5px; background:rgba(255,255,255,.06); overflow:hidden}
+  .ing-bar i{display:block; height:100%; background:var(--cyan); box-shadow:0 0 10px rgba(47,216,255,.6); transition:width .35s ease}
+  .ing-tape{display:flex; flex-wrap:wrap; gap:2px; margin-top:10px}
+  .ic{width:13px; height:13px; flex:0 0 auto; border:1px solid; cursor:pointer; background:none}
+  .ic.done{background:var(--cyan); border-color:var(--cyan)}
+  .ic.pending{border-color:rgba(255,255,255,.16)}
+  .ic.blocked{background:rgba(255,92,110,.5); border-color:#ff5c6e}
+  .ic.skipped{border-color:rgba(255,255,255,.16); background:repeating-linear-gradient(45deg,rgba(255,255,255,.12) 0 2px,transparent 2px 4px)}
+  .ic.sel{outline:1px solid var(--cyan); outline-offset:2px}
+  .ing-meta{margin-top:10px; color:var(--dim); font-size:12.5px; line-height:1.65}
+  .ing-meta code,.ing-frag code{font-family:var(--font-mono); font-size:11.5px; color:var(--cyan-soft)}
+  .ing-grew{margin-top:7px; display:flex; flex-wrap:wrap; gap:4px 14px; font-family:var(--font-mono); font-size:11px; color:var(--dim2)}
+  .ing-grew b{color:var(--cyan-soft); font-weight:500}
+  .ing-frag{display:none; margin-top:10px; padding:10px 12px; border:1px solid var(--line); background:rgba(0,0,0,.25); font-size:12.5px; color:var(--dim); line-height:1.6}
+  .ing-frag .fh{color:var(--txt); font-weight:600; font-size:13px}
+  .ing-un{margin-top:12px; border-top:1px solid var(--line); padding-top:11px}
+  .ing-un summary{cursor:pointer; font-size:12.5px; color:#ffb86b; list-style:none}
+  .ing-un summary::-webkit-details-marker{display:none}
+  .ing-un summary:before{content:"▸ "; font-family:var(--font-mono)}
+  .ing-un[open] summary:before{content:"▾ "}
+  .ing-un table{width:100%; border-collapse:collapse; margin-top:9px; font-size:12px}
+  .ing-un td{padding:5px 9px 5px 0; border-bottom:1px solid var(--line); vertical-align:top; color:var(--dim)}
+  .ing-un td.w{font-family:var(--font-mono); color:var(--txt); white-space:nowrap}
+  .ing-un td.e{font-family:var(--font-mono); font-size:11px; color:var(--dim2)}
+  .ing-note{margin-top:9px; color:var(--dim2); font-size:12px; line-height:1.6}
+
   /* preview & pick */
   .pv-bar{display:flex; gap:9px; margin-bottom:12px}
   .pv-url{flex:1}
@@ -1629,6 +1717,7 @@ function renderDetail(){
       '<div id="taskList"></div>' +
     '</div>' +
     '<div class="pane" data-pane="model">' +
+      '<div class="ingest" id="ingestBox"></div>' +
       '<div class="model-stale" id="modelStale"></div>' +
       '<div class="model-src" id="modelSrc"></div>' +
       '<div class="model-head">' +
@@ -1950,14 +2039,21 @@ async function loadModel(pathStr){
   modelData=d;
   renderModelSrc(d);
   renderModelStale(d);
+  renderIngest(d);   // after stale: a running ingest owns the tab badge
   const upd=document.getElementById('modelUpd');
   if(upd) upd.textContent = (d.index && d.index.at) ? ('updated '+fmtTime(d.index.at)) : '';
   const nav=document.getElementById('modelNav');
   if(!d.exists){
     if(nav) nav.innerHTML='';
     const shared=(d.shared||[]).map(s=>s.name);
+    const ing=d.ingest&&d.ingest.counts;
     view.innerHTML = modelSrc
       ? '<div class="model-empty"><b>'+esc(modelSrc)+' has not shared a model yet.</b><br>Their snapshot arrives when they press <b>⇪ Share model</b> in their own dashboard — it lands in <code>.gitmir/shared/'+esc(modelSrc)+'/model/</code> on this machine.</div>'
+      // An ingest is under way: the model is empty because the first fragments have not
+      // landed, not because nobody started. Saying "run gitmir-model" here would be wrong.
+      : ing && ing.done < ing.total
+      ? '<div class="model-empty"><b>The ingest has not written anything yet.</b><br>'+
+        ing.total+' fragments are planned and '+ing.done+' are done — diagrams appear here as soon as the first fragment lands entities in <code>.gitmir/model/</code>. Progress is above; the fragments themselves are tasks in the <b>Queue</b> tab.</div>'
       : '<div class="model-empty"><b>This project has no model of its own yet.</b><br>'+
         (shared.length
           ? 'Switch to <b>⇪ '+esc(shared[0])+'</b> above to explore the model your teammate shared — it is on this machine, under <code>.gitmir/shared/</code>.'
@@ -1986,6 +2082,130 @@ function renderModelStale(d){
     '<button class="run stale-fix">📋 Copy gitmir-model — paste into Claude to refresh</button>';
   box.querySelector('.stale-fix').addEventListener('click', ()=>copySkill('gitmir-model','gitmir-model'));
   if(badge){ badge.textContent='!'; badge.className='badge stale'; }
+}
+
+// Thousands separator without a regex: in this file every backslash escape inside the
+// client script is collapsed by the template literal, so \\d and \\B are not safe here.
+function ingNum(n){
+  n = Math.round(Number(n)||0);
+  const s = String(n); let out = '', c = 0;
+  for(let i=s.length-1; i>=0; i--){ out = s[i]+out; if(++c%3===0 && i>0) out = ' '+out; }
+  return out;
+}
+let ingSel = null;   // which fragment cell is expanded
+// Ingesting a big source is dozens of tasks over several sessions. Shown as a queue it is
+// opaque; shown as a tape it is one glance — how far along, what is blocked, and what the
+// model still cannot resolve. The last of those is the honest part and it stays visible.
+function renderIngest(d){
+  const box=document.getElementById('ingestBox'); if(!box) return;
+  const g=d.ingest;
+  if(!g || !g.counts || !g.counts.total || modelSrc){ box.innerHTML=''; box.style.display='none'; return; }
+  const c=g.counts, total=c.total, done=c.done||0, blocked=c.blocked||0, skipped=c.skipped||0;
+  const openRefs=(g.unresolved&&g.unresolved.open)||0;
+  const pct = total ? Math.round(done*100/total) : 0;
+  const running = done+blocked+skipped < total;
+  const finished = !running && !blocked;
+  box.style.display='block';
+  box.className = 'ingest' + (finished && !openRefs ? ' ing-done' : '');
+
+  // Finished cleanly: one quiet line. It stays because how a model was built is
+  // provenance — worth knowing when you later wonder how complete it is.
+  if(finished && !openRefs){
+    box.innerHTML='<div class="ing-hd"><span class="ing-t">Model ingest</span>'+
+      '<span class="ing-n">complete</span></div>'+
+      '<div class="ing-meta">Built from '+ingNum(total)+' fragments'+
+      (g.linesTotal?(' covering '+ingNum(g.linesTotal)+' lines'):'')+
+      ', every reference resolved.'+(g.source?(' Source: <code>'+esc(g.source)+'</code>'):'')+'</div>';
+    return;
+  }
+
+  let head = running ? (ingNum(done)+' of '+ingNum(total)+' fragments') : (ingNum(total)+' fragments read');
+  let html='<div class="ing-hd"><span class="ing-t">Model ingest</span>'+
+    '<span class="ing-n">'+head+'</span><span class="ing-pct">'+pct+'%</span></div>'+
+    '<div class="ing-bar"><i style="width:'+pct+'%"></i></div>';
+
+  html+='<div class="ing-tape">';
+  for(const f of (g.fragments||[])){
+    const t = '#'+f.n+(f.id?(' '+f.id):'')+' — '+f.status+
+      (f.lines?(', '+ingNum(f.lines)+' lines'):'')+(f.files?(', '+f.files+' files'):'');
+    html+='<i class="ic '+f.status+(ingSel===f.n?' sel':'')+'" data-frag="'+f.n+'" title="'+esc(t)+'"></i>';
+  }
+  html+='</div>';
+
+  html+='<div class="ing-frag" id="ingFrag"></div>';
+
+  const bits=[];
+  if(g.linesTotal) bits.push(ingNum(g.linesDone)+' of '+ingNum(g.linesTotal)+' lines read');
+  if(blocked) bits.push('<b style="color:#ff5c6e">'+blocked+' blocked</b>');
+  if(skipped) bits.push(skipped+' skipped');
+  if(g.kind) bits.push('kind: '+esc(g.kind));
+  html+='<div class="ing-meta">'+bits.join(' · ')+
+    (g.source?('<br>Reading <code>'+esc(g.source)+'</code>'):'')+'</div>';
+
+  const dims=Object.keys(g.added||{});
+  if(dims.length){
+    html+='<div class="ing-grew">';
+    for(const k of dims) html+='<span>'+esc(k)+' <b>'+ingNum(g.added[k])+'</b></span>';
+    html+='</div>';
+  }
+
+  if(openRefs){
+    html+='<details class="ing-un"><summary>'+ingNum(openRefs)+' reference'+(openRefs>1?'s':'')+
+      ' seen but not yet resolvable — recorded, not invented</summary>'+
+      '<table><tbody>';
+    for(const u of (g.unresolved.items||[])){
+      html+='<tr><td class="w">'+esc(u.from||'?')+(u.field?(' <span style="color:var(--dim2)">'+esc(u.field)+'</span>'):'')+
+        '</td><td class="w">→ '+esc(u.wanted||'?')+'</td><td class="e">'+esc(u.evidence||'')+'</td></tr>';
+    }
+    html+='</tbody></table>';
+    if(openRefs>(g.unresolved.items||[]).length)
+      html+='<div class="ing-note">Showing '+(g.unresolved.items||[]).length+' of '+ingNum(openRefs)+
+        ' — the rest are in <code>.gitmir/ingest/unresolved.json</code>.</div>';
+    html+='<div class="ing-note">Each is a link a fragment saw before its target existed. Later fragments '+
+      'resolve what they can and the final stitch pass closes the rest. Whatever stays here is a known gap, '+
+      'which is the point: an invented link would look exactly like a real one.</div>';
+    html+='</details>';
+  }
+
+  // Both notes can apply at once — a blocked fragment does not stop the run, so saying
+  // only one of the two would drop the half the user needs.
+  if(blocked) html+='<div class="ing-note">A blocked fragment failed three times and was left alone so the '+
+    'rest could continue — click its red cell for the reason.</div>';
+  if(running) html+='<div class="ing-note">Each fragment is a task in the <b>Queue</b>, run with a fresh '+
+    'context holding only its own slice. Progress lives in <code>.gitmir/ingest/ledger.json</code>, so a '+
+    'session that ends halfway continues rather than restarts.</div>';
+
+  box.innerHTML=html;
+
+  const tape=box.querySelector('.ing-tape');
+  if(tape) tape.addEventListener('click', (e)=>{
+    const cell=e.target.closest('.ic'); if(!cell) return;
+    const n=Number(cell.dataset.frag);
+    ingSel = (ingSel===n) ? null : n;
+    box.querySelectorAll('.ic').forEach(x=> x.classList.toggle('sel', Number(x.dataset.frag)===ingSel));
+    paintIngFrag(g);
+  });
+  paintIngFrag(g);
+
+  // While an ingest is running that is the most useful thing the tab can say.
+  const badge=document.getElementById('modelBadge');
+  if(badge && running){ badge.textContent = done+'/'+total; badge.className='badge'; }
+}
+function paintIngFrag(g){
+  const el=document.getElementById('ingFrag'); if(!el) return;
+  const f=(g.fragments||[]).find(x=>x.n===ingSel);
+  if(!f){ el.style.display='none'; el.innerHTML=''; return; }
+  el.style.display='block';
+  let h='<div class="fh">#'+f.n+(f.id?(' · '+esc(f.id)):'')+' — '+esc(f.status)+'</div>';
+  if(f.owns&&f.owns.length) h+='<div>owns <code>'+f.owns.map(esc).join('</code>, <code>')+'</code>'+
+    (f.files||f.lines?(' &nbsp;('+(f.files?f.files+' files':'')+(f.files&&f.lines?', ':'')+(f.lines?ingNum(f.lines)+' lines':'')+')'):'')+'</div>';
+  if(f.dimensions&&f.dimensions.length) h+='<div>fills '+f.dimensions.map(esc).join(' · ')+'</div>';
+  if(f.added){
+    const parts=Object.keys(f.added).map(k=>esc(k)+' '+esc(String(f.added[k])));
+    if(parts.length) h+='<div>added '+parts.join(' · ')+'</div>';
+  }
+  if(f.note) h+='<div style="color:#ffb86b">'+esc(f.note)+'</div>';
+  el.innerHTML=h;
 }
 
 // Source switcher: our own model, plus any teammate model the bridge delivered.

@@ -115,6 +115,12 @@ closes them and reports what stayed open.
 That last part matters more than it sounds: **a model with twelve recorded unknowns is
 trustworthy, and a model with twelve invented links is not — and they look identical.**
 
+The **Model** tab shows the run while it happens: a tape of one cell per fragment (done ·
+pending · blocked), how many of the source's lines have actually been read, the model
+growing dimension by dimension, and the unresolved references with their evidence. Click a
+cell for what that fragment owns and what it added. Forty tasks in a queue is opaque; this
+is one glance — and the tab badge carries the count, so you can see it without opening it.
+
 Then **`model-navigate`** is how a task uses it: resolve the entry id, expand by hops, and
 follow the **inbound** references — the ones that answer "what breaks if I change this",
 which is the question that gets forgotten. It states the path it walked, so you can see
