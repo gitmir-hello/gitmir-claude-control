@@ -1216,6 +1216,10 @@ const HTML = /* html */ `<!doctype html>
   .q-clk:active{transform:translateY(1px)}
   .q-badge{font-family:var(--font-mono); text-transform:uppercase; letter-spacing:.12em; font-size:10px; padding:3px 9px; border:1px solid; border-radius:0; flex-shrink:0}
 
+  .map-cap{margin-bottom:14px; color:var(--dim); font-size:13px; line-height:1.65; max-width:1000px}
+  .map-cap b{color:var(--cyan-soft); font-weight:500; font-family:var(--font-mono); font-size:12px}
+  .map-cap2{display:block; margin-top:8px; color:var(--dim2); font-size:12.5px}
+
   /* preview & pick */
   .pv-bar{display:flex; gap:9px; margin-bottom:12px}
   .pv-url{flex:1}
@@ -1690,6 +1694,7 @@ let logicEntityId = null;
 let modelSrc = null;   // null = this project's own model; otherwise a teammate's name
 let mermaidReady = null;
 const MODEL_VIEWS = [
+  {key:'map', label:'Product map'},
   {key:'logic', label:'Business logic'},
   {key:'overview', label:'Overview'},
   {key:'er', label:'Data (ER)'},
@@ -1960,6 +1965,19 @@ async function renderModelView(){
   if(modelView==='processes') return renderProcesses(view, m);
   view.innerHTML='';
   const box=document.createElement('div'); view.appendChild(box);
+  if(modelView==='map'){
+    // This is the view shown to a client, so say what the picture means in their words.
+    const cap=document.createElement('div'); cap.className='map-cap';
+    // No apostrophes in here on purpose: this string is emitted from a template literal.
+    cap.innerHTML='Each block is an area of the product — what it owns (◆) and how much of it there is. '+
+      'A line means one area touches another: <b>writes X</b> — it changes data owned by that area · '+
+      '<b>uses</b> — its screens call that area · <b>calls</b> — it triggers logic over there · '+
+      'a named signal is an event one area raises and another reacts to.'+
+      '<span class="map-cap2">Read it together with whoever asked for the product: if a line is missing or points the wrong way, the understanding is wrong — and that is far cheaper to find now than after it is built.</span>';
+    box.appendChild(cap);
+    const d=document.createElement('div'); box.appendChild(d);
+    return renderElk(d, graphProductMap(m));
+  }
   if(modelView==='er') return renderElk(box, graphER(m));
   if(modelView==='flow') return renderElk(box, graphFlow(m));
   view.innerHTML='<div class="model-empty">No data for this diagram.</div>';
@@ -2191,6 +2209,79 @@ function renderOverview(view, d){
 }
 
 // ----- ER diagram -----
+// The view you open in front of a client before anything is built: the product as
+// business areas and the lines between them. Everything here is aggregated up from the
+// fine-grained model — which module writes whose data, who notifies whom, who calls
+// whom — so it cannot drift from what the code actually does.
+function graphProductMap(m){
+  const mods=m.modules||[], ents=m.entities||[], sf=m.serverFunctions||[],
+        fe=m.frontendUnits||[], ev=m.events||[], rt=m.apiRoutes||[];
+  const owner=fieldOwner(m);
+  const modById=new Map(mods.map(x=>[x.id,x]));
+  const entById=new Map(ents.map(x=>[x.id,x]));
+  const evById=new Map(ev.map(x=>[x.id,x]));
+  const fnById=new Map(sf.map(x=>[x.id,x]));
+  const rtOwner=new Map();                       // routeId -> module that answers it
+  for(const f of sf) if(f.routeId) rtOwner.set(f.routeId, f.moduleId||null);
+  for(const r of rt) if(!rtOwner.has(r.id)) rtOwner.set(r.id, r.moduleId||null);
+  const OTHER='__other';
+  const mod=id=> (id && modById.has(id)) ? id : OTHER;
+  const modName=id=> id===OTHER ? 'Everything else' : ((modById.get(id)||{}).name || id);
+
+  // What lives in each area, in the words a client recognises.
+  const bucket=new Map();
+  const B=id=>{ if(!bucket.has(id)) bucket.set(id,{ents:[],screens:0,actions:0,desc:''}); return bucket.get(id); };
+  for(const e of ents) B(mod(e.moduleId)).ents.push(e.name||e.id);
+  for(const f of fe) B(mod(f.moduleId)).screens++;
+  for(const f of sf) B(mod(f.moduleId)).actions++;
+  for(const x of mods) if(bucket.has(x.id)) B(x.id).desc = x.description||'';
+  if(!bucket.size) return {nodes:[],edges:[]};
+
+  const nodes=[], edges=[];
+  for(const [id,b] of bucket){
+    const lines=[];
+    if(b.ents.length) lines.push('◆ '+b.ents.slice(0,4).join(' · ')+(b.ents.length>4?' +'+(b.ents.length-4):''));
+    const meta=[]; if(b.screens) meta.push(b.screens+' screen'+(b.screens>1?'s':''));
+    if(b.actions) meta.push(b.actions+' action'+(b.actions>1?'s':''));
+    if(meta.length) lines.push('▤ '+meta.join(' · '));
+    const W=272;
+    const dl = b.desc ? wrapPx(b.desc, W-15-11, CW_MONO).slice(0,2) : [];
+    const h = 32 + dl.length*SUB_LH + Math.max(1,lines.length)*18 + 10;
+    nodes.push({id, w:W, h, meta:{kind:'module', label:modName(id), sub:b.desc, subLines:dl, fields:lines,
+      ref: id===OTHER?null:{k:'module', id}}});
+  }
+
+  // One line per pair of areas, labelled with the strongest thing that passes along it.
+  const link=new Map();
+  const add=(from,to,kind,label,rank)=>{
+    if(from===to || !bucket.has(from) || !bucket.has(to)) return;
+    const k=from+'>'+to; const cur=link.get(k);
+    if(!cur || rank>cur.rank) link.set(k,{from,to,kind,label,rank});
+  };
+  for(const f of sf){
+    const A=mod(f.moduleId);
+    // data: this area writes something another area owns
+    for(const fid of (f.writesFieldIds||[])){
+      const e=entById.get(owner.get(fid)); if(!e) continue;
+      add(A, mod(e.moduleId), 'data', 'writes '+(e.name||''), 3);
+    }
+    // a signal one area raises and another reacts to
+    for(const id of (f.emitsEventIds||[])){
+      const evt=evById.get(id); if(!evt) continue;
+      for(const g of sf) if((g.subscribesEventIds||[]).includes(id)) add(A, mod(g.moduleId), 'effect', evt.name||'event', 4);
+    }
+    for(const id of (f.callsFunctionIds||[])){
+      const g=fnById.get(id); if(g) add(A, mod(g.moduleId), 'spine', 'calls', 1);
+    }
+  }
+  // screens of one area talking to another area's API
+  for(const u of fe){ const A=mod(u.moduleId);
+    for(const rid of (u.consumesRouteIds||[])) if(rtOwner.has(rid)) add(A, mod(rtOwner.get(rid)), 'spine', 'uses', 2);
+  }
+  for(const e of link.values()) edges.push({from:e.from, to:e.to, kind:e.kind, label:e.label});
+  return {direction:'RIGHT', nodes, edges};
+}
+
 function graphER(m){
   const ents=m.entities||[]; const nodes=[], edges=[]; const byId=new Map(ents.map(e=>[e.id,e]));
   if(!ents.length) return {nodes,edges};
