@@ -25,7 +25,7 @@ if (-not $node) {
 }
 
 # Hidden and detached: the dashboard outlives this launcher and anything you close.
-Start-Process -FilePath $node -ArgumentList 'server.js' -WorkingDirectory $dir -WindowStyle Hidden
+Start-Process -FilePath $node -ArgumentList 'server.ts' -WorkingDirectory $dir -WindowStyle Hidden
 
 for ($i = 0; $i -lt 60; $i++) {
     Start-Sleep -Milliseconds 250
@@ -34,6 +34,6 @@ for ($i = 0; $i -lt 60; $i++) {
 
 Add-Type -AssemblyName System.Windows.Forms
 [System.Windows.Forms.MessageBox]::Show(
-    "The dashboard did not start within 15 seconds. Try running 'node server.js' in`n$dir`nto see the error.",
+    "The dashboard did not start within 15 seconds. Try running 'node server.ts' in`n$dir`nto see the error.",
     "GITMIR Claude Control") | Out-Null
 exit 1

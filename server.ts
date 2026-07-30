@@ -1,4 +1,3 @@
-'use strict';
 // GITMIR Claude Control — local dashboard for running Claude Code across projects.
 // Copyright (C) 2026 GITMIR
 // SPDX-License-Identifier: AGPL-3.0-or-later
@@ -9,16 +8,24 @@
 // It is distributed WITHOUT ANY WARRANTY; see the LICENSE file for the full text.
 // A commercial license is also available — see LICENSING.md.
 
-const http = require('http');
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
-const { execFile, spawn } = require('child_process');
+import http from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { execFile, spawn } from 'node:child_process';
+
+// ---------- the shapes this dashboard actually moves around ----------
+/** A folder the user added, as stored in projects.json. */
+interface Project { name: string; path: string; color?: string; description?: string }
+/** An entry in skills.json — a prompt kept in its own .md file. */
+interface Skill { name: string; title?: string; desc?: string; file: string; stripFrontmatter?: boolean; prepend?: string }
+type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
 
 // The native folder picker is reliable on macOS, Linux and Windows 10, but on
 // Windows 11 a dialog spawned by a background process gets suppressed — so we hide
 // the "Browse…" button there and let the user paste the path instead.
-function nativePickerAvailable() {
+function nativePickerAvailable(): boolean {
   if (process.platform === 'darwin' || process.platform === 'linux') return true;
   if (process.platform === 'win32') {
     const m = /^10\.0\.(\d+)/.exec(os.release() || '');
@@ -27,16 +34,16 @@ function nativePickerAvailable() {
   return false;
 }
 
-const relay = require('./relay');
+import * as relay from './relay.ts';
 
 // Fixed by default so the URL is memorable, but overridable: 4599 may be taken, and
 // two people on one machine need different ports.
 const PORT = Number(process.env.GITMIR_PORT || 4599) || 4599;
-const DATA_FILE = path.join(__dirname, 'projects.json');
-const SKILLS_FILE = path.join(__dirname, 'skills.json');
+const DATA_FILE = path.join(import.meta.dirname, 'projects.json');
+const SKILLS_FILE = path.join(import.meta.dirname, 'skills.json');
 
 // ---------- storage ----------
-function loadProjects() {
+function loadProjects(): Project[] {
   try {
     const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
     return Array.isArray(data) ? data : [];
@@ -44,12 +51,12 @@ function loadProjects() {
     return [];
   }
 }
-function saveProjects(list) {
+function saveProjects(list: Project[]): void {
   fs.writeFileSync(DATA_FILE, JSON.stringify(list, null, 2));
 }
 
 // ---------- skills registry ----------
-function loadSkills() {
+function loadSkills(): Skill[] {
   try {
     const data = JSON.parse(fs.readFileSync(SKILLS_FILE, 'utf8'));
     return Array.isArray(data) ? data : [];
@@ -57,10 +64,10 @@ function loadSkills() {
     return [];
   }
 }
-function resolveSkillFile(f) {
-  return path.isAbsolute(f) ? f : path.join(__dirname, f);
+function resolveSkillFile(f: string): string | null {
+  return path.isAbsolute(f) ? f : path.join(import.meta.dirname, f);
 }
-function stripFrontmatter(text) {
+function stripFrontmatter(text: string): string {
   if (text.startsWith('---')) {
     const end = text.indexOf('\n---', 3);
     if (end !== -1) {
@@ -72,7 +79,7 @@ function stripFrontmatter(text) {
 }
 
 // ---------- osascript helpers ----------
-function osascript(script, args = []) {
+function osascript(script: string, args: string[] = []): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile('osascript', ['-e', script, ...args], { timeout: 120000 }, (err, stdout, stderr) => {
       if (err) return reject(new Error((stderr || err.message || '').trim()));
@@ -83,7 +90,7 @@ function osascript(script, args = []) {
 
 // Native macOS folder picker -> POSIX path (no trailing slash), or null if cancelled.
 // Native folder picker -> selected path, or null if cancelled. Detects the OS.
-async function chooseFolder() {
+async function chooseFolder(): Promise<string | null> {
   const plat = process.platform;
 
   // macOS — osascript "choose folder"
@@ -125,22 +132,22 @@ async function chooseFolder() {
   ];
   for (const [bin, args] of tools) {
     try {
-      const p = await new Promise((resolve, reject) => {
-        execFile(bin, args, { timeout: 180000 }, (err, stdout) => {
+      const p = await new Promise<string>((resolve, reject) => {
+        execFile(bin as string, args as string[], { timeout: 180000 }, (err: any, stdout: string) => {
           if (err && err.code === 'ENOENT') return reject(err);   // tool not installed -> try next
           resolve((stdout || '').trim());                          // empty = cancelled
         });
       });
       return p ? p.replace(/\/+$/, '') : null;
     } catch (e) {
-      if (e.code !== 'ENOENT') throw e;
+      if ((e as NodeJS.ErrnoException)?.code !== 'ENOENT') throw e;
     }
   }
   throw new Error('no folder picker found (install zenity or kdialog)');
 }
 
 // Open a terminal in the folder and run `claude` — detects the OS.
-function openInTerminal(projectPath) {
+function openInTerminal(projectPath: string) {
   const plat = process.platform;
 
   // macOS — Terminal.app via osascript (path passed as argv -> no injection).
@@ -183,7 +190,7 @@ function openInTerminal(projectPath) {
       let i = 0;
       const tryNext = () => {
         if (i >= candidates.length) return reject(new Error('no terminal emulator found'));
-        const [bin, args] = candidates[i++];
+        const [bin, args] = candidates[i++] as [string, string[]];
         const c = spawn(bin, args, { detached: true, stdio: 'ignore' });
         c.on('error', tryNext);
         c.on('spawn', () => { c.unref(); resolve(''); });
@@ -196,7 +203,7 @@ function openInTerminal(projectPath) {
 }
 
 // Reveal a folder in the OS file manager. Detects the OS.
-function revealInFinder(projectPath) {
+function revealInFinder(projectPath: string) {
   const plat = process.platform;
   if (plat === 'darwin') {
     const script =
@@ -222,11 +229,14 @@ function revealInFinder(projectPath) {
 }
 
 // ---------- http helpers ----------
-function sendJSON(res, code, obj) {
+function sendJSON(res: ServerResponse, code: number, obj: unknown): void {
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(obj));
 }
-function readBody(req) {
+// The parsed JSON body of a request. It is untrusted input, so the type says only
+// "some object with some fields" — every handler validates the fields it uses before
+// touching them, which is where the real checking lives.
+function readBody(req: IncomingMessage): Promise<Record<string, any>> {
   return new Promise((resolve) => {
     let data = '';
     req.on('data', (c) => (data += c));
@@ -239,7 +249,7 @@ function readBody(req) {
 // (open a terminal, repoint the team bridge at a hostile relay, read project paths).
 // Accept API calls only from the dashboard's own origin, and reject a Host header
 // that isn't localhost — that is what closes DNS rebinding.
-function sameOrigin(req) {
+function sameOrigin(req: IncomingMessage): boolean {
   const host = String(req.headers.host || '');
   if (!/^(localhost|127\.0\.0\.1|\[::1\]):?/.test(host)) return false;
   // Anything arriving on the preview origin is the framed site talking, not the
@@ -271,15 +281,17 @@ function sameOrigin(req) {
 const PREVIEW_ON = process.env.GITMIR_PREVIEW !== '0';
 const PREVIEW_HOST = '127.0.0.1';
 const PREVIEW_ORIGIN = 'http://' + PREVIEW_HOST + ':' + PORT;
-// Server-side escape: esc() further down lives inside the HTML template and is
-// only defined in the browser.
-const hesc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+// Server-side escape. esc() in public/app.js is the browser's copy; this one is for
+// the few strings the server itself puts into HTML.
+const HESC_MAP: Record<string, string> = { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' };
+const hesc = (s: unknown): string => String(s == null ? '' : s).replace(/[&<>"']/g, (c: string) => HESC_MAP[c] || c);
 const PREVIEW_MAX = 2 * 1024 * 1024;   // documents only; this is not a CDN
 const PREVIEW_TIMEOUT = 15000;
 
 // The machine's own network is not ours to reach. Loopback IS allowed: pointing
 // the preview at your own dev server (or at this dashboard) is the main use.
-function blockedHost(hostname) {
+/** The reason this host is refused, or null when it is allowed. The reason is shown to the user. */
+function blockedHost(hostname: string): string | null {
   const h = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
   if (/^169\.254\./.test(h)) return 'link-local addresses (cloud metadata lives there)';
   if (/^10\./.test(h)) return 'private network addresses';
@@ -290,7 +302,7 @@ function blockedHost(hostname) {
   if (/\.internal$|\.local$/.test(h)) return 'internal network names';
   return null;
 }
-const isLoopback = (h) => /^(localhost|127\.|::1$|0\.0\.0\.0$)/.test(String(h || '').toLowerCase().replace(/^\[|\]$/g, ''));
+const isLoopback = (h: unknown): boolean => /^(localhost|127\.|::1$|0\.0\.0\.0$)/.test(String(h || '').toLowerCase().replace(/^\[|\]$/g, ''));
 
 // The picker. Injected into the proxied document; namespaced so it cannot collide
 // with the page it lands in, and it removes everything it added when it turns off.
@@ -418,8 +430,16 @@ const loopbackOk = new Set();
 // mirror of that one site: every path on it maps to the same path upstream. This is
 // what makes ROOT-RELATIVE urls work — /css/style.css resolves against the origin
 // and ignores <base> entirely, which is why prefixing paths could never be enough.
-let previewSite = null;   // e.g. 'https://example.com'
-async function previewFetch(rawUrl, allowLoopback) {
+let previewSite: string | null = null;   // e.g. 'https://example.com'
+/**
+ * Either a fetched document or the reason it was refused — as a discriminated union, so
+ * `if (got.error) return ...` narrows the rest of the function to the success shape and
+ * body/status/finalUrl are known to be there. No assertions, no runtime change.
+ */
+type PreviewResult =
+  | { error: string }
+  | { status: number; contentType: string; body: Buffer; finalUrl: string };
+async function previewFetch(rawUrl: string, allowLoopback: boolean): Promise<PreviewResult> {
   let u;
   try { u = new URL(rawUrl); } catch { return { error: 'That is not a valid URL.' }; }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return { error: 'Only http:// and https:// can be previewed.' };
@@ -440,7 +460,7 @@ async function previewFetch(rawUrl, allowLoopback) {
       r = await fetch(u.href, { redirect: 'manual', signal: ctl.signal, headers: { 'user-agent': 'GitMirClaudeControl/preview', accept: 'text/html,*/*' } });
     } catch (e) {
       clearTimeout(timer);
-      return { error: `Could not reach ${u.hostname}: ${(e && e.message) || e}` };
+      return { error: `Could not reach ${u.hostname}: ${(e as Error)?.message || e}` };
     }
     clearTimeout(timer);
     if ([301, 302, 303, 307, 308].includes(r.status)) {
@@ -458,7 +478,7 @@ async function previewFetch(rawUrl, allowLoopback) {
 // Everything served as HTML on the preview origin goes through here, so the picker
 // survives a redirect or a click on a link inside the site. Serving a second document
 // without the bridge is exactly how "Select" stopped doing anything.
-function preparePreviewHtml(buf, finalUrl) {
+function preparePreviewHtml(buf: Buffer, finalUrl: string): string {
   let html = buf.toString('utf8');
   const fu = new URL(finalUrl);
   // <base> plus rewriting absolute same-site urls keeps every asset on the mirror,
@@ -476,7 +496,7 @@ function preparePreviewHtml(buf, finalUrl) {
 
 // ---------- routes ----------
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://localhost:${PORT}`);
+  const url = new URL(req.url || '/', `http://localhost:${PORT}`);
   try {
     // The injected picker is fetched by the sandboxed preview frame, whose origin is
     // opaque — it carries no secrets and must stay reachable from there.
@@ -496,7 +516,7 @@ const server = http.createServer(async (req, res) => {
     // broken dashboard, and 110 KB over loopback costs nothing.
     if (req.method === 'GET' && url.pathname === '/app.js') {
       try {
-        const body = fs.readFileSync(path.join(__dirname, 'public', 'app.js'));
+        const body = fs.readFileSync(path.join(import.meta.dirname, 'public', 'app.js'));
         res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'no-store' });
         return res.end(body);
       } catch {
@@ -508,7 +528,7 @@ const server = http.createServer(async (req, res) => {
       const rel = url.pathname.replace(/^\/vendor\//, '');
       if (rel.includes('..')) { res.writeHead(400); return res.end('bad'); }
       try {
-        const body = fs.readFileSync(path.join(__dirname, 'vendor', rel));
+        const body = fs.readFileSync(path.join(import.meta.dirname, 'vendor', rel));
         const type = rel.endsWith('.js') ? 'application/javascript; charset=utf-8'
           : rel.endsWith('.css') ? 'text/css; charset=utf-8'
           : rel.endsWith('.woff2') ? 'font/woff2'
@@ -528,7 +548,7 @@ const server = http.createServer(async (req, res) => {
         && !url.pathname.startsWith('/api/')) {
       if (!PREVIEW_ON || !previewSite) { res.writeHead(404); return res.end('no preview'); }
       const got = await previewFetch(previewSite + url.pathname + (url.search || ''), true);
-      if (got.error) { res.writeHead(502, { 'Access-Control-Allow-Origin': '*' }); return res.end(got.error); }
+      if ('error' in got) { res.writeHead(502, { 'Access-Control-Allow-Origin': '*' }); return res.end(got.error); }
       let body = got.body;
       const ct = got.contentType || 'application/octet-stream';
       if (/text\/html|application\/xhtml/i.test(ct)) {
@@ -552,8 +572,8 @@ const server = http.createServer(async (req, res) => {
       const scheme = slash < 0 ? '' : rest.slice(0, slash);
       if (scheme !== 'http' && scheme !== 'https') { res.writeHead(400); return res.end('bad target'); }
       const upstream = scheme + '://' + rest.slice(slash + 1) + (url.search || '');
-      const got = await previewFetch(upstream);
-      if (got.error) { res.writeHead(502, { 'Access-Control-Allow-Origin': '*' }); return res.end(got.error); }
+      const got = await previewFetch(upstream, false);
+      if ('error' in got) { res.writeHead(502, { 'Access-Control-Allow-Origin': '*' }); return res.end(got.error); }
       const ct = got.contentType || 'application/octet-stream';
       // Rewrite same-site absolute URLs inside CSS so its @imports and url()s keep
       // flowing through the mirror as well.
@@ -583,8 +603,8 @@ const server = http.createServer(async (req, res) => {
       const dest = req.headers['sec-fetch-dest'];
       const userOpened = dest === 'iframe' || dest === 'document' || dest === undefined;
       const got = await previewFetch(target, userOpened);
-      if (userOpened && !got.error) { try { const f = new URL(got.finalUrl); loopbackOk.add(f.host); previewSite = f.origin; } catch {} }
-      if (got.error) {
+      if (userOpened && !('error' in got)) { try { const f = new URL(got.finalUrl); loopbackOk.add(f.host); previewSite = f.origin; } catch {} }
+      if ('error' in got) {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         return res.end(`<!doctype html><meta charset="utf-8"><body style="margin:0;font:14px/1.6 -apple-system,sans-serif;background:#04060a;color:#8497b8;display:flex;align-items:center;justify-content:center;height:100vh;padding:30px;text-align:center">${hesc(got.error)}</body>`);
       }
@@ -611,8 +631,8 @@ const server = http.createServer(async (req, res) => {
       const EXT = /\.(js|jsx|ts|tsx|vue|svelte|astro|html|htm|php|erb|hbs|ejs|pug|jade|css|scss|sass|less|styl|json|md|py|rb|go|java|kt|cs|swift|dart|elm|twig|liquid)$/i;
       const wanted = needles.map((n) => String(n || '').trim()).filter((n) => n.length >= 3).slice(0, 12);
       if (!wanted.length) return sendJSON(res, 200, { hits: [], searched: 0 });
-      const hits = []; let searched = 0;
-      const walk = (dir, depth) => {
+      const hits: { file: string; line: number; needle: string; text: string }[] = []; let searched = 0;
+      const walk = (dir: string, depth: number) => {
         if (depth > 8 || searched > 4000 || hits.length >= 60) return;
         let ents = [];
         try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
@@ -641,12 +661,12 @@ const server = http.createServer(async (req, res) => {
       walk(p, 0);
       // If the project has a model, name the frontend units that consume this route
       // — that is a stronger signal than a text match.
-      let fromModel = [];
+      let fromModel: { name: string; kind?: string; description?: string }[] = [];
       try {
         const fe = JSON.parse(fs.readFileSync(path.join(p, '.gitmir', 'model', 'frontendUnits.json'), 'utf8'));
         const route = String(url.searchParams.get('route') || '');
         if (Array.isArray(fe)) {
-          fromModel = fe.filter((f) => f && f.name && (!route || String(f.name).toLowerCase().includes(route.toLowerCase())))
+          fromModel = fe.filter((f: any) => f && f.name && (!route || String(f.name).toLowerCase().includes(route.toLowerCase())))
             .slice(0, 8).map((f) => ({ name: f.name, kind: f.kind || '', description: f.description || '' }));
         }
       } catch {}
@@ -690,10 +710,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/queue') {
       const p = url.searchParams.get('path') || '';
       const cols = ['todo', 'inprogress', 'verify', 'done'];
-      const out = {};
+      const out: Record<string, unknown> = {};
       for (const c of cols) {
         const dir = path.join(p, 'tasks', c);
-        let items = [];
+        let items: { file: string; title: string; mtime: number }[] = [];
         try {
           items = fs.readdirSync(dir).filter((f) => f.endsWith('.md')).map((f) => {
             let title = f.replace(/\.md$/, '');
@@ -705,7 +725,7 @@ const server = http.createServer(async (req, res) => {
             return { file: f, title, mtime };
           }).sort((a, b) => a.file.localeCompare(b.file));
         } catch {}
-        out[c] = items;
+        out[c] = items as any;
       }
       // The audit walks the whole app and its result is mostly about what it did NOT reach.
       // That is unreadable as a pile of task files, so it is summarised for the Queue tab.
@@ -713,7 +733,7 @@ const server = http.createServer(async (req, res) => {
       let audit = null;
       try {
         const adir = path.join(p, '.gitmir', 'audit');
-        const rd = (f) => { try { return JSON.parse(fs.readFileSync(path.join(adir, f), 'utf8')); } catch { return null; } };
+        const rd = (f: string): any => { try { return JSON.parse(fs.readFileSync(path.join(adir, f), 'utf8')); } catch { return null; } };
         const inv = rd('inventory.json');
         if (inv && Array.isArray(inv.pages) && inv.pages.length) {
           const S = { passed: 0, failed: 0, pending: 0, unreachable: 0, skipped: 0 };
@@ -722,14 +742,14 @@ const server = http.createServer(async (req, res) => {
           for (const g of inv.pages.slice(0, 600)) {
             if (!g || typeof g !== 'object') continue;
             const status = S.hasOwnProperty(g.status) ? g.status : 'pending';
-            S[status]++;
-            const ne = Array.isArray(g.notExercised) ? g.notExercised.slice(0, 10).map((x) => String(x).slice(0, 160)) : [];
+            S[status as keyof typeof S]++;
+            const ne = Array.isArray(g.notExercised) ? g.notExercised.slice(0, 10).map((x: unknown) => String(x).slice(0, 160)) : [];
             notExercised += ne.length;
             pages.push({
               n: Number(g.n) || pages.length + 1,
               url: String(g.url == null ? '' : g.url).slice(0, 300),
               title: String(g.title == null ? '' : g.title).slice(0, 160),
-              foundBy: Array.isArray(g.foundBy) ? g.foundBy.slice(0, 5).map((x) => String(x).slice(0, 20)) : [],
+              foundBy: Array.isArray(g.foundBy) ? g.foundBy.slice(0, 5).map((x: unknown) => String(x).slice(0, 20)) : [],
               auth: String(g.auth == null ? '' : g.auth).slice(0, 40),
               interactive: Number(g.elements && g.elements.interactive) || 0,
               dataEls: Number(g.elements && g.elements.data) || 0,
@@ -746,7 +766,7 @@ const server = http.createServer(async (req, res) => {
             .filter((f) => f && typeof f === 'object')
             .map((f) => {
               const s = SEV.includes(f.severity) ? f.severity : 'minor';
-              sev[s]++;
+              sev[s as keyof typeof sev]++;
               return {
                 id: String(f.id == null ? '' : f.id).slice(0, 40), severity: s,
                 title: String(f.title == null ? '' : f.title).slice(0, 200),
@@ -764,11 +784,11 @@ const server = http.createServer(async (req, res) => {
             env: String(inv.env == null ? '' : inv.env).slice(0, 40),
             driver: String(inv.driver == null ? '' : inv.driver).slice(0, 40),
             at: typeof inv.at === 'string' ? inv.at.slice(0, 40) : null,
-            auth: Array.isArray(inv.auth) ? inv.auth.slice(0, 8).map((x) => String(x).slice(0, 40)) : [],
+            auth: Array.isArray(inv.auth) ? inv.auth.slice(0, 8).map((x: unknown) => String(x).slice(0, 40)) : [],
             caps: inv.caps && typeof inv.caps === 'object' ? inv.caps : null,
             counts: { total: pages.length, passed: S.passed, failed: S.failed, pending: S.pending, unreachable: S.unreachable, skipped: S.skipped },
             notExercised, pages,
-            mismatches: (Array.isArray(inv.mismatches) ? inv.mismatches : []).slice(0, 40).map((m) => ({
+            mismatches: (Array.isArray(inv.mismatches) ? inv.mismatches : []).slice(0, 40).map((m: any) => ({
               kind: String((m && m.kind) == null ? '' : m.kind).slice(0, 60),
               what: String((m && m.what) == null ? '' : m.what).slice(0, 200),
               detail: String((m && m.detail) == null ? '' : m.detail).slice(0, 300),
@@ -777,7 +797,7 @@ const server = http.createServer(async (req, res) => {
           };
         }
       } catch {}
-      out.audit = audit;
+      (out as any).audit = audit;
       return sendJSON(res, 200, out);
     }
     if (req.method === 'GET' && url.pathname === '/api/task-file') {
@@ -807,13 +827,13 @@ const server = http.createServer(async (req, res) => {
         ? path.join(p, '.gitmir', 'shared', who, 'model')
         : path.join(p, '.gitmir', 'model');
       const dims = ['modules','entities','serverUnits','serverFunctions','apiRoutes','frontendUnits','events','processes','statusFlows','reactions'];
-      const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+      const readJson = (f: string) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
       const index = readJson(path.join(dir, 'index.json'));
-      const model = {};
+      const model: Record<string, unknown[]> = {};
       let exists = !!index;
       for (const d of dims) {
         const arr = readJson(path.join(dir, d + '.json'));
-        model[d] = Array.isArray(arr) ? arr : [];
+        model[d] = (Array.isArray(arr) ? arr : []) as any;
         if (model[d].length) exists = true;
       }
       const brief = who ? null : readJson(path.join(p, '.gitmir', 'brief.json'));
@@ -831,7 +851,7 @@ const server = http.createServer(async (req, res) => {
             'coverage', '.cache', '.venv', '__pycache__', '.gitmir', 'tasks', 'docs', '.claude']);
           const EXT = /\.(js|jsx|ts|tsx|vue|svelte|astro|mjs|cjs|py|rb|go|java|kt|cs|swift|php|rs|sql|prisma)$/i;
           let newest = 0, changed = 0, seen = 0, newestFile = '';
-          const walk = (d, depth) => {
+          const walk = (d: string, depth: number) => {
             if (depth > 7 || seen > 6000) return;
             let ents = []; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
             for (const e of ents) {
@@ -860,11 +880,11 @@ const server = http.createServer(async (req, res) => {
         if (led && Array.isArray(led.fragments) && led.fragments.length) {
           const st = { done: 0, pending: 0, blocked: 0, skipped: 0 };
           let linesTotal = 0, linesDone = 0, filesTotal = 0;
-          const added = {}, frags = [];
+          const added: Record<string, number> = {}, frags: any[] = [];
           for (const f of led.fragments.slice(0, 800)) {
             if (!f || typeof f !== 'object') continue;
             const status = st.hasOwnProperty(f.status) ? f.status : 'pending';
-            st[status]++;
+            st[status as keyof typeof st]++;
             const lines = Number(f.size && f.size.lines) || 0;
             const files = Number(f.size && f.size.files) || 0;
             linesTotal += lines; filesTotal += files;
@@ -877,9 +897,9 @@ const server = http.createServer(async (req, res) => {
             frags.push({
               n: Number(f.n) || frags.length + 1,
               id: String(f.id == null ? '' : f.id).slice(0, 80),
-              owns: Array.isArray(f.owns) ? f.owns.slice(0, 12).map((o) => String(o).slice(0, 200)) : [],
+              owns: Array.isArray(f.owns) ? f.owns.slice(0, 12).map((o: unknown) => String(o).slice(0, 200)) : [],
               files, lines, status,
-              dimensions: Array.isArray(f.dimensions) ? f.dimensions.slice(0, 12).map((x) => String(x).slice(0, 40)) : [],
+              dimensions: Array.isArray(f.dimensions) ? f.dimensions.slice(0, 12).map((x: unknown) => String(x).slice(0, 40)) : [],
               added: f.added && typeof f.added === 'object' ? f.added : null,
               note: String(f.note == null ? '' : f.note).slice(0, 300),
             });
@@ -906,7 +926,7 @@ const server = http.createServer(async (req, res) => {
         }
       }
       // Which teammates' models are on disk for this project (for the source switcher).
-      let shared = [];
+      let shared: { name: string; label: string; receivedAt: string | null; at: number }[] = [];
       try {
         const sdir = path.join(p, '.gitmir', 'shared');
         shared = fs.readdirSync(sdir, { withFileTypes: true })
@@ -941,7 +961,7 @@ const server = http.createServer(async (req, res) => {
       const s = loadSkills().find((x) => x.name === name);
       if (!s) return sendJSON(res, 404, { error: 'unknown skill' });
       try {
-        let text = fs.readFileSync(resolveSkillFile(s.file), 'utf8');
+        let text: string = fs.readFileSync(resolveSkillFile(s.file) || '', 'utf8');
         if (s.stripFrontmatter) text = stripFrontmatter(text);
         if (s.prepend) text = s.prepend + text;
         return sendJSON(res, 200, { name, title: s.title || s.name, text });
@@ -955,7 +975,7 @@ const server = http.createServer(async (req, res) => {
         const folder = await chooseFolder();
         return sendJSON(res, 200, folder ? { path: folder } : { cancelled: true });
       } catch (e) {
-        return sendJSON(res, 200, { pickerFailed: true, error: String(e.message || e) });
+        return sendJSON(res, 200, { pickerFailed: true, error: String((e as Error)?.message || e) });
       }
     }
     if (req.method === 'POST' && url.pathname === '/api/add') {
@@ -971,7 +991,7 @@ const server = http.createServer(async (req, res) => {
           folder = await chooseFolder();
         } catch (e) {
           // picker unavailable (headless / no GUI / missing tool) -> let the UI offer manual entry
-          return sendJSON(res, 200, { added: false, pickerFailed: true, error: String(e.message || e) });
+          return sendJSON(res, 200, { added: false, pickerFailed: true, error: String((e as Error)?.message || e) });
         }
         if (!folder) return sendJSON(res, 200, { added: false, cancelled: true });
       }
@@ -1017,7 +1037,7 @@ const server = http.createServer(async (req, res) => {
       if (Array.isArray(paths)) {
         const list = loadProjects();
         const byPath = new Map(list.map((x) => [x.path, x]));
-        const next = paths.map((p) => byPath.get(p)).filter(Boolean);
+        const next = paths.map((p: string) => byPath.get(p)).filter(Boolean) as Project[];
         for (const x of list) if (!paths.includes(x.path)) next.push(x);
         saveProjects(next);
       }
@@ -1048,26 +1068,26 @@ const server = http.createServer(async (req, res) => {
   } catch (e) {
     // A throw AFTER the headers went out used to take the whole dashboard down with
     // ERR_HTTP_HEADERS_SENT. Report what we still can and keep serving.
-    console.error('request failed:', (e && e.stack) || e);
+    console.error('request failed:', ((e as Error)?.stack) || e);
     if (res.headersSent) { try { res.end(); } catch {} return; }
-    try { sendJSON(res, 500, { error: String((e && e.message) || e) }); } catch {}
+    try { sendJSON(res, 500, { error: String(((e as Error)?.message) || e) }); } catch {}
   }
 });
 
 // Nothing in a request handler, a relay frame or a timer should be able to stop the
 // dashboard — it is the only process the user has running.
-process.on('uncaughtException', (e) => console.error('uncaught:', (e && e.stack) || e));
-process.on('unhandledRejection', (e) => console.error('unhandled rejection:', (e && e.stack) || e));
+process.on('uncaughtException', (e) => console.error('uncaught:', ((e as Error)?.stack) || e));
+process.on('unhandledRejection', (e) => console.error('unhandled rejection:', ((e as Error)?.stack) || e));
 
 server.on('error', (e) => {
-  if (e && e.code === 'EADDRINUSE') {
+  if (e && (e as NodeJS.ErrnoException).code === 'EADDRINUSE') {
     console.error(`\n  Port ${PORT} is already in use.`);
     console.error(`  If the dashboard is already running, just open  http://localhost:${PORT}`);
     console.error(`  Otherwise start it elsewhere:  GITMIR_PORT=4600 node server.js\n`);
-  } else if (e && e.code === 'EACCES') {
+  } else if (e && (e as NodeJS.ErrnoException).code === 'EACCES') {
     console.error(`\n  Not allowed to listen on port ${PORT}. Pick one above 1024:  GITMIR_PORT=4599 node server.js\n`);
   } else {
-    console.error('\n  Could not start: ' + ((e && e.message) || e) + '\n');
+    console.error('\n  Could not start: ' + (((e as Error)?.message) || e) + '\n');
   }
   process.exit(1);
 });
@@ -1076,14 +1096,14 @@ server.listen(PORT, '127.0.0.1', () => {
   // The server can start perfectly while the client script is broken, and then the user
   // sees a blank page with no clue why. Parse it (compile only, never run) and say so.
   try {
-    const js = fs.readFileSync(path.join(__dirname, 'public', 'app.js'), 'utf8');
+    const js = fs.readFileSync(path.join(import.meta.dirname, 'public', 'app.js'), 'utf8');
     new Function(js);
   } catch (e) {
-    if (e && e.code === 'ENOENT') {
+    if (e && (e as NodeJS.ErrnoException).code === 'ENOENT') {
       console.error('\n  *** public/app.js is missing — the dashboard will load an empty page.');
       console.error('  *** Re-clone or restore the file; the server cannot serve the UI without it.\n');
     } else {
-      console.error('\n  *** THE DASHBOARD SCRIPT IS BROKEN: ' + ((e && e.message) || e));
+      console.error('\n  *** THE DASHBOARD SCRIPT IS BROKEN: ' + (((e as Error)?.message) || e));
       console.error('  *** The UI will not work. Fix public/app.js and restart.\n');
     }
   }
@@ -1092,7 +1112,7 @@ server.listen(PORT, '127.0.0.1', () => {
   const opener = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', addr]]
     : process.platform === 'darwin' ? ['open', [addr]]
     : ['xdg-open', [addr]];
-  execFile(opener[0], opener[1], () => {});
+  execFile(opener[0] as string, opener[1] as string[], () => {});
 });
 
 // ---------- frontend ----------

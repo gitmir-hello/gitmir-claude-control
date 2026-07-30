@@ -12,4 +12,4 @@ if curl -s "$URL/api/ping" >/dev/null 2>&1; then
 fi
 
 # Иначе запускаем сервер (он сам откроет браузер).
-exec node server.js
+exec node server.ts

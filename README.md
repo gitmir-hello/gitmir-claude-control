@@ -4,13 +4,14 @@
 
 **See what your product actually is — and hand your AI the exact slice of it.**
 
-A local, single-file dashboard that runs [Claude Code](https://www.anthropic.com/claude-code) across all your projects, builds a living model of each one from the real code, and turns any piece of that model into a precisely-briefed task.
+A local, single-file TypeScript dashboard that runs [Claude Code](https://www.anthropic.com/claude-code) across all your projects, builds a living model of each one from the real code, and turns any piece of that model into a precisely-briefed task.
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-2fd8ff.svg)](LICENSE)
 [![Commercial license](https://img.shields.io/badge/commercial_license-available-2fd8ff.svg)](LICENSING.md)
-[![Node](https://img.shields.io/badge/node-%E2%89%A518-2fd8ff.svg)](https://nodejs.org)
+[![Node](https://img.shields.io/badge/node-%E2%89%A522.18-2fd8ff.svg)](https://nodejs.org)
 [![Platform](https://img.shields.io/badge/platform-macOS%20·%20Windows%20·%20Linux-2fd8ff.svg)](#requirements)
-[![Dependencies](https://img.shields.io/badge/npm_deps-0-2fd8ff.svg)](#)
+[![Dependencies](https://img.shields.io/badge/runtime_deps-0-2fd8ff.svg)](#)
+[![TypeScript](https://img.shields.io/badge/TypeScript-no_build_step-2fd8ff.svg)](#)
 [![Runs 100% local](https://img.shields.io/badge/runs-100%25_local-2fd8ff.svg)](SECURITY.md)
 [![Telemetry](https://img.shields.io/badge/telemetry-none-2fd8ff.svg)](SECURITY.md)
 [![by GITMIR](https://img.shields.io/badge/by-gitmir.com-2fd8ff.svg)](https://gitmir.com)
@@ -45,14 +46,15 @@ both work from the same picture instead of re-reading the code every time.
 ```bash
 git clone https://github.com/gitmir-hello/gitmir-claude-control.git
 cd gitmir-claude-control
-node server.js
+node server.ts
 ```
 
 Opens on **http://localhost:4599**. Add a project folder → **▶ Run Claude** → paste the
 **`gitmir-model`** skill. Claude reads the repo and writes `.gitmir/model/`. The
 **Model** tab lights up: entity lifecycles, ER, data flows, processes.
 
-No account. No sign-in. No install beyond `git clone` — **zero npm dependencies**.
+No account. No sign-in. No install beyond `git clone` — **zero runtime dependencies**.
+Node runs the TypeScript directly: there is no build step, no bundler and no `dist/`.
 
 ## What you get
 
@@ -177,7 +179,7 @@ fully offline.
 
 Don't take our word for it:
 
-- **Read every line.** The whole tool is one `server.js` with **zero npm
+- **Read every line.** The whole tool is one `server.ts` with **zero npm
   dependencies** — everything it needs (ELK, fonts) is vendored locally. There is no
   transitive package doing something behind your back.
 - **Run it air-gapped.** Pull the network cable; it still works.
@@ -239,19 +241,23 @@ dashboard comes alive.
 
 ## Requirements
 
-- [Node.js](https://nodejs.org) **18+** for the dashboard
+- [Node.js](https://nodejs.org) **22.18+** — that is where Node began running TypeScript
+  directly, stripping the types itself. Nothing is compiled and nothing is installed:
+  `node server.ts` is the whole build system. (Node 18 and 20 are both past end of life.)
 - The Claude Code CLI (`claude`) on your `PATH`
 - macOS, Windows or Linux
-- **Node 22+** only if you use the Team bridge (it uses Node's built-in `WebSocket`,
-  which is how this stays at zero dependencies) — on older Node the Team tab says so
-  instead of failing silently
+
+Contributors can run `npm install && npm run typecheck` — `typescript` is the only entry
+in `devDependencies` and exists solely for that. **Nothing is needed to run the tool**, and
+`dependencies` is empty and staying that way: ELK and the fonts are vendored, so there is
+no supply chain to trust and it works offline.
 
 Run it in your normal desktop session so the folder picker and terminal launch work.
 Stop with `Ctrl+C`. macOS users can double-click `start.command`; Windows, `start.cmd` —
 though those run it in the foreground, so closing the terminal window stops the dashboard.
 
 **Port.** 4599 by default. If it is taken, or two people share the machine, set
-`GITMIR_PORT=4600 node server.js` — the dashboard says so plainly instead of throwing a
+`GITMIR_PORT=4600 node server.ts` — the dashboard says so plainly instead of throwing a
 stack trace when the port is busy.
 
 **Desktop shortcut (Windows).** Double-click `install-shortcut.cmd` once. It puts a
@@ -262,7 +268,7 @@ console window and opens your browser. Stop it with `taskkill /IM node.exe /F`.
 Claude Control** app on your Desktop that starts the dashboard *in the background* and
 opens your browser — and if it is already running, simply opens the browser. The dashboard
 then survives closing the browser, the launcher and any terminal; stop it with
-`pkill -f 'node server.js'`. Logs: `~/Library/Logs/gitmir-claude-control.log`.
+`pkill -f 'node server.ts'`. Logs: `~/Library/Logs/gitmir-claude-control.log`.
 
 ## Design
 

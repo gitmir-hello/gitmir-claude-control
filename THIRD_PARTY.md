@@ -18,5 +18,5 @@ for the rest of the project; they are included for use within this tool only.
 
 Fonts are served locally (a subset downloaded from Google Fonts, which distributes
 Onest and JetBrains Mono under the SIL OFL). If you prefer, remove `vendor/fonts/`
-and the `<link rel="stylesheet" href="/vendor/fonts.css">` line in `server.js` — the
+and the `<link rel="stylesheet" href="/vendor/fonts.css">` line in `server.ts` — the
 UI falls back to system fonts.

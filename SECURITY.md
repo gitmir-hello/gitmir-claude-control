@@ -40,7 +40,7 @@ any other third-party host — is ever contacted.
   (see below). Nothing is uploaded in the background, ever.
 - **No third-party dependencies.** Zero npm packages (`node_modules` is empty). The
   optional Team bridge needs Node 22+ for that built-in `WebSocket`; the dashboard
-  itself runs on Node 18+.
+  itself runs on Node 22.18+.
   Everything it needs — ELK for diagram layout, the fonts — is vendored locally
   under `vendor/`. There is no transitive code you can't see running behind your
   back.
@@ -49,7 +49,7 @@ any other third-party host — is ever contacted.
 
 You don't have to trust this page. Three independent ways to confirm it:
 
-1. **Read the code.** The entire tool is a single `server.js`. Skim it — every
+1. **Read the code.** The entire tool is a single `server.ts`. Skim it — every
    route is a local file operation or an `open`/terminal launch. There is no
    outbound HTTP client in it.
 2. **Run it air-gapped.** Disconnect from the network and start it. The dashboard,

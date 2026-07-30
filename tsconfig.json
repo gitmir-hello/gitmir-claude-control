@@ -1,0 +1,30 @@
+{
+  // Node runs these files directly by stripping the types — it never compiles them. So
+  // this config exists to CHECK, not to emit, and erasableSyntaxOnly is the important
+  // line: it rejects enums, namespaces and parameter properties, which are exactly the
+  // TypeScript features Node cannot strip. Without it you can write code that typechecks
+  // and then fails to start.
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
+
+    "noEmit": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+
+    "strict": true,
+    // noUncheckedIndexedAccess is deliberately off. It is a good rule, but on this
+    // codebase it fires mostly on regex captures and array indexing, and the honest ways
+    // to satisfy it are a real refactor or a spray of `!` assertions that would put the
+    // types back where they started. Left as a next step rather than faked.
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["server.ts", "relay.ts"],
+  "exclude": ["public", "vendor", "node_modules"]
+}

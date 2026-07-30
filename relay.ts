@@ -1,4 +1,3 @@
-'use strict';
 // GITMIR Claude Control — local dashboard for running Claude Code across projects.
 // Copyright (C) 2026 GITMIR
 // SPDX-License-Identifier: AGPL-3.0-or-later
@@ -23,8 +22,8 @@
 // are confined to the intended directory, payloads are capped, and no peer can
 // throw an exception out of the message handler (that would kill the dashboard).
 
-const fs = require('fs');
-const path = require('path');
+import fs from 'node:fs';
+import path from 'node:path';
 
 const MAX_FILES = 40;                    // model files accepted per snapshot
 const MAX_FILE_BYTES = 2 * 1024 * 1024;  // per file
@@ -33,14 +32,37 @@ const MAX_TASK_BYTES = 256 * 1024;       // per incoming task
 const STALE_MS = 75 * 1000;              // silence after which a socket is presumed dead
 const HANDSHAKE_MS = 20 * 1000;          // no 'welcome'/'denied' by then → treat as failed
 
-const LEVELS = ['local', 'tasks', 'full'];
-const LEVEL_TEXT = {
+const LEVELS: Level[] = ['local', 'tasks', 'full'];
+const LEVEL_TEXT: Record<Level, string> = {
   local: 'nothing leaves this machine',
   tasks: 'the task queue',
   full: 'the task queue + the product model',
 };
 
-const state = {
+
+// ---------- the shapes that cross the wire ----------
+type Level = 'local' | 'tasks' | 'full';
+interface Member { id: string | number; name?: string; self?: boolean }
+interface Activity { t: number; kind: string; text: string }
+/** Everything the Team tab needs to render, and the only mutable state here. */
+interface RelayState {
+  connected: boolean; connecting: boolean;
+  key: string | null; name: string; projectPath: string | null; projectId: string | null;
+  url: string;
+  plan: string | null; self: Member | null; members: Member[]; activity: Activity[];
+  autoShare: boolean;
+  error: string | null;
+  sharing: Level; sharingAt: string | null; room: string | null;
+}
+/** A frame from the relay. It came off the network, so nothing here is trusted. */
+interface Frame {
+  type?: string; body?: any; from?: { id?: string | number; name?: string };
+  // The relay also sends flat top-level fields (self, plan, project, sharing, …). It is
+  // network input either way, so the index signature is honest: shape is checked at use.
+  [k: string]: any;
+}
+
+const state: RelayState = {
   connected: false, connecting: false,
   key: null, name: 'me', projectPath: null, projectId: null,
   url: String(process.env.GITMIR_RELAY_URL || 'ws://localhost:4600').trim(),
@@ -53,23 +75,23 @@ const state = {
   sharingAt: null,
   room: null,              // the project room actually joined, per welcome
 };
-let ws = null;
+let ws: WebSocket | null = null;
 let sharedWith = '';     // ids of the members the model was last pushed to
 let lastRx = 0;          // timestamp of the last frame received (half-open detection)
-let handshakeTimer = null;
-let reconnectTimer = null;
+let handshakeTimer: ReturnType<typeof setTimeout> | null = null;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let backoff = 0;         // ms; grows on each failed attempt
 let deliberate = false;  // true when the user asked to disconnect — suppresses auto-reconnect
 let denied = false;      // true after a plan/auth denial — never auto-reconnect
 
-const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'x';
-function log(kind, text) { state.activity.unshift({ t: Date.now(), kind, text }); state.activity.length = Math.min(state.activity.length, 50); }
+const slug = (s: unknown): string => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'x';
+function log(kind: string, text: string): void { state.activity.unshift({ t: Date.now(), kind, text }); state.activity.length = Math.min(state.activity.length, 50); }
 
-function readLocalModel() {
+function readLocalModel(): Record<string, string> | null {
   if (!state.projectPath) return null;
   const dir = path.join(state.projectPath, '.gitmir', 'model');
   if (!fs.existsSync(dir)) return null;
-  const files = {};
+  const files: Record<string, string> = {};
   for (const f of fs.readdirSync(dir)) if (f.endsWith('.json')) files[f] = fs.readFileSync(path.join(dir, f), 'utf8');
   return Object.keys(files).length ? files : null;
 }
@@ -77,7 +99,7 @@ function readLocalModel() {
 // names. Accept only a plain `<name>.json` basename and confirm the resolved path
 // is still inside the destination — otherwise "../../../.claude/settings.json"
 // would let a teammate write anywhere the user can.
-function safeModelName(dir, f) {
+function safeModelName(dir: string, f: unknown): string | null {
   const name = String(f == null ? '' : f);
   if (!/^[A-Za-z0-9._-]{1,80}$/.test(name)) return null;   // no separators, no ".."
   if (name.startsWith('.') || !name.endsWith('.json')) return null;
@@ -93,8 +115,8 @@ function safeModelName(dir, f) {
 // hands out a fresh random connection id every time someone reconnects (so keying on
 // the id alone would spawn a duplicate folder per reconnect). Resolve by identity:
 // reuse the folder whose meta.json carries this display name, else mint a new one.
-function sharedDirName(from, id) {
-  const base = path.join(state.projectPath, '.gitmir', 'shared');
+function sharedDirName(from: string, id?: string | number): string {
+  const base = path.join(state.projectPath || '', '.gitmir', 'shared');
   const name = String(from == null ? '' : from);
   try {
     for (const e of fs.readdirSync(base, { withFileTypes: true })) {
@@ -115,7 +137,7 @@ function sharedDirName(from, id) {
   return (s !== 'x' && s) ? s + '-' + tag : 'peer-' + tag;
 }
 
-function saveSharedModel(from, files, fromId) {
+function saveSharedModel(from: string, files: unknown, fromId?: string | number): void {
   if (!state.projectPath || !files || typeof files !== 'object') return;
   const who = sharedDirName(from, fromId);
   const dir = path.join(state.projectPath, '.gitmir', 'shared', who, 'model');
@@ -148,7 +170,7 @@ function saveSharedModel(from, files, fromId) {
 
 // "asked 6 hours ago" — only when the gap is real, so a task that arrived promptly
 // says nothing at all.
-function ago(ts) {
+function ago(ts: unknown): string {
   const t = Number(ts);
   if (!t || !isFinite(t)) return '';
   const secs = Math.floor((Date.now() - t) / 1000);
@@ -165,7 +187,7 @@ function ago(ts) {
 // server's offline queue) does not create a second file for the same task.
 const writtenTaskIds = new Set();
 
-function writeIncomingTask(from, task, taskId) {
+function writeIncomingTask(from: string, task: any, taskId?: string | number): void {
   const title = typeof task.title === 'string' ? task.title.trim().slice(0, 200) : '';
   if (!title) { log('task', `from ${from} (no title, dropped)`); return; }
   if (!state.projectPath) { log('task', `from ${from} (no project bound, DROPPED — nothing written): ${title}`); return; }
@@ -212,13 +234,13 @@ function writeIncomingTask(from, task, taskId) {
 
 // A socket can be half-open (laptop sleep, NAT rebind, dead TLS terminator) with
 // no 'close' ever firing. Never claim a send succeeded unless the socket is OPEN.
-function live() { return !!ws && ws.readyState === 1; }
-function sendFrame(obj) {
+function live(): boolean { return !!ws && ws.readyState === 1; }
+function sendFrame(obj: unknown): boolean {
   if (!live()) return false;
-  try { ws.send(JSON.stringify(obj)); return true; } catch { return false; }
+  try { ws!.send(JSON.stringify(obj)); return true; } catch { return false; }
 }
 
-function pushModel() {
+function pushModel(): boolean {
   const files = readLocalModel();
   if (!files) { log('model', 'no local .gitmir/model to share'); return false; }
   if (!sendFrame({ type: 'model', body: { files } })) { log('model', 'not connected — model not shared'); return false; }
@@ -238,7 +260,7 @@ const Q_MAX_TASKS = 500, Q_MAX_BODY = 20000, Q_MAX_CRIT = 40, Q_MAX_CRIT_LEN = 1
 
 // Acceptance criteria are what let the client's view show what "done" means. The
 // task-planner skill writes them as a numbered "## Verify" list.
-function parseCriteria(md) {
+function parseCriteria(md: string): string[] {
   const lines = String(md || '').split('\n');
   const out = [];
   let inSec = false;
@@ -268,7 +290,8 @@ function parseCriteria(md) {
 //   3. POST /api/orders with {"items":[]} — FAIL: responded 500, expected 400
 // Turning that into per-criterion results is what lets the web view show proof
 // ("3 of 4 checks passed, failing: …") instead of a status word.
-function parseCriteriaResults(md) {
+interface CritResult { text: string; ok: boolean; note?: string }
+function parseCriteriaResults(md: string): CritResult[] {
   const lines = String(md || '').split('\n');
   const out = [];
   let inSec = false;
@@ -288,7 +311,7 @@ function parseCriteriaResults(md) {
     // never read as a pass.
     const text = raw.replace(/\s*[—–-]?\s*\b(PASS(ED)?|FAIL(ED)?)\b.*$/i, '').trim() || raw.slice(0, 200);
     const noteM = raw.match(/\b(?:FAIL(?:ED)?|BLOCKED|NEEDS HUMAN)\b:?\s*(.+)$/i);
-    const entry = { text: text.slice(0, Q_MAX_CRIT_LEN), ok: passed };
+    const entry: CritResult = { text: text.slice(0, Q_MAX_CRIT_LEN), ok: passed };
     const note = noteM ? noteM[1].trim() : (passed ? '' : raw);
     if (!passed && note) entry.note = note.slice(0, Q_MAX_CRIT_LEN);
     out.push(entry);
@@ -299,12 +322,14 @@ function parseCriteriaResults(md) {
 
 // `Type:`, `Fixes:` and `Attempt:` headers the planner/runner write, lifted into
 // structured fields so the web view never has to parse a task body.
-function parseMeta(md) {
+/** Structured task metadata the relay server reads — the key names are a contract. */
+interface TaskMeta { kind?: string; fixes?: string; attempt?: number }
+function parseMeta(md: string): TaskMeta {
   const head = String(md || '').split('\n').slice(0, 12).join('\n');
   const kind = (head.match(/^\s*Type:\s*(build|verify|fix)\s*$/im) || [])[1];
   const fixesRaw = (head.match(/^\s*Fixes:\s*(.+?)\s*$/im) || [])[1];
   const attempt = parseInt((head.match(/^\s*Attempt:\s*(\d+)\s*$/im) || [])[1], 10);
-  const meta = {};
+  const meta: TaskMeta = {};
   if (kind) meta.kind = kind.toLowerCase();
   // Always an id (the filename stem), never a filename — that is what links it to
   // the task the web app already has.
@@ -315,7 +340,12 @@ function parseMeta(md) {
 
 function readQueue() {
   if (!state.projectPath) return [];
-  const tasks = [];
+  /** One task file, as the Team tab and the relay server both see it. */
+  interface QueueTask extends TaskMeta {
+    id: string; title: string; body: string; status: string; order: number;
+    criteria: string[]; criteriaResults?: CritResult[]; next?: boolean;
+  }
+  const tasks: QueueTask[] = [];
   for (const [folder, status] of Object.entries(Q_COLS)) {
     const dir = path.join(state.projectPath, 'tasks', folder);
     let names = [];
@@ -354,11 +384,11 @@ function readQueue() {
 }
 
 let qSent = new Map();     // id -> serialized form last sent
-let qTimer = null;
+let qTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Publish the queue. Sends a full `replace` when anything disappeared (so the server
 // drops what no longer exists) and only the changed tasks otherwise.
-function pushQueue(force) {
+function pushQueue(force?: boolean): void {
   if (!live() || !state.projectPath) return;
   const tasks = readQueue();
   const now = new Map(tasks.map((t) => [t.id, JSON.stringify(t)]));
@@ -390,9 +420,9 @@ function queueSignature() {
   return parts.join('|');
 }
 
-let qSig = null;
+let qSig: string | null = null;
 function startQueueWatch() {
-  clearInterval(qTimer);
+  clearInterval(qTimer ?? undefined);
   qSig = null;
   qTimer = setInterval(() => {
     if (!live() || !state.projectPath) return;
@@ -406,7 +436,7 @@ function startQueueWatch() {
 
 // The model is mirrored only when the owner asked for it; at 'local' and 'tasks' the
 // server discards a snapshot, so sending one is pointless traffic.
-let mSig = null, mTimer = null;
+let mSig: string | null = null, mTimer: ReturnType<typeof setTimeout> | null = null;
 function modelSignature() {
   if (!state.projectPath) return '';
   const dir = path.join(state.projectPath, '.gitmir', 'model');
@@ -421,7 +451,7 @@ function modelSignature() {
   return parts.join('|');
 }
 function startModelWatch() {
-  clearInterval(mTimer);
+  clearInterval(mTimer ?? undefined);
   mSig = null;
   mTimer = setInterval(() => {
     if (!live() || !state.projectPath) return;
@@ -436,9 +466,9 @@ function startModelWatch() {
 
 // Server-originated messages (sharing, heartbeat, and whatever comes next) have no
 // sender. Attribute those to GitMir rather than throwing on m.from.name.
-const peerName = (m) => (m && m.from && typeof m.from.name === 'string' && m.from.name) || 'GitMir';
+const peerName = (m: Frame): string => (m && m.from && typeof m.from.name === 'string' && m.from.name) || 'GitMir';
 
-function handle(m) {
+function handle(m: Frame): void {
   switch (m.type) {
     case 'welcome': {
       state.connected = true; state.connecting = false;
@@ -448,7 +478,7 @@ function handle(m) {
       // An older server, or a workspace-wide room, sends no level — that means local.
       state.sharing = LEVELS.includes(m.sharing) ? m.sharing : 'local';
       state.sharingAt = m.sharingAt || null;
-      clearTimeout(handshakeTimer);
+      clearTimeout(handshakeTimer ?? undefined);
       log('bridge', `connected · plan ${state.plan || '—'} · mirrors: ${LEVEL_TEXT[state.sharing]}`);
       // Publish the queue as it stands, so the server's picture matches the folders.
       qSent = new Map(); qSig = null; mSig = null;
@@ -460,7 +490,7 @@ function handle(m) {
       const lvl = LEVELS.includes(m.level) ? m.level : 'local';
       const was = state.sharing;
       state.sharing = lvl; state.sharingAt = m.at || Date.now();
-      if (was !== lvl) log('sharing', `the project owner set mirroring to: ${LEVEL_TEXT[lvl]}`);
+      if (was !== lvl) log('sharing', `the project owner set mirroring to: ${LEVEL_TEXT[lvl as Level]}`);
       break;
     }
     case 'heartbeat':
@@ -482,7 +512,7 @@ function handle(m) {
     case 'model': saveSharedModel(peerName(m), m.body && m.body.files, m.from && m.from.id); break;
     case 'denied':
       state.connected = false; state.connecting = false; denied = true;
-      clearTimeout(handshakeTimer);
+      clearTimeout(handshakeTimer ?? undefined);
       state.error = String(m.reason || 'access denied');
       log('denied', state.error);
       break;
@@ -493,7 +523,7 @@ function handle(m) {
 // relay works whether it lives at the root (wss://relay.gitmir.com) or on a path
 // (wss://ide.gitmir.com/relay, with or without a trailing slash). Concatenating
 // "/?key=" would send "/relay/" and a path-mounted upgrade would never match.
-function buildUrl(base, key, name, projectId) {
+function buildUrl(base: string, key: string, name: string, projectId?: string | null): string {
   const u = new URL(String(base == null ? '' : base).trim());
   if (u.protocol === 'http:') u.protocol = 'ws:';
   if (u.protocol === 'https:') u.protocol = 'wss:';
@@ -515,16 +545,16 @@ function openSocket() {
     return;
   }
   let wsurl;
-  try { wsurl = buildUrl(state.url, state.key, state.name, state.projectId); }
+  try { wsurl = buildUrl(state.url, state.key || '', state.name, state.projectId); }
   catch (e) {                                // a malformed URL can never succeed
     state.connecting = false; denied = true;
-    state.error = `Bad relay URL: ${(e && e.message) || e}`;
+    state.error = `Bad relay URL: ${(e as Error)?.message || e}`;
     log('bridge', state.error);
     return;
   }
   let sock;
   try { sock = new WebSocket(wsurl); }
-  catch (e) { state.connecting = false; state.error = `connect failed: ${(e && e.message) || e}`; log('bridge', state.error); scheduleReconnect(); return; }
+  catch (e) { state.connecting = false; state.error = `connect failed: ${(e as Error)?.message || e}`; log('bridge', state.error); scheduleReconnect(); return; }
   ws = sock;
   lastRx = Date.now();
   sock.addEventListener('message', (e) => {
@@ -533,7 +563,7 @@ function openSocket() {
     let m; try { m = JSON.parse(e.data); } catch { return; }
     // A peer must never be able to throw out of here: an exception in a listener
     // is an uncaught exception in Node, which would take the dashboard down.
-    try { handle(m); } catch (err) { log('bridge', `bad frame from peer: ${(err && err.message) || err}`); }
+    try { handle(m); } catch (err) { log('bridge', `bad frame from peer: ${(err as Error)?.message || err}`); }
   });
   sock.addEventListener('close', (ev) => {
     if (ws !== sock) return;                 // superseded socket — ignore
@@ -559,16 +589,17 @@ setInterval(() => {
 
 // Reconnect with exponential backoff (1s → 15s), unless the drop was deliberate or
 // the workspace was denied (e.g. free plan) — those must not loop.
-function scheduleReconnect() {
+function scheduleReconnect(): void {
   if (deliberate || denied || !state.key) { state.connecting = false; return; }
   backoff = Math.min(backoff ? backoff * 2 : 1000, 15000);
   state.connecting = true;
-  clearTimeout(reconnectTimer);
+  clearTimeout(reconnectTimer ?? undefined);
   reconnectTimer = setTimeout(() => { if (!deliberate && !denied) openSocket(); }, backoff);
   log('bridge', `reconnecting in ${Math.round(backoff / 1000)}s…`);
 }
 
-function connect({ key, name, projectPath, projectId, url }) {
+interface ConnectOpts { key: string; name?: string; projectPath: string; projectId?: string | null; url?: string }
+function connect({ key, name, projectPath, projectId, url }: ConnectOpts): boolean | void {
   disconnect();
   deliberate = false; denied = false; backoff = 0; sharedWith = ''; state.error = null;
   state.key = key; state.name = name || 'me'; state.projectPath = projectPath || null;
@@ -578,7 +609,7 @@ function connect({ key, name, projectPath, projectId, url }) {
   openSocket();
   // A relay behind a proxy can accept the TCP/TLS upgrade and then never speak.
   // Without this the UI would sit on "connecting…" forever with no error.
-  clearTimeout(handshakeTimer);
+  clearTimeout(handshakeTimer ?? undefined);
   handshakeTimer = setTimeout(() => {
     if (state.connected || deliberate || denied) return;
     state.error = 'The relay accepted the connection but never answered — check the Relay URL and that it is a GitMir relay.';
@@ -588,13 +619,15 @@ function connect({ key, name, projectPath, projectId, url }) {
   }, HANDSHAKE_MS);
   return true;
 }
-function shareModel() {
+/** What the Team tab shows after an action — not a bare boolean, it needs the reason. */
+interface ActionResult { ok: boolean; error?: string }
+function shareModel(): ActionResult {
   if (!live()) return { ok: false, error: 'not connected' };
   state.autoShare = true;
   sharedWith = state.members.map((x) => String(x.id)).sort().join(',');
   return { ok: pushModel() };
 }
-function sendTask({ title, body }) {
+function sendTask({ title, body }: { title: string; body: string }): ActionResult {
   if (!live()) return { ok: false, error: 'not connected' };
   const t = typeof title === 'string' ? title.trim() : '';
   if (!t) return { ok: false, error: 'no title' };
@@ -602,16 +635,21 @@ function sendTask({ title, body }) {
   log('task', `sent → team: ${t}`);
   return { ok: true };
 }
-function status() {
+/**
+ * What the Team tab is allowed to see. Deliberately NOT `RelayState`: `key` and
+ * `autoShare` are omitted, so the credential never reaches the browser. Keep it that way.
+ */
+type RelayStatus = Omit<RelayState, 'key' | 'autoShare'> & { sharingText: string };
+function status(): RelayStatus {
   return { connected: state.connected, connecting: state.connecting, plan: state.plan, self: state.self, name: state.name,
     projectPath: state.projectPath, projectId: state.projectId, room: state.room, url: state.url, error: state.error,
     sharing: state.sharing, sharingAt: state.sharingAt, sharingText: LEVEL_TEXT[state.sharing] || LEVEL_TEXT.local,
     members: state.members, activity: state.activity };
 }
-function disconnect() {
+function disconnect(): void {
   deliberate = true;
-  clearTimeout(reconnectTimer); clearTimeout(handshakeTimer);
-  clearInterval(qTimer); clearInterval(mTimer); qSent = new Map(); qSig = null; mSig = null;
+  clearTimeout(reconnectTimer ?? undefined); clearTimeout(handshakeTimer ?? undefined);
+  clearInterval(qTimer ?? undefined); clearInterval(mTimer ?? undefined); qSent = new Map(); qSig = null; mSig = null;
   try { if (ws) ws.close(); } catch {}
   ws = null;
   // Drop the credential too — "Disconnect" should leave nothing armed behind.
@@ -619,4 +657,4 @@ function disconnect() {
   state.key = null; state.autoShare = false; sharedWith = ''; state.error = null;
 }
 
-module.exports = { connect, status, shareModel, sendTask, disconnect };
+export { connect, status, shareModel, sendTask, disconnect };

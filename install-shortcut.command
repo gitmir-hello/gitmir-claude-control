@@ -64,7 +64,7 @@ fi
 cd "\$DIR" || { osascript -e 'display alert "GITMIR Claude Control" message "The project folder has moved. Run install-shortcut.command again."'; exit 1; }
 mkdir -p "\$(dirname "\$LOG")"
 # nohup + disown: the dashboard outlives this launcher and anything you close.
-GITMIR_PORT="$PORT" nohup "\$NODE" server.js >>"\$LOG" 2>&1 &
+GITMIR_PORT="$PORT" nohup "\$NODE" server.ts >>"\$LOG" 2>&1 &
 disown 2>/dev/null || true
 
 for i in \$(seq 1 60); do
@@ -96,4 +96,4 @@ touch "$APP"   # make Finder pick up the new bundle
 echo
 echo "Done — \"$APP_NAME\" is on your Desktop."
 echo "Double-click it: the dashboard starts in the background and your browser opens at $URL."
-echo "It keeps running after you close the browser. To stop it:  pkill -f 'node server.js'"
+echo "It keeps running after you close the browser. To stop it:  pkill -f 'node server.ts'"
