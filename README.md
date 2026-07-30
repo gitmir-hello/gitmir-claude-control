@@ -229,6 +229,7 @@ They live in [`skills.json`](skills.json) — point an entry at your own `.md` t
 | **`context-distillation`** | Turns a pile of docs, tickets or a chat thread into a small brief with checkable acceptance criteria — the context, not the noise. |
 | **`task-planner`** | Breaks a goal into small self-contained task files, each carrying the right slice of the model **and the step-by-step checks that prove it works**. |
 | **`task-runner`** | Works the queue autonomously: `todo → in progress → verify → done`. It runs each task's checks for real, and when one fails it writes the fix task itself. |
+| **`app-audit`** | Walks the running app — every page, element and route — derives what a user can actually accomplish, proves each use case by executing it, and files a fix task for every failure with the repro. Refuses production; never presses a destructive control on data that matters. |
 | **`task-log`** | Keeps a human-readable log of what Claude completed, shown in the **Tasks** tab. |
 | **`legacy-maintenance`** | Change an old codebase without breaking what's next to it: maps the blast radius from the model, then ships small reversible steps. |
 | **`stack-port`** | Port a hand-written project to a new stack at full parity — the old app is the spec, a parity ledger stops anything being silently dropped. |

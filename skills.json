@@ -52,6 +52,12 @@
     "file": "skills/task-runner.md"
   },
   {
+    "name": "app-audit",
+    "title": "app-audit",
+    "desc": "Walks a running app end to end — every page, every interactive element, every route — works out what a user can actually accomplish, then proves each use case by executing it. Failures become fix tasks with the exact repro. It refuses to touch production and never presses a destructive control on data that matters.",
+    "file": "skills/app-audit.md"
+  },
+  {
     "name": "legacy-maintenance",
     "title": "legacy-maintenance",
     "desc": "Change or maintain an existing legacy codebase without breaking the behaviour next to it — maps the blast radius from the model, then ships small reversible steps you can verify. For keeping old projects alive, not rewriting them.",
