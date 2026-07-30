@@ -28,6 +28,50 @@ tasks/todo/
 Tasks go in the format `task-planner` defines and `task-runner` executes, so the audit runs
 on the machinery that already exists rather than beside it. The **Queue** tab shows it.
 
+### The two files, exactly
+
+The dashboard reads these to draw the audit panel, so the shapes are a contract — keep the
+key names. Unknown extra keys are ignored, missing ones just leave a field blank.
+
+```jsonc
+// .gitmir/audit/inventory.json
+{ "target": "http://localhost:3000",
+  "env": "local",                       // local | staging | disposable  (never "production")
+  "driver": "chrome-cdp",               // playwright | puppeteer | chrome-cdp | curl
+  "at": "2026-07-30T09:00:00Z",
+  "auth": ["anonymous", "user"],        // the auth states actually exercised
+  "caps": { "crawlDepth": 3, "maxPages": 60 },   // the limits you imposed — state them
+  "pages": [
+    { "n": 12, "url": "/checkout", "title": "Checkout",
+      "foundBy": ["model", "router", "crawl"],   // which sources saw it
+      "auth": "user",
+      "elements": { "interactive": 24, "data": 6 },
+      "useCases": 5,
+      "status": "passed",               // passed | failed | pending | unreachable | skipped
+      "notExercised": ["Place order — charges the card"],
+      "task": "012-audit-checkout",     // the verify task file, without .md
+      "note": "" } ],
+  "mismatches": [
+    { "kind": "route-unreachable", "what": "/admin/legacy",
+      "detail": "in the router, never linked from any crawled page" } ] }
+```
+
+```jsonc
+// .gitmir/audit/findings.json  — an array
+[ { "id": "f-001",
+    "severity": "critical",             // critical | major | minor | intermittent
+    "title": "checkout accepts an empty address",
+    "page": "/checkout", "step": 3,
+    "expected": "refused, the message names the field (docs/04_SCREENS.md)",
+    "observed": "POST /api/orders returned 201, order created with address: null",
+    "evidence": ".gitmir/audit/shots/012-3.png",
+    "task": "047-fix-checkout-address",  // the fix task you filed, without .md
+    "at": "2026-07-30T09:41:00Z" } ]
+```
+
+Write `inventory.json` at the end of Phase 2 and update a page's `status` as each audit
+task finishes, so the panel fills in while the run is going rather than all at once.
+
 ## Before anything: which environment
 
 **Never audit production.** This skill clicks buttons, submits forms and calls endpoints. On

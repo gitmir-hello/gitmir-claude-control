@@ -692,6 +692,77 @@ const server = http.createServer(async (req, res) => {
         } catch {}
         out[c] = items;
       }
+      // The audit walks the whole app and its result is mostly about what it did NOT reach.
+      // That is unreadable as a pile of task files, so it is summarised for the Queue tab.
+      // Both files are written by an agent mid-run: clamp everything, assume nothing.
+      let audit = null;
+      try {
+        const adir = path.join(p, '.gitmir', 'audit');
+        const rd = (f) => { try { return JSON.parse(fs.readFileSync(path.join(adir, f), 'utf8')); } catch { return null; } };
+        const inv = rd('inventory.json');
+        if (inv && Array.isArray(inv.pages) && inv.pages.length) {
+          const S = { passed: 0, failed: 0, pending: 0, unreachable: 0, skipped: 0 };
+          const pages = [];
+          let notExercised = 0;
+          for (const g of inv.pages.slice(0, 600)) {
+            if (!g || typeof g !== 'object') continue;
+            const status = S.hasOwnProperty(g.status) ? g.status : 'pending';
+            S[status]++;
+            const ne = Array.isArray(g.notExercised) ? g.notExercised.slice(0, 10).map((x) => String(x).slice(0, 160)) : [];
+            notExercised += ne.length;
+            pages.push({
+              n: Number(g.n) || pages.length + 1,
+              url: String(g.url == null ? '' : g.url).slice(0, 300),
+              title: String(g.title == null ? '' : g.title).slice(0, 160),
+              foundBy: Array.isArray(g.foundBy) ? g.foundBy.slice(0, 5).map((x) => String(x).slice(0, 20)) : [],
+              auth: String(g.auth == null ? '' : g.auth).slice(0, 40),
+              interactive: Number(g.elements && g.elements.interactive) || 0,
+              dataEls: Number(g.elements && g.elements.data) || 0,
+              useCases: Number(g.useCases) || 0,
+              status, notExercised: ne,
+              task: String(g.task == null ? '' : g.task).slice(0, 120),
+              note: String(g.note == null ? '' : g.note).slice(0, 300),
+            });
+          }
+          const SEV = ['critical', 'major', 'minor', 'intermittent'];
+          const raw = rd('findings.json');
+          const sev = { critical: 0, major: 0, minor: 0, intermittent: 0 };
+          const findings = (Array.isArray(raw) ? raw : []).slice(0, 400)
+            .filter((f) => f && typeof f === 'object')
+            .map((f) => {
+              const s = SEV.includes(f.severity) ? f.severity : 'minor';
+              sev[s]++;
+              return {
+                id: String(f.id == null ? '' : f.id).slice(0, 40), severity: s,
+                title: String(f.title == null ? '' : f.title).slice(0, 200),
+                page: String(f.page == null ? '' : f.page).slice(0, 200),
+                step: Number(f.step) || null,
+                expected: String(f.expected == null ? '' : f.expected).slice(0, 400),
+                observed: String(f.observed == null ? '' : f.observed).slice(0, 400),
+                evidence: String(f.evidence == null ? '' : f.evidence).slice(0, 300),
+                task: String(f.task == null ? '' : f.task).slice(0, 120),
+              };
+            })
+            .sort((a, b) => SEV.indexOf(a.severity) - SEV.indexOf(b.severity));
+          audit = {
+            target: String(inv.target == null ? '' : inv.target).slice(0, 300),
+            env: String(inv.env == null ? '' : inv.env).slice(0, 40),
+            driver: String(inv.driver == null ? '' : inv.driver).slice(0, 40),
+            at: typeof inv.at === 'string' ? inv.at.slice(0, 40) : null,
+            auth: Array.isArray(inv.auth) ? inv.auth.slice(0, 8).map((x) => String(x).slice(0, 40)) : [],
+            caps: inv.caps && typeof inv.caps === 'object' ? inv.caps : null,
+            counts: { total: pages.length, passed: S.passed, failed: S.failed, pending: S.pending, unreachable: S.unreachable, skipped: S.skipped },
+            notExercised, pages,
+            mismatches: (Array.isArray(inv.mismatches) ? inv.mismatches : []).slice(0, 40).map((m) => ({
+              kind: String((m && m.kind) == null ? '' : m.kind).slice(0, 60),
+              what: String((m && m.what) == null ? '' : m.what).slice(0, 200),
+              detail: String((m && m.detail) == null ? '' : m.detail).slice(0, 300),
+            })),
+            sev, findings: findings.slice(0, 60), findingsTotal: findings.length,
+          };
+        }
+      } catch {}
+      out.audit = audit;
       return sendJSON(res, 200, out);
     }
     if (req.method === 'GET' && url.pathname === '/api/task-file') {
@@ -1348,6 +1419,32 @@ const HTML = /* html */ `<!doctype html>
   .ing-un td.e{font-family:var(--font-mono); font-size:11px; color:var(--dim2)}
   .ing-note{margin-top:9px; color:var(--dim2); font-size:12px; line-height:1.6}
 
+  /* app audit — coverage first, then what it could not reach, then the defects */
+  .audit{display:none; margin-bottom:16px; padding:13px 15px; border:1px solid rgba(47,216,255,.3); background:linear-gradient(180deg,rgba(47,216,255,.06),rgba(47,216,255,.015))}
+  .ic.passed{background:var(--ok); border-color:var(--ok)}
+  .ic.failed{background:#ff5c6e; border-color:#ff5c6e}
+  .ic.unreachable{border-color:#ffb86b; background:rgba(255,184,107,.18)}
+  .au-gaps{margin-top:10px; padding:9px 11px; border-left:2px solid #ffb86b; background:rgba(255,184,107,.06); color:var(--dim); font-size:12.5px; line-height:1.7}
+  .au-gaps b{color:#ffb86b; font-weight:600}
+  .au-run{margin-top:9px; display:flex; flex-wrap:wrap; gap:5px 16px; font-family:var(--font-mono); font-size:11px; color:var(--dim2)}
+  .au-run b{color:var(--cyan-soft); font-weight:500}
+  .au-sev{margin-top:12px; display:flex; flex-wrap:wrap; gap:7px}
+  .sv{font-family:var(--font-mono); font-size:10.5px; text-transform:uppercase; letter-spacing:.1em; padding:3px 9px; border:1px solid}
+  .sv.critical{color:#ff5c6e; border-color:#ff5c6e; background:rgba(255,92,110,.1)}
+  .sv.major{color:#ffb86b; border-color:#ffb86b; background:rgba(255,184,107,.1)}
+  .sv.minor{color:var(--dim); border-color:var(--line)}
+  .sv.intermittent{color:#c084fc; border-color:#c084fc; background:rgba(192,132,252,.1)}
+  .au-find{margin-top:11px; border-top:1px solid var(--line)}
+  .af{padding:10px 0; border-bottom:1px solid var(--line); font-size:12.5px; line-height:1.65}
+  .af-h{display:flex; gap:9px; align-items:baseline; flex-wrap:wrap}
+  .af-t{color:var(--txt); font-weight:600; font-size:13px}
+  .af-p{font-family:var(--font-mono); font-size:11px; color:var(--dim2)}
+  .af-r{margin-top:4px; color:var(--dim)}
+  .af-r i{font-style:normal; font-family:var(--font-mono); font-size:11px; color:var(--dim2); margin-right:6px}
+  .af-x{color:#ff5c6e}
+  .au-mm{margin-top:11px; color:var(--dim); font-size:12.5px; line-height:1.7}
+  .au-mm code{font-family:var(--font-mono); font-size:11.5px; color:#ffb86b}
+
   /* preview & pick */
   .pv-bar{display:flex; gap:9px; margin-bottom:12px}
   .pv-url{flex:1}
@@ -1729,6 +1826,7 @@ function renderDetail(){
     '</div>' +
     '<div class="pane" data-pane="queue">' +
       '<div class="tasks-head"><span class="t">Task queue — todo · in progress · verify · done</span></div>' +
+      '<div class="audit" id="auditBox"></div>' +
       '<div id="queueView"><div class="model-empty">Loading…</div></div>' +
     '</div>' +
     '<div class="pane" data-pane="preview">'+
@@ -2429,6 +2527,7 @@ async function loadQueue(pathStr){
   const view=document.getElementById('queueView'); if(!view) return;
   let q; try{ q=await (await fetch('/api/queue?path='+encodeURIComponent(pathStr))).json(); }catch{ return; }
   if(selected!==pathStr) return;
+  renderAudit(q);   // before the no-tasks return: an audit can outlive its tasks
   const total=(q.todo||[]).length+(q.inprogress||[]).length+(q.verify||[]).length+(q.done||[]).length;
   // Unverified work is still open work, so the badge counts todo + verify.
   const pending=(q.todo||[]).length+(q.verify||[]).length;
@@ -2444,6 +2543,115 @@ async function loadQueue(pathStr){
   }
   view.innerHTML=html+'</div>';
   view.querySelectorAll('.q-clk').forEach(c=> c.addEventListener('click', ()=> openTaskPopup(pathStr, c.dataset.col, c.dataset.file)));
+}
+
+let auSel = null;   // which page cell is expanded
+// The audit report the skill asks for leads with the gaps, and so does this: a panel that
+// shows only the defects invites the reading that everything else was checked.
+function renderAudit(q){
+  const box=document.getElementById('auditBox'); if(!box) return;
+  const a=q.audit;
+  if(!a || !a.counts || !a.counts.total){ box.innerHTML=''; box.style.display='none'; return; }
+  box.style.display='block';
+  const c=a.counts, seen=(c.passed||0)+(c.failed||0);
+  const pct = c.total ? Math.round(seen*100/c.total) : 0;
+
+  let html='<div class="ing-hd"><span class="ing-t">App audit</span>'+
+    '<span class="ing-n">'+ingNum(seen)+' of '+ingNum(c.total)+' pages walked</span>'+
+    '<span class="ing-pct">'+pct+'%</span></div>'+
+    '<div class="ing-bar"><i style="width:'+pct+'%"></i></div>';
+
+  html+='<div class="ing-tape">';
+  for(const g of (a.pages||[])){
+    const t='#'+g.n+' '+(g.url||'')+' — '+g.status+
+      (g.useCases?(', '+g.useCases+' use cases'):'')+
+      (g.notExercised&&g.notExercised.length?(', '+g.notExercised.length+' not pressed'):'');
+    html+='<i class="ic '+g.status+(auSel===g.n?' sel':'')+'" data-pg="'+g.n+'" title="'+esc(t)+'"></i>';
+  }
+  html+='</div><div class="ing-frag" id="auFrag"></div>';
+
+  // What the run could NOT see. This is the part that decides how much the rest is worth.
+  const gaps=[];
+  if(c.pending) gaps.push('<b>'+c.pending+'</b> page'+(c.pending>1?'s':'')+' not walked yet');
+  if(c.unreachable) gaps.push('<b>'+c.unreachable+'</b> unreachable');
+  if(c.skipped) gaps.push('<b>'+c.skipped+'</b> skipped');
+  if(a.notExercised) gaps.push('<b>'+a.notExercised+'</b> destructive control'+(a.notExercised>1?'s':'')+' left unpressed');
+  if(a.driver==='curl') gaps.push('<b>no browser</b> — API only, the interface went unchecked');
+  if(!(a.auth||[]).length) gaps.push('<b>no auth state recorded</b>');
+  else if((a.auth||[]).length===1) gaps.push('one auth state only (<b>'+esc(a.auth[0])+'</b>)');
+  if(a.caps) for(const k of Object.keys(a.caps).slice(0,6)) gaps.push(esc(k)+' capped at <b>'+esc(String(a.caps[k]))+'</b>');
+  html+='<div class="au-gaps">'+(gaps.length
+    ? 'Not covered: '+gaps.join(' · ')+'.'
+    : 'Every page walked, every control exercised, no caps applied.')+'</div>';
+
+  const run=[];
+  if(a.target) run.push('target <b>'+esc(a.target)+'</b>');
+  if(a.env) run.push('env <b>'+esc(a.env)+'</b>');
+  if(a.driver) run.push('driver <b>'+esc(a.driver)+'</b>');
+  if((a.auth||[]).length) run.push('auth <b>'+a.auth.map(esc).join(', ')+'</b>');
+  if(a.at) run.push('ran <b>'+esc(fmtTime(a.at))+'</b>');
+  if(run.length) html+='<div class="au-run">'+run.map(x=>'<span>'+x+'</span>').join('')+'</div>';
+
+  const sv=a.sev||{};
+  const chips=['critical','major','minor','intermittent'].filter(k=>sv[k]);
+  if(chips.length) html+='<div class="au-sev">'+chips.map(k=>'<span class="sv '+k+'">'+sv[k]+' '+k+'</span>').join('')+'</div>';
+
+  if((a.findings||[]).length){
+    html+='<div class="au-find">';
+    for(const f of a.findings){
+      html+='<div class="af"><div class="af-h"><span class="sv '+f.severity+'">'+esc(f.severity)+'</span>'+
+        '<span class="af-t">'+esc(f.title||'(untitled)')+'</span>'+
+        '<span class="af-p">'+esc(f.page||'')+(f.step?(' step '+f.step):'')+'</span></div>';
+      if(f.expected) html+='<div class="af-r"><i>expected</i>'+esc(f.expected)+'</div>';
+      if(f.observed) html+='<div class="af-r af-x"><i>observed</i>'+esc(f.observed)+'</div>';
+      const tail=[];
+      if(f.task) tail.push('fix task <b>'+esc(f.task)+'</b>');
+      if(f.evidence) tail.push(esc(f.evidence));
+      if(tail.length) html+='<div class="af-r"><i>filed</i>'+tail.join(' · ')+'</div>';
+      html+='</div>';
+    }
+    html+='</div>';
+    if(a.findingsTotal>a.findings.length)
+      html+='<div class="ing-note">Showing '+a.findings.length+' of '+ingNum(a.findingsTotal)+
+        ' — the rest are in <code>.gitmir/audit/findings.json</code>.</div>';
+  } else if(!c.pending){
+    html+='<div class="ing-note">No defects were observed. That covers what is listed above and nothing else.</div>';
+  }
+
+  if((a.mismatches||[]).length){
+    html+='<div class="au-mm"><b>Sources disagree:</b><br>';
+    for(const m of a.mismatches) html+='<code>'+esc(m.what||'')+'</code> — '+esc(m.detail||m.kind||'')+'<br>';
+    html+='</div>';
+  }
+
+  box.innerHTML=html;
+  const tape=box.querySelector('.ing-tape');
+  if(tape) tape.addEventListener('click', (e)=>{
+    const cell=e.target.closest('.ic'); if(!cell) return;
+    const n=Number(cell.dataset.pg);
+    auSel = (auSel===n) ? null : n;
+    box.querySelectorAll('.ic').forEach(x=> x.classList.toggle('sel', Number(x.dataset.pg)===auSel));
+    paintAuPage(a);
+  });
+  paintAuPage(a);
+}
+function paintAuPage(a){
+  const el=document.getElementById('auFrag'); if(!el) return;
+  const g=(a.pages||[]).find(x=>x.n===auSel);
+  if(!g){ el.style.display='none'; el.innerHTML=''; return; }
+  el.style.display='block';
+  let h='<div class="fh">#'+g.n+' '+esc(g.url||'')+(g.title?(' · '+esc(g.title)):'')+' — '+esc(g.status)+'</div>';
+  const bits=[];
+  if(g.auth) bits.push('auth '+esc(g.auth));
+  if(g.useCases) bits.push(g.useCases+' use cases');
+  if(g.interactive) bits.push(g.interactive+' interactive elements');
+  if(g.dataEls) bits.push(g.dataEls+' data regions');
+  if((g.foundBy||[]).length) bits.push('found by '+g.foundBy.map(esc).join(' + '));
+  if(bits.length) h+='<div>'+bits.join(' · ')+'</div>';
+  if(g.task) h+='<div>task <code>'+esc(g.task)+'</code></div>';
+  if((g.notExercised||[]).length) h+='<div style="color:#ffb86b">not pressed: '+g.notExercised.map(esc).join(', ')+'</div>';
+  if(g.note) h+='<div style="color:#ffb86b">'+esc(g.note)+'</div>';
+  el.innerHTML=h;
 }
 
 async function openTaskPopup(pathStr, col, file){
