@@ -71,13 +71,66 @@ Traversal is cheap and unbounded expansion is not, so decide the radius on purpo
   task; split it.
 
 Traverse **inbound as well as outbound**. Outbound tells you what this thing uses; inbound
-tells you what breaks when you change it, and inbound is the one that gets forgotten. To
-find inbound links, grep the id across the model files — that is what stable ids are for:
+tells you what breaks when you change it, and inbound is the one that gets forgotten.
+
+## Two kinds of reference — and why one grep is not the answer
+
+The model links things in **two** different ways, and missing the second one is the single
+easiest way to produce a confident, incomplete answer.
+
+**By id.** Most references are a stable id and can be found by grepping that id:
+`serverUnitId`, `routeId`, `moduleId`, `parentId`, `entityId`, `refEntityId`, `derivedFrom`,
+`entityIds`, `dependsOn`, `readsFieldIds`, `writesFieldIds`, `callsFunctionIds`,
+`emitsEventIds`, `subscribesEventIds`, `consumesRouteIds`, `steps[].refId`, `triggerRefId`.
+
+**By name inside a parent.** Some references name a field rather than carrying its id:
+
+| Where | How it points at a field |
+|---|---|
+| `statusFlows[].entityId` + `fieldName` | the status field this machine governs |
+| `statusFlows[].transitions[].effects[].entityId` + `fieldName` | what a transition writes |
+| `reactions[].trigger.entityId` + `fieldName` | the field whose change fires it |
+| `reactions[].effects[].entityId` + `fieldName` | what it recalculates or syncs |
+
+`statusFlows[].transitions[].from`/`to` are state **keys**, not ids, and
+`frontendUnits[].inputs[].from` / `outputs[].source` are free-form keys too.
+
+So `grep 'f-order-status' .gitmir/model/*.json` finds the field's definition in
+`entities.json` and the functions that read and write it in `serverFunctions.json` — and
+**silently misses the status machine and every reaction on that field**, which is exactly
+the logic that makes changing it dangerous. A grep that returns two files looks like a
+complete answer. It is not one.
+
+**For a field, always run both halves:**
 
 ```bash
-grep -l 'f-order-status' .gitmir/model/*.json
-grep -n 'f-order-status' .gitmir/model/serverFunctions.json
+# 1. the field's own id and name, from the entity
+grep -n -A3 '"name": "status"' .gitmir/model/entities.json     # -> id f-order-status, entity ent-order
+
+# 2. id-based inbound links
+grep -n 'f-order-status' .gitmir/model/*.json
+
+# 3. name-based inbound links: the ENTITY id, then filter by field name
+grep -n 'ent-order' .gitmir/model/statusFlows.json .gitmir/model/reactions.json
 ```
+
+Then read the hits from step 3 and keep the ones whose `fieldName` is your field — at the
+top level *and* inside `effects[]`. Do not skip the effects: a transition on some other
+entity can write your field.
+
+Two more inbound edges that a field-id grep will never show, because they are entity-level:
+
+- `entities[].derivedFrom` containing your entity — an aggregate recomputed from it.
+- `entities[].fields[].refEntityId` pointing at your entity — the foreign keys into it.
+
+For an **entity, route, function, event or process**, the id grep genuinely is complete —
+those are only ever referenced by id. The two-step rule is specifically about **fields**,
+and about state keys.
+
+One nuance that removes a tempting shortcut: a field id is not derivable from the entity
+and the field name. The convention is `f-order-status`, but abbreviated ids like `f-dr-date`
+for `DailyRevenue.date` are legal and common. Read the id out of `entities.json`; do not
+construct it.
 
 ## Which dimensions a task needs
 
@@ -86,11 +139,11 @@ the skill:
 
 | The task | Start from | Then follow |
 |---|---|---|
-| Change or rename a **field** | `entities` → the `Field` id | `serverFunctions` where the id appears in `readsFieldIds`/`writesFieldIds`; `statusFlows` whose `fieldName` is it; `reactions` whose `trigger` names it; `entities` with a `ref` field pointing at its entity |
+| Change or rename a **field** | `entities` → the field's **id and name**, and its entity id | **both halves above.** By id: `serverFunctions` where it appears in `readsFieldIds`/`writesFieldIds`. By entity id + `fieldName`: `statusFlows` governing it, `reactions` triggered by it, and the `effects[]` of either that write it. Then `entities` with `derivedFrom` on its entity, and `refEntityId` fields pointing at it |
 | Change what a **status transition** does | `statusFlows` for that entity | the transition's `effects`; `serverFunctions` writing that field; `events` those functions emit, and their subscribers |
 | Add or change an **endpoint** | `apiRoutes` | its `serverUnitId`; `serverFunctions` with that `routeId`; `frontendUnits` with the route in `consumesRouteIds` |
 | Change a **screen** | `frontendUnits` | `consumesRouteIds` → `apiRoutes` → the functions behind them; `dependsOn` for the components inside it |
-| "What breaks if I remove **X**" | X's own object | every inbound reference, found by grepping X's id across all ten files. The answer is that list |
+| "What breaks if I remove **X**" | X's own object | every inbound reference. Grepping X's id across all ten files is the whole answer only when X is an entity, route, function, event or process — if X is a **field**, add the name-based pass or the answer is wrong |
 | "How does **&lt;business flow&gt;** work" | `processes` | each `steps[].refId` in order, into whatever dimension it names |
 | "Why did this value change" | `reactions` + `statusFlows` | the effects that write that field, then the functions that fire them |
 | Estimate the blast radius before a refactor | `modules` | which modules the touched ids belong to; anything crossing a module boundary is the risk |
@@ -143,6 +196,11 @@ from a real one once it is written down, and every later session will trust it.
   spent before the task starts. Load two or three.
 - **Following outbound links only.** Outbound answers "what does this use". The question is
   almost always "what uses this".
+- **Trusting a single id grep on a field.** It returns `entities.json` and
+  `serverFunctions.json` and looks authoritative, while the status machine and the reactions
+  — the logic that makes the field risky to change — reference it by `entityId` + `fieldName`
+  and do not appear. Two files back from a grep is a reason to run the second pass, not a
+  reason to stop.
 - **Re-deriving what the model states.** If the model says a function writes a field, do not
   re-read the function to confirm it unless the model is stale or the answer hinges on it.
 - **Reporting the model as the code.** It is a description, written by a reader. Where the
