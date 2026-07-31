@@ -123,8 +123,8 @@ This is the link that matters. From
 > **Cover what the change could break nearby.** Use `.gitmir/model/` to see what
 > else reads or writes the fields you touched, **and add a step for it.**
 
-> **Every task needs a `## Verify` section.** A requirement you cannot check is a
-> wish, not a task.
+> **Every task needs a `## Verify` section.** A task with no way to check it is not
+> ready to run — a requirement you cannot check is a wish, not a task.
 
 So how much your acceptance criteria cover stops being a function of *who wrote
 the spec and what they remembered*, and becomes a function of *what the code
@@ -161,10 +161,11 @@ verbatim and the result it actually observed.
 
 ### And keeping the model current is itself one of the checks
 
-> If the task changes code, add a step for the model itself — the model describes
-> the new field / route / transition, ids unchanged, `index.json` refreshed.
-> **The model is what every later task is briefed from; if it silently lags, every
-> one of them is briefed from fiction.**
+> **If the task changes code and the project has a `.gitmir/model/`, add a step for
+> the model itself** — "`.gitmir/model/` describes the new field / route /
+> transition, ids unchanged, `index.json` refreshed". The model is what every later
+> task is briefed from; if it silently lags, every one of them is briefed from
+> fiction.
 
 Specifications drift because everybody may edit them and nobody reconciles them.
 Here nobody has to reconcile: a task that let the model fall behind **does not
@@ -188,8 +189,8 @@ what stayed open.
 
 Which is the whole design philosophy in one line:
 
-> **A model with twelve recorded unknowns is trustworthy, and a model with twelve
-> invented links is not — and they look identical.**
+> **A model with twelve recorded unknowns is trustworthy; a model with twelve
+> invented links is not, and looks identical from the outside.**
 
 ---
 
