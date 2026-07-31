@@ -2,8 +2,8 @@
 
 **Short version:** GITMIR Claude Control runs entirely on your machine and makes
 **no network calls to our servers**. No account, no telemetry, nothing uploaded.
-You can verify every claim on this page yourself in a few minutes — it's one file
-with zero dependencies.
+You can verify every claim on this page yourself in a few minutes — it is three
+files with zero runtime dependencies.
 
 This matters most for teams under an NDA: your source code and your product's
 business logic never sit on someone else's server, because they never leave your
@@ -49,9 +49,12 @@ any other third-party host — is ever contacted.
 
 You don't have to trust this page. Three independent ways to confirm it:
 
-1. **Read the code.** The entire tool is a single `server.ts`. Skim it — every
-   route is a local file operation or an `open`/terminal launch. There is no
-   outbound HTTP client in it.
+1. **Read the code.** The whole tool is `server.ts` (the server), `relay.ts` (the
+   optional team bridge) and `public/app.js` (the browser UI) — about 4 200 lines,
+   no dependencies to audit behind them. Skim `server.ts`: every route is a local
+   file operation or an `open`/terminal launch. The only outbound HTTP client in
+   the codebase is the Preview tab, which fetches the URL **you** type, and the
+   bridge, which connects only after you enter a key.
 2. **Run it air-gapped.** Disconnect from the network and start it. The dashboard,
    the model view, the task log — all keep working. (Only *launching Claude* needs
    the network, because Claude talks to Anthropic — see above.)
