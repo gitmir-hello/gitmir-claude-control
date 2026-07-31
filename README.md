@@ -267,6 +267,44 @@ in a queue is opaque; this is one glance.
 
 For a normal-sized repo you need none of this — run `gitmir-model` and you're done.
 
+### When the client asks you to show how it works
+
+The most common version of this: an existing client project, a call booked, and
+"can you walk us through what you've built?"
+
+**1. Build the model.** Paste **`gitmir-model`** into a Claude session in that
+project. On a large legacy codebase use **`model-ingest`** instead — the tell is
+that one pass produced a model where the entities are all present and the links
+between modules are not.
+
+**2. Check it before you show it.** This is the step that decides whether the
+meeting works, and it takes five minutes:
+
+- every node has a real one-line description, not its own name restated;
+- every status transition has a **label** — "Capture payment", not a nameless arrow;
+- `index.json` counts match and no reference dangles.
+
+A diagram of labelled boxes that explain nothing is worse than no diagram, because
+it looks like you documented something. If any of that is missing, ask Claude to
+run the integrity rules from `gitmir-model` and fill the descriptions.
+
+**3. Open Model → Product map.** That view is built for this conversation: business
+areas and what connects them, no code and no file names. Start there, then follow
+their questions — **Business logic** for "how does a deal move", **Processes** for
+"what happens end to end", **Data flow** for "where does this number come from".
+The diagrams have a fullscreen button, which matters on a projector.
+
+**4. Check the freshness first.** If the code has moved since the model was built,
+the tab says so in amber at the top. Showing a client a confident diagram of a
+product as it was two weeks ago is the worst outcome available — the refresh is one
+paste, from the button in the banner.
+
+Two practical notes. The sidebar lists **every project you have**, including other
+clients — go fullscreen on the diagram, or tidy the list before you share your
+screen. And if they want something to keep, **`product-docs-spec`** turns the same
+model into a `docs/` folder of twelve files: the diagram is for the conversation,
+`docs/` is for the record.
+
 ---
 
 ## Where this sits
