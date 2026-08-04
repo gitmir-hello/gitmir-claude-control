@@ -628,61 +628,117 @@ function shareModel(): ActionResult {
   return { ok: pushModel() };
 }
 /**
- * Publish a read-only view of this project's model and get back a link.
+ * Publish a read-only map of this project and get back a link (path 1 of SHARE_THE_MAP.md).
  *
- * The upload happens here rather than in the browser because the workspace key lives only
- * in this process — `status()` deliberately withholds it, and it should stay that way. The
- * key travels as a header, not a query parameter, so it does not land in an access log.
+ * Deliberately independent of the bridge: no socket, no plan, no connection. The relay key
+ * is the only credential and a free account can mint one — showing somebody a picture of
+ * what you built must not cost money. The key is never held here between calls; it comes in
+ * per request, or from a live bridge session if one happens to be running.
  *
- * Only `.gitmir/model/` is sent. There is no code path here that reads source.
+ * The model is uploaded whole; the server narrows it before rendering, so the recipient sees
+ * areas, lifecycles and screens and never a field name, an endpoint or a line of code.
  */
-async function shareView(opts?: { name?: string; expiresIn?: number | null; access?: string }): Promise<ActionResult & { url?: string }> {
-  if (!state.key) return { ok: false, error: 'not connected — open the Team tab and connect first' };
-  const files = readLocalModel();
-  if (!files) return { ok: false, error: 'no local .gitmir/model to share' };
-
-  const total = Object.values(files).reduce((n, s) => n + Buffer.byteLength(s), 0);
-  if (Object.keys(files).length > MAX_FILES || total > MAX_TOTAL_BYTES) {
-    return { ok: false, error: `model too large to share (${Math.round(total / 1024)} KB)` };
-  }
-
-  let endpoint: string;
+interface ShareOpts {
+  key?: string; title?: string; path?: string;
+  access?: 'link' | 'people'; allowed?: string[];
+  expiresInDays?: number | null;
+}
+const SHARE_ERRORS: Record<string, string> = {
+  bad_title: 'The title is missing or too long (140 characters max).',
+  no_model: 'This project has no model to share yet — run gitmir-model first.',
+  no_key: 'No workspace key. Paste the key from ide.gitmir.com into the field above.',
+  bad_key: 'The relay rejected that key — it may be wrong, revoked, or from another workspace.',
+  too_big: 'The model is over the 8 MiB limit the relay accepts.',
+  rate: 'Too many links created in the last hour. Wait a while and try again.',
+  too_many: 'You already have 25 live links. Revoke one in Settings → Shared links, then retry.',
+};
+const SHARE_HOST_DEFAULT = 'https://ide.gitmir.com';
+function shareEndpoint(): string {
+  const override = String(process.env.GITMIR_SHARE_URL || '').trim();
+  if (override) { try { return new URL('/api/share', override).href; } catch {} }
   try {
     const u = new URL(state.url);
-    if (u.protocol === 'ws:') u.protocol = 'http:';
-    else if (u.protocol === 'wss:') u.protocol = 'https:';
-    else return { ok: false, error: `relay URL must start with ws:// or wss:// (got "${u.protocol}//")` };
-    endpoint = new URL('/api/share', u.origin).href;
-  } catch {
-    return { ok: false, error: 'relay URL is not a valid URL' };
+    const loopback = /^(localhost|127\.|::1$|\[::1\]$)/i.test(u.hostname);
+    if (!loopback) {
+      if (u.protocol === 'ws:') u.protocol = 'http:';
+      else if (u.protocol === 'wss:') u.protocol = 'https:';
+      return new URL('/api/share', u.origin).href;
+    }
+  } catch {}
+  return SHARE_HOST_DEFAULT + '/api/share';
+}
+async function shareView(opts?: ShareOpts): Promise<ActionResult & { url?: string; share?: any }> {
+  const key = String((opts && opts.key) || state.key || '').trim();
+  if (!key) return { ok: false, error: SHARE_ERRORS.no_key };
+  // The bridge may never have been connected — `state.projectPath` is only set by
+  // connect(), and sharing a map deliberately does not require connecting. So the folder
+  // comes in with the request.
+  const dir = String((opts && opts.path) || state.projectPath || '').trim();
+  if (!dir) return { ok: false, error: 'no project — pick one first' };
+
+  const mdir = path.join(dir, '.gitmir', 'model');
+  let files: Record<string, string> | null = null;
+  try {
+    if (fs.existsSync(mdir)) {
+      const out: Record<string, string> = {};
+      for (const f of fs.readdirSync(mdir)) if (f.endsWith('.json')) out[f] = fs.readFileSync(path.join(mdir, f), 'utf8');
+      if (Object.keys(out).length) files = out;
+    }
+  } catch {}
+  if (!files) return { ok: false, error: SHARE_ERRORS.no_model };
+
+  // "the model, whole": every dimension parsed, under its own key, plus index.
+  const model: Record<string, unknown> = {};
+  for (const [f, raw] of Object.entries(files)) {
+    try { model[f.replace(/\.json$/i, '')] = JSON.parse(raw); } catch {}
   }
+  if (!Object.keys(model).length) return { ok: false, error: 'the model files could not be parsed as JSON' };
+
+  const title = String((opts && opts.title) || path.basename(dir) || 'Product map').slice(0, 140);
+  const access = (opts && opts.access) === 'people' ? 'people' : 'link';
+  const allowed = access === 'people'
+    ? (Array.isArray(opts && opts.allowed) ? opts!.allowed! : []).map((a) => String(a).trim().toLowerCase()).filter(Boolean).slice(0, 50)
+    : undefined;
+  const days = opts && opts.expiresInDays === null ? null : (opts && typeof opts.expiresInDays === 'number' ? opts.expiresInDays : 30);
+
+  // Where to publish. The Relay URL is a websocket address for the LIVE bridge and it
+  // defaults to localhost, which is not where shares live — so it is only used when it
+  // actually points somewhere remote. Otherwise the hosted service, overridable for a
+  // self-hosted relay.
+  const endpoint = shareEndpoint();
+
+  const body: Record<string, unknown> = { title, model, access };
+  if (allowed) body.allowed = allowed;
+  body.expiresInDays = days;
 
   const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), 20000);
+  const timer = setTimeout(() => ac.abort(), 30000);
   try {
     const r = await fetch(endpoint, {
       method: 'POST', signal: ac.signal,
-      headers: { 'content-type': 'application/json', 'x-gitmir-key': state.key, 'user-agent': 'GitMirClaudeControl/share' },
-      body: JSON.stringify({
-        name: String((opts && opts.name) || state.name || 'Product model').slice(0, 120),
-        project: state.projectId || null,
-        access: (opts && opts.access) || 'unlisted',
-        expiresIn: opts && opts.expiresIn === null ? null : (opts && opts.expiresIn) || 2592000,
-        files,
-      }),
+      headers: { 'content-type': 'application/json', 'x-gitmir-key': key, 'user-agent': 'GitMirClaudeControl/share' },
+      body: JSON.stringify(body),
     });
-    if (r.status === 404) {
-      return { ok: false, error: 'This relay does not support shared views yet — the server side is not deployed.' };
+    const text = await r.text();
+    let parsed: any = null;
+    try { parsed = JSON.parse(text); } catch {}
+    if (!parsed) {
+      // A deployed API route answers with JSON even when it refuses. HTML here means the
+      // route is not there — say that, rather than showing the person a status code.
+      return { ok: false, error: r.status === 404
+        ? 'This relay has no /api/share endpoint — the server side is not deployed yet.'
+        : `the relay answered ${r.status} with something that is not JSON` };
     }
-    if (r.status === 401 || r.status === 403) return { ok: false, error: 'the relay refused the key' };
-    if (!r.ok) return { ok: false, error: `relay responded ${r.status}` };
-    const body: any = await r.json().catch(() => null);
-    const link = body && typeof body.url === 'string' ? body.url : '';
+    if (!r.ok) {
+      const code = String(parsed.code || '');
+      return { ok: false, error: SHARE_ERRORS[code] || parsed.error || `the relay refused it (${r.status}${code ? ' ' + code : ''})` };
+    }
+    const link = typeof parsed.url === 'string' ? parsed.url : '';
     if (!link) return { ok: false, error: 'the relay accepted it but returned no link' };
-    log('view', `shared a read-only view: ${link}`);
-    return { ok: true, url: link };
+    log('share', `shared a read-only map: ${link}`);
+    return { ok: true, url: link, share: parsed.share || null };
   } catch (e) {
-    const msg = (e as Error)?.name === 'AbortError' ? 'the relay did not answer in 20s' : ((e as Error)?.message || String(e));
+    const msg = (e as Error)?.name === 'AbortError' ? 'the relay did not answer in 30s' : ((e as Error)?.message || String(e));
     return { ok: false, error: msg };
   } finally {
     clearTimeout(timer);

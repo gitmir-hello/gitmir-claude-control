@@ -120,13 +120,45 @@ rule as everything else here: **the relay routes, it does not store.**
   page you happen to visit cannot drive this tool or turn the bridge on behind your
   back (that also closes DNS-rebinding).
 - **Still zero-dependency.** The bridge uses Node's built-in WebSocket — no added
-  npm packages, nothing new to audit beyond the code in `relay.js`.
+  npm packages, nothing new to audit beyond the code in `relay.ts`.
 - **Gated by your plan, not by us watching you.** Access to the relay requires a
   paid Team plan; a free key is refused at connect time. The gate is a plan check,
   not surveillance — no usage is tracked.
 
 If you never open the Team panel, none of this runs and the tool behaves exactly as
 the sections above describe: your machine, and nothing outbound but Claude.
+
+## Share a map (the one place the model leaves on purpose)
+
+Everything above says your model stays on machines you control. **The Share button on
+the Model tab is the exception, and it only fires when you press it.** No timer, no file
+watcher, no automatic sync — one press, one snapshot.
+
+- **What leaves:** the contents of `.gitmir/model/` — the whole model, as JSON. Nothing
+  else. **Your source code is not part of it and there is no code path here that reads
+  it.**
+- **Where it goes:** `POST https://ide.gitmir.com/api/share`, authenticated with your
+  workspace key as a header. Set `GITMIR_SHARE_URL` to publish to your own relay instead.
+- **What the recipient is shown:** a narrowed map — the areas, what a user can do, how
+  records move between states, the screens and the kinds of record. **Field names,
+  endpoints, server function names and the steps inside a flow are not rendered**, and
+  there is no endpoint that returns the uploaded model, so the link cannot be turned back
+  into a specification.
+- **Who can open it:** either anybody holding the link — the id is 128 random bits and
+  **the link is therefore a credential, so pass it the way you would a password** — or
+  only the email addresses you list, who must sign in. The page carries `noindex`.
+- **How long it lives:** 30 days by default. "Never" is a choice you make, not what you
+  get by leaving the field alone.
+- **How to kill it:** *Settings → Shared links* on ide.gitmir.com. Revoking deletes the
+  stored model, not just the listing. That screen is on your account, signed in, on
+  purpose: creating a share is something a machine does, ending one is something a person
+  does where it can be audited.
+- **It costs nothing and needs no bridge.** Sharing a map works on a free account with no
+  connection running. The paid product is the live bridge, not showing somebody a picture.
+
+**If nothing may leave at all**, the same panel offers a self-contained HTML file — the
+model and the viewer in one document that opens with no server and no network. Nothing is
+uploaded on that path.
 
 ## Reporting an issue
 

@@ -1155,9 +1155,19 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/team/status') {
       return sendJSON(res, 200, relay.status());
     }
+    // Sharing a map needs no bridge connection and no plan — only the workspace key, which
+    // a free account can mint. The key comes from the client because that is where the user
+    // typed it; it is not stored here between calls.
     if (req.method === 'POST' && url.pathname === '/api/team/share-view') {
       const b = await readBody(req);
-      return sendJSON(res, 200, await relay.shareView({ name: typeof b.name === 'string' ? b.name : '' }));
+      return sendJSON(res, 200, await relay.shareView({
+        key: typeof b.key === 'string' ? b.key : '',
+        path: typeof b.path === 'string' ? b.path : '',
+        title: typeof b.title === 'string' ? b.title : '',
+        access: b.access === 'people' ? 'people' : 'link',
+        allowed: Array.isArray(b.allowed) ? b.allowed.map((x: unknown) => String(x)) : [],
+        expiresInDays: b.expiresInDays === null ? null : Number(b.expiresInDays) || 30,
+      }));
     }
     if (req.method === 'POST' && url.pathname === '/api/team/share-model') {
       return sendJSON(res, 200, relay.shareModel());
@@ -1530,18 +1540,27 @@ const HTML = /* html */ `<!doctype html>
   .stale-fix{margin-top:11px; font-size:13px; padding:9px 14px}
   .tab-btn .badge.stale{ background:#ffb86b; color:#1a0f0a; border-color:#ffb86b }
 
-  /* share a read-only view */
-  .share-modal{max-width:820px}
-  .share-opts{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:14px}
-  .share-opt{border:1px solid var(--line); padding:14px 15px; background:rgba(0,0,0,.22); display:flex; flex-direction:column; gap:9px}
-  .share-h{font-family:var(--font-mono); text-transform:uppercase; letter-spacing:.14em; font-size:11px; color:var(--cyan-soft)}
-  .share-d{color:var(--dim); font-size:12.5px; line-height:1.65; flex:1}
-  .share-opt button{align-self:flex-start}
-  .share-out{font-size:12px; line-height:1.6; min-height:1.2em; color:var(--dim2); word-break:break-all}
-  .share-out.ok{color:var(--ok); display:flex; gap:9px; align-items:center; flex-wrap:wrap}
-  .share-out.ok code{font-family:var(--font-mono); font-size:11.5px; color:var(--cyan-soft)}
-  .share-out.err{color:#ff5c6e}
-  @media (max-width:820px){ .share-opts{grid-template-columns:1fr} }
+  /* share a read-only map */
+  .share-modal{max-width:640px}
+  .sh-key{margin-top:6px}
+  .sh-key label,.sh-exp label{display:block; font-family:var(--font-mono); text-transform:uppercase; letter-spacing:.14em; font-size:10.5px; color:var(--cyan-soft); margin-bottom:6px}
+  .sh-note{margin-top:6px; color:var(--dim2); font-size:12px}
+  .sh-modes{margin-top:16px; display:flex; flex-direction:column; gap:10px}
+  .sh-radio{display:flex; align-items:center; gap:10px; font-size:13.5px; color:var(--txt); cursor:pointer; flex-wrap:wrap}
+  .sh-radio input[type=radio]{accent-color:var(--cyan); width:15px; height:15px}
+  .sh-people{flex:1; min-width:240px; margin-left:6px}
+  .sh-people:disabled{opacity:.4}
+  .sh-exp{margin-top:16px; max-width:200px}
+  .sh-what{margin-top:16px; padding:11px 13px; border-left:2px solid var(--line2); background:rgba(0,0,0,.22); color:var(--dim); font-size:12.5px; line-height:1.7}
+  .sh-what b{color:var(--txt); font-weight:600}
+  .sh-out{margin-top:14px; font-size:12.5px; line-height:1.65; color:var(--dim2)}
+  .sh-out.err{color:#ff5c6e}
+  .sh-out.ok{color:var(--dim)}
+  .sh-url{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+  .sh-url code{font-family:var(--font-mono); font-size:12px; color:var(--cyan); word-break:break-all}
+  .sh-warn{margin-top:8px; color:#ffb86b}
+  .sh-manage{margin-top:8px; color:var(--dim2); font-size:12px}
+  .sh-out a{color:var(--cyan-soft)}
 
   /* model ingest — a big source being eaten one fragment at a time */
   .ingest{display:none; margin-bottom:14px; padding:13px 15px; border:1px solid rgba(47,216,255,.32); background:linear-gradient(180deg,rgba(47,216,255,.07),rgba(47,216,255,.02))}

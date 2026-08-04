@@ -1,58 +1,106 @@
-// ---------- share a read-only view ----------
-// Two ways out, and they answer different questions. The file works today, offline, and
-// the recipient installs nothing. The link needs the relay to support it — until then this
-// says exactly why rather than failing vaguely.
+// ---------- share a read-only map ----------
+// Path 1 of SHARE_THE_MAP.md: one snapshot the author deliberately sends. It needs the
+// workspace key and nothing else — no plan, no bridge connection, no socket. Never call
+// this on a timer; one press, one snapshot.
+const SHARE_SEES = 'the areas, what a user can do, how things move between states, the screens and the kinds of record';
+const SHARE_HIDES = 'field names, endpoints, the steps inside a flow, or a single line of code';
+
 function openSharePopup(){
   if(!selected){ toast('Pick a project first', true); return; }
   if(!modelData || !modelData.exists){ toast('This project has no model yet — run gitmir-model first', true); return; }
   if(modelSrc){ toast('You can only share your own model, not a teammate snapshot', true); return; }
+  const mem=loadTeamMem();
+  const title=(modelData.index && modelData.index.project) || (selected.split('/').pop()) || 'Product map';
   let ov=document.getElementById('shareOverlay');
   if(!ov){ ov=document.createElement('div'); ov.id='shareOverlay'; ov.className='ctx-overlay'; document.body.appendChild(ov); }
-  const nm=(modelData.index && modelData.index.project) || (selected.split('/').pop()) || 'Product model';
   ov.innerHTML=
     '<div class="ctx-modal share-modal">'+
-      '<div class="ctx-head"><div class="ctx-title">Share this model — read only</div><button class="ctx-x" title="Close (Esc)">✕</button></div>'+
-      '<div class="ctx-note">Whoever opens it sees the same six views you see. They cannot create tasks, send anything, or change the model. <b>Only the model travels — never your source.</b></div>'+
-      '<div class="share-opts">'+
-        '<div class="share-opt">'+
-          '<div class="share-h">A file</div>'+
-          '<div class="share-d">One self-contained HTML file, about 2 MB. Opens from a double-click with no server and no network — send it, attach it, put it in their wiki. Works right now.</div>'+
-          '<button class="run share-file">⬇ Save the file</button>'+
-        '</div>'+
-        '<div class="share-opt">'+
-          '<div class="share-h">A link</div>'+
-          '<div class="share-d">Uploads the model to your relay and returns a URL you can send. Needs the Team bridge connected, and a relay that supports shared views.</div>'+
-          '<button class="ghost share-link">🔗 Get a link</button>'+
-          '<div class="share-out" id="shareOut"></div>'+
-        '</div>'+
+      '<div class="ctx-head"><div class="ctx-title">Share this map</div><button class="ctx-x" title="Close (Esc)">✕</button></div>'+
+
+      '<div class="sh-key'+(mem.key?' has':'')+'">'+
+        '<label>Workspace key</label>'+
+        '<input class="ti" id="shKey" type="password" autocomplete="off" spellcheck="false" placeholder="paste the key from ide.gitmir.com" value="'+esc(mem.key||'')+'">'+
+        '<div class="sh-note">Free on any plan. This does not connect the bridge and does not need one.</div>'+
       '</div>'+
-      '<div class="ctx-actions"><button class="del share-close">Close</button></div>'+
+
+      '<div class="sh-modes">'+
+        '<label class="sh-radio"><input type="radio" name="shAccess" value="link" checked><span>Anyone with the link</span></label>'+
+        '<label class="sh-radio"><input type="radio" name="shAccess" value="people"><span>Only these people</span>'+
+          '<input class="ti sh-people" id="shPeople" placeholder="client@company.com, pm@company.com" disabled></label>'+
+      '</div>'+
+
+      '<div class="sh-exp"><label>Expires in</label>'+
+        '<select class="ti" id="shExp">'+
+          '<option value="7">7 days</option>'+
+          '<option value="30" selected>30 days</option>'+
+          '<option value="90">90 days</option>'+
+          '<option value="">never</option>'+
+        '</select></div>'+
+
+      '<div class="sh-what">'+
+        '<div><b>They see</b> '+SHARE_SEES+'.</div>'+
+        '<div><b>They do not see</b> '+SHARE_HIDES+'.</div>'+
+      '</div>'+
+
+      '<div class="sh-out" id="shOut"></div>'+
+
+      '<div class="ctx-actions">'+
+        '<button class="run sh-go">Create link</button>'+
+        '<button class="ghost sh-file">⬇ Or save a self-contained file</button>'+
+        '<button class="del sh-close">Close</button>'+
+      '</div>'+
     '</div>';
   ov.classList.add('show');
   const close=()=>{ ov.classList.remove('show'); ov.innerHTML=''; };
   ov.querySelector('.ctx-x').addEventListener('click', close);
-  ov.querySelector('.share-close').addEventListener('click', close);
+  ov.querySelector('.sh-close').addEventListener('click', close);
   ov.addEventListener('click', e=>{ if(e.target===ov) close(); });
-  ov.querySelector('.share-file').addEventListener('click', ()=>{
+
+  const people=ov.querySelector('#shPeople');
+  ov.querySelectorAll('input[name=shAccess]').forEach(r=> r.addEventListener('change', ()=>{
+    people.disabled = ov.querySelector('input[name=shAccess]:checked').value!=='people';
+    if(!people.disabled) people.focus();
+  }));
+
+  // Path 3 — nothing is uploaded, for an NDA where nothing may be.
+  ov.querySelector('.sh-file').addEventListener('click', ()=>{
     const a=document.createElement('a');
-    a.href='/api/share/export?path='+encodeURIComponent(selected)+'&name='+encodeURIComponent(nm);
+    a.href='/api/share/export?path='+encodeURIComponent(selected)+'&name='+encodeURIComponent(title);
     a.download=''; document.body.appendChild(a); a.click(); a.remove();
     toast('Building the file — check your downloads');
   });
-  ov.querySelector('.share-link').addEventListener('click', async (e)=>{
-    const btn=e.currentTarget, out=document.getElementById('shareOut');
-    btn.disabled=true; out.textContent='Uploading…'; out.className='share-out';
-    let r; try{ r=await (await fetch('/api/team/share-view',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:nm})})).json(); }
-    catch{ r={ok:false,error:'could not reach the local server'}; }
+
+  ov.querySelector('.sh-go').addEventListener('click', async (e)=>{
+    const btn=e.currentTarget, out=document.getElementById('shOut');
+    const key=(document.getElementById('shKey').value||'').trim();
+    const access=ov.querySelector('input[name=shAccess]:checked').value;
+    const allowed=access==='people'
+      ? (people.value||'').split(/[,;\s]+/).map(x=>x.trim()).filter(Boolean)
+      : [];
+    if(access==='people' && !allowed.length){ out.className='sh-out err'; out.textContent='Add at least one address, or choose "Anyone with the link".'; return; }
+    const expRaw=document.getElementById('shExp').value;
+    btn.disabled=true; out.className='sh-out'; out.textContent='Creating…';
+    let r; try{
+      r=await (await fetch('/api/team/share-view',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({ key, path:selected, title, access, allowed, expiresInDays: expRaw===''?null:Number(expRaw) })})).json();
+    }catch{ r={ok:false,error:'could not reach the local server'}; }
     btn.disabled=false;
     if(r && r.ok && r.url){
-      out.className='share-out ok';
-      out.innerHTML='<code>'+esc(r.url)+'</code><button class="ghost share-copy">📋 Copy</button>';
-      out.querySelector('.share-copy').addEventListener('click', async ()=>{ await copyToClipboard(r.url); toast('Link copied ✓'); });
-      copyToClipboard(r.url).then(()=>toast('Link copied ✓'));
+      // The key worked, so keep it for next time — same place the Team tab keeps it.
+      if(key){ const m=loadTeamMem(); m.key=key; saveTeamMem(m); }
+      out.className='sh-out ok';
+      out.innerHTML=
+        '<div class="sh-url"><code>'+esc(r.url)+'</code><button class="ghost sh-copy">📋 Copy</button></div>'+
+        (access==='people'
+          ? '<div class="sh-warn">Only the addresses you listed can open it, and they must sign in.</div>'
+          : '<div class="sh-warn">Anybody holding this link can open it, so pass it on the way you would a password.</div>')+
+        '<div class="sh-manage"><a href="https://ide.gitmir.com/settings" target="_blank" rel="noopener">Manage or revoke your links ↗</a> — Settings → Shared links on ide.gitmir.com</div>';
+      out.querySelector('.sh-copy').addEventListener('click', async ()=>{ await copyToClipboard(r.url); toast('Link copied ✓'); });
+      copyToClipboard(r.url).then(()=>toast('Link copied ✓')).catch(()=>{});
     } else {
-      out.className='share-out err';
-      out.textContent=(r && r.error) || 'Share failed';
+      out.className='sh-out err';
+      out.innerHTML=esc((r && r.error) || 'Share failed')+
+        ((r && /25 live links/.test(r.error||'')) ? ' <a href="https://ide.gitmir.com/settings" target="_blank" rel="noopener">Open Settings ↗</a>' : '');
     }
   });
 }
