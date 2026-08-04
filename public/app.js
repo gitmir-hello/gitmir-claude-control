@@ -1,3 +1,67 @@
+// ---------- share a read-only view ----------
+// Two ways out, and they answer different questions. The file works today, offline, and
+// the recipient installs nothing. The link needs the relay to support it — until then this
+// says exactly why rather than failing vaguely.
+function openSharePopup(){
+  if(!selected){ toast('Pick a project first', true); return; }
+  if(!modelData || !modelData.exists){ toast('This project has no model yet — run gitmir-model first', true); return; }
+  if(modelSrc){ toast('You can only share your own model, not a teammate snapshot', true); return; }
+  let ov=document.getElementById('shareOverlay');
+  if(!ov){ ov=document.createElement('div'); ov.id='shareOverlay'; ov.className='ctx-overlay'; document.body.appendChild(ov); }
+  const nm=(modelData.index && modelData.index.project) || (selected.split('/').pop()) || 'Product model';
+  ov.innerHTML=
+    '<div class="ctx-modal share-modal">'+
+      '<div class="ctx-head"><div class="ctx-title">Share this model — read only</div><button class="ctx-x" title="Close (Esc)">✕</button></div>'+
+      '<div class="ctx-note">Whoever opens it sees the same six views you see. They cannot create tasks, send anything, or change the model. <b>Only the model travels — never your source.</b></div>'+
+      '<div class="share-opts">'+
+        '<div class="share-opt">'+
+          '<div class="share-h">A file</div>'+
+          '<div class="share-d">One self-contained HTML file, about 2 MB. Opens from a double-click with no server and no network — send it, attach it, put it in their wiki. Works right now.</div>'+
+          '<button class="run share-file">⬇ Save the file</button>'+
+        '</div>'+
+        '<div class="share-opt">'+
+          '<div class="share-h">A link</div>'+
+          '<div class="share-d">Uploads the model to your relay and returns a URL you can send. Needs the Team bridge connected, and a relay that supports shared views.</div>'+
+          '<button class="ghost share-link">🔗 Get a link</button>'+
+          '<div class="share-out" id="shareOut"></div>'+
+        '</div>'+
+      '</div>'+
+      '<div class="ctx-actions"><button class="del share-close">Close</button></div>'+
+    '</div>';
+  ov.classList.add('show');
+  const close=()=>{ ov.classList.remove('show'); ov.innerHTML=''; };
+  ov.querySelector('.ctx-x').addEventListener('click', close);
+  ov.querySelector('.share-close').addEventListener('click', close);
+  ov.addEventListener('click', e=>{ if(e.target===ov) close(); });
+  ov.querySelector('.share-file').addEventListener('click', ()=>{
+    const a=document.createElement('a');
+    a.href='/api/share/export?path='+encodeURIComponent(selected)+'&name='+encodeURIComponent(nm);
+    a.download=''; document.body.appendChild(a); a.click(); a.remove();
+    toast('Building the file — check your downloads');
+  });
+  ov.querySelector('.share-link').addEventListener('click', async (e)=>{
+    const btn=e.currentTarget, out=document.getElementById('shareOut');
+    btn.disabled=true; out.textContent='Uploading…'; out.className='share-out';
+    let r; try{ r=await (await fetch('/api/team/share-view',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:nm})})).json(); }
+    catch{ r={ok:false,error:'could not reach the local server'}; }
+    btn.disabled=false;
+    if(r && r.ok && r.url){
+      out.className='share-out ok';
+      out.innerHTML='<code>'+esc(r.url)+'</code><button class="ghost share-copy">📋 Copy</button>';
+      out.querySelector('.share-copy').addEventListener('click', async ()=>{ await copyToClipboard(r.url); toast('Link copied ✓'); });
+      copyToClipboard(r.url).then(()=>toast('Link copied ✓'));
+    } else {
+      out.className='share-out err';
+      out.textContent=(r && r.error) || 'Share failed';
+    }
+  });
+}
+
+// A shared view runs this exact file with the model handed to it instead of fetched, and
+// with everything that writes disabled. Same renderer as the dashboard, by construction —
+// there is no second implementation to drift.
+const SHARE = window.__GITMIR_SHARE__ || null;
+
 const listEl = document.getElementById('list');
 const mainEl = document.getElementById('main');
 const countEl = document.getElementById('count');
@@ -136,6 +200,7 @@ function renderDetail(){
       '<div class="model-head">' +
         '<div class="model-subnav" id="modelNav"></div>' +
         '<span class="upd" id="modelUpd"></span>' +
+        '<button class="mrefresh mshare" id="modelShare" title="Share this model — read only">⇪ Share</button>' +
         '<button class="mrefresh" id="modelRefresh" title="Refresh model">⟳</button>' +
       '</div>' +
       '<div id="modelView"><div class="model-empty">Opening model…</div></div>' +
@@ -191,6 +256,7 @@ function renderDetail(){
   wrap.querySelector('#delBtn').addEventListener('click', ()=>remove(p));
   wrap.querySelectorAll('.tab-btn').forEach(b=> b.addEventListener('click', ()=> setTab(b.dataset.tab)));
   wrap.querySelector('#modelRefresh').addEventListener('click', ()=>{ if(selected) loadModel(selected); });
+  wrap.querySelector('#modelShare').addEventListener('click', openSharePopup);
   setTab(activeTab);
   renderSkillButtons();
 
@@ -250,6 +316,9 @@ const EFF_RU={create:'create',update:'update',recalculate:'recalculate',sync:'sy
 let elkReady=null;
 function ensureElk(){
   if(elkReady) return elkReady;
+  // In a self-contained shared view the layout engine is already inlined above this
+  // script, and there is no server to fetch it from — use what is already here.
+  if(window.ELK){ elkReady=Promise.resolve(new (window.ELK.default||window.ELK)()); return elkReady; }
   elkReady=new Promise((resolve,reject)=>{
     const s=document.createElement('script'); s.src='/vendor/elk.bundled.js';
     s.onload=()=>{ try{ const C=window.ELK&&(window.ELK.default||window.ELK); resolve(new C()); }catch(e){ reject(e); } };
@@ -787,34 +856,36 @@ function openContextPopup(kind,id){
         ? 'Deterministic context from the model shared by <b>'+esc(srcLabel())+'</b>. <b>Send to team</b> delivers it to <b>everyone currently online</b> in your workspace (the relay broadcasts — it cannot target one person), landing in their <code>tasks/todo/</code>. <b>Queue here</b> instead writes it into this local project.'
         : 'Deterministic context — assembled from the model by walking id-links. Paste into Claude, or turn it into a queued task.')+'</div>'+
       '<pre class="ctx-pre">'+esc(ctx)+'</pre>'+
-      '<div class="ctx-taskl">Task for this element (optional):</div>'+
-      '<textarea class="ctx-task" placeholder="e.g. Add a partial-refund transition from paid, updating Payment and Inventory…"></textarea>'+
+      // A shared view is read-only: it has no project on disk to queue into and no bridge
+      // to send over. Copying context still works — that is the useful half for a reader.
+      (SHARE ? '' : '<div class="ctx-taskl">Task for this element (optional):</div>'+
+        '<textarea class="ctx-task" placeholder="e.g. Add a partial-refund transition from paid, updating Payment and Inventory…"></textarea>')+
       '<div class="ctx-actions">'+
-        (modelSrc
+        (SHARE ? '' : (modelSrc
           ? '<button class="run ctx-send">➤ Send to team</button><button class="ghost ctx-create">＋ Queue here</button>'
-          : '<button class="run ctx-create">＋ Create task</button>')+
+          : '<button class="run ctx-create">＋ Create task</button>'))+
         '<button class="ghost ctx-copy">📋 Copy context</button>'+
-        '<button class="ghost ctx-copyt">📋 Copy context + task</button>'+
+        (SHARE ? '' : '<button class="ghost ctx-copyt">📋 Copy context + task</button>')+
         '<button class="del ctx-close">Close</button>'+
       '</div>'+
     '</div>';
   ov.classList.add('show');
-  const ta=ov.querySelector('.ctx-task');
+  const ta=ov.querySelector('.ctx-task');   // absent in a shared view — guarded below
   const CTXPRE='This is deterministic context extracted from the product information model — the GitMir multidimensional object model that lives in the .gitmir/ folder of this project. It maps how this element connects to the rest of the product (data, server logic, API, frontend, events, business processes, status flows, reactions) by stable ids. Use it to fully understand the context, so the task is carried out accurately and completely.';
-  const withTask=()=> CTXPRE+'\n\n'+ctx + (ta.value.trim()? '\n\n---\n## Task\n'+ta.value.trim() : '');
+  const withTask=()=> CTXPRE+'\n\n'+ctx + (ta && ta.value.trim()? '\n\n---\n## Task\n'+ta.value.trim() : '');
   const close=()=>{ ov.classList.remove('show'); ov.innerHTML=''; };
   ov.querySelector('.ctx-x').addEventListener('click', close);
   ov.querySelector('.ctx-close').addEventListener('click', close);
   ov.addEventListener('click', e=>{ if(e.target===ov) close(); });
   ov.querySelector('.ctx-copy').addEventListener('click', async ()=>{ await copyToClipboard(CTXPRE+'\n\n'+ctx); toast('Context copied ✓  paste into claude'); });
-  ov.querySelector('.ctx-copyt').addEventListener('click', async ()=>{ await copyToClipboard(withTask()); toast('Context + task copied ✓'); });
+  if(!SHARE) ov.querySelector('.ctx-copyt').addEventListener('click', async ()=>{ await copyToClipboard(withTask()); toast('Context + task copied ✓'); });
   // When the context came from a teammate's snapshot, say so in the task file —
   // otherwise the local Claude would read it as a description of THIS project.
   const origin= modelSrc
     ? '> NOTE: this context describes the model shared by '+srcLabel()+' (a snapshot in .gitmir/shared/'+modelSrc+'/), NOT this project\'s own .gitmir/model.\n\n'
     : '';
   const taskBody=(t)=> origin+'> '+CTXPRE+'\n\n## Task\n'+t+'\n\n## Context (from the .gitmir model)\n'+ctx+'\n';
-  ov.querySelector('.ctx-create').addEventListener('click', async ()=>{
+  if(!SHARE) ov.querySelector('.ctx-create').addEventListener('click', async ()=>{
     const t=ta.value.trim(); if(!t){ toast('Type the task first', true); ta.focus(); return; }
     const content='# '+title+' — '+t.split('\n')[0].slice(0,80)+'\n\n'+taskBody(t);
     const r=await fetch('/api/task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:selected, title:title+' — '+t.slice(0,40), content})});
@@ -824,7 +895,7 @@ function openContextPopup(kind,id){
   });
   // Viewing a teammate's model: the task belongs on THEIR machine, so send it over
   // the bridge with the same deterministic context attached.
-  const sendBtn=ov.querySelector('.ctx-send');
+  const sendBtn=SHARE?null:ov.querySelector('.ctx-send');
   if(sendBtn) sendBtn.addEventListener('click', async ()=>{
     const t=ta.value.trim(); if(!t){ toast('Type the task first', true); ta.focus(); return; }
     // The receiving side already writes "# title / ## Context (received from…) / ## Task",
@@ -1419,9 +1490,13 @@ function openAddModal(){
   });
   setTimeout(()=>inp.focus(), 40);
 }
-document.getElementById('addBtn').addEventListener('click', openAddModal);
-searchEl.addEventListener('input', renderList);
-window.addEventListener('focus', ()=>load(true)); // refresh folder status on return
+// Dashboard chrome. A shared view has no project list, no search and nothing to refresh
+// on focus — these elements do not exist on that page.
+if(!SHARE){
+  document.getElementById('addBtn').addEventListener('click', openAddModal);
+  searchEl.addEventListener('input', renderList);
+  window.addEventListener('focus', ()=>load(true)); // refresh folder status on return
+}
 
 // drag & drop reorder
 let dragEl = null;
@@ -1802,9 +1877,26 @@ async function teamPoll(){
 }
 
 document.addEventListener('keydown', (e)=>{ if(e.key==='Escape'){ fsClose(); for(const id of ['ctxOverlay','addOverlay','taskOverlay','pvOverlay']){ const o=document.getElementById(id); if(o){ o.classList.remove('show'); o.innerHTML=''; } } } });
-fetch('/api/env').then(r=>r.json()).then(d=>{ PICKER_OK = !!d.pickerAvailable; if(d.relayUrl) RELAY_URL_DEFAULT=d.relayUrl; if(d.previewOrigin) PV_ORIGIN=d.previewOrigin; if(d.preview===false){ PREVIEW_OK=false; renderDetail(); } }).catch(()=>{});
-loadSkillsList();
-load();
-teamPoll();
-setInterval(teamPoll, 3500);
+
+// ---------- boot ----------
+// A shared view has no projects to list, no bridge to poll and no environment to ask
+// about — every one of those calls would 404 on a page served from somewhere else.
+function bootShare(){
+  modelData = { exists:true, model:SHARE.model||{}, index:SHARE.index||null,
+                brief:SHARE.brief||null, shared:[], stale:null, ingest:null, src:null };
+  const nm=document.getElementById('shareName');
+  if(nm) nm.textContent = SHARE.name || (SHARE.index && SHARE.index.project) || 'Product model';
+  const at=document.getElementById('shareAt');
+  if(at && SHARE.index && SHARE.index.at) at.textContent = 'model built '+fmtTime(SHARE.index.at);
+  renderModelNav();
+  renderModelView();
+}
+if(SHARE){ bootShare(); }
+else {
+  fetch('/api/env').then(r=>r.json()).then(d=>{ PICKER_OK = !!d.pickerAvailable; if(d.relayUrl) RELAY_URL_DEFAULT=d.relayUrl; if(d.previewOrigin) PV_ORIGIN=d.previewOrigin; if(d.preview===false){ PREVIEW_OK=false; renderDetail(); } }).catch(()=>{});
+  loadSkillsList();
+  load();
+  teamPoll();
+  setInterval(teamPoll, 3500);
+}
 

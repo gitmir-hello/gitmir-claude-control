@@ -627,6 +627,68 @@ function shareModel(): ActionResult {
   sharedWith = state.members.map((x) => String(x.id)).sort().join(',');
   return { ok: pushModel() };
 }
+/**
+ * Publish a read-only view of this project's model and get back a link.
+ *
+ * The upload happens here rather than in the browser because the workspace key lives only
+ * in this process — `status()` deliberately withholds it, and it should stay that way. The
+ * key travels as a header, not a query parameter, so it does not land in an access log.
+ *
+ * Only `.gitmir/model/` is sent. There is no code path here that reads source.
+ */
+async function shareView(opts?: { name?: string; expiresIn?: number | null; access?: string }): Promise<ActionResult & { url?: string }> {
+  if (!state.key) return { ok: false, error: 'not connected — open the Team tab and connect first' };
+  const files = readLocalModel();
+  if (!files) return { ok: false, error: 'no local .gitmir/model to share' };
+
+  const total = Object.values(files).reduce((n, s) => n + Buffer.byteLength(s), 0);
+  if (Object.keys(files).length > MAX_FILES || total > MAX_TOTAL_BYTES) {
+    return { ok: false, error: `model too large to share (${Math.round(total / 1024)} KB)` };
+  }
+
+  let endpoint: string;
+  try {
+    const u = new URL(state.url);
+    if (u.protocol === 'ws:') u.protocol = 'http:';
+    else if (u.protocol === 'wss:') u.protocol = 'https:';
+    else return { ok: false, error: `relay URL must start with ws:// or wss:// (got "${u.protocol}//")` };
+    endpoint = new URL('/api/share', u.origin).href;
+  } catch {
+    return { ok: false, error: 'relay URL is not a valid URL' };
+  }
+
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 20000);
+  try {
+    const r = await fetch(endpoint, {
+      method: 'POST', signal: ac.signal,
+      headers: { 'content-type': 'application/json', 'x-gitmir-key': state.key, 'user-agent': 'GitMirClaudeControl/share' },
+      body: JSON.stringify({
+        name: String((opts && opts.name) || state.name || 'Product model').slice(0, 120),
+        project: state.projectId || null,
+        access: (opts && opts.access) || 'unlisted',
+        expiresIn: opts && opts.expiresIn === null ? null : (opts && opts.expiresIn) || 2592000,
+        files,
+      }),
+    });
+    if (r.status === 404) {
+      return { ok: false, error: 'This relay does not support shared views yet — the server side is not deployed.' };
+    }
+    if (r.status === 401 || r.status === 403) return { ok: false, error: 'the relay refused the key' };
+    if (!r.ok) return { ok: false, error: `relay responded ${r.status}` };
+    const body: any = await r.json().catch(() => null);
+    const link = body && typeof body.url === 'string' ? body.url : '';
+    if (!link) return { ok: false, error: 'the relay accepted it but returned no link' };
+    log('view', `shared a read-only view: ${link}`);
+    return { ok: true, url: link };
+  } catch (e) {
+    const msg = (e as Error)?.name === 'AbortError' ? 'the relay did not answer in 20s' : ((e as Error)?.message || String(e));
+    return { ok: false, error: msg };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function sendTask({ title, body }: { title: string; body: string }): ActionResult {
   if (!live()) return { ok: false, error: 'not connected' };
   const t = typeof title === 'string' ? title.trim() : '';
@@ -657,4 +719,4 @@ function disconnect(): void {
   state.key = null; state.autoShare = false; sharedWith = ''; state.error = null;
 }
 
-export { connect, status, shareModel, sendTask, disconnect };
+export { connect, status, shareModel, shareView, sendTask, disconnect };

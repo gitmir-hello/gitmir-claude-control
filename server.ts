@@ -495,6 +495,89 @@ function preparePreviewHtml(buf: Buffer, finalUrl: string): string {
 }
 
 // ---------- routes ----------
+/**
+ * Build a shared view of a project's model as one self-contained HTML file.
+ *
+ * The renderer is not reimplemented here and nothing is cut out of the dashboard to make
+ * this work: the file embeds a COPY of `public/app.js` and of the dashboard's own
+ * stylesheet, so the shared diagrams are drawn by the same code that draws the local ones
+ * and cannot drift from them. `app.js` renders in read-only mode when `__GITMIR_SHARE__`
+ * is present — no project to queue into, no bridge to send over.
+ */
+function buildShareBundle(projectPath: string, displayName: string): { html: string; filename: string } | { error: string } {
+  if (!projectPath) return { error: 'no project path' };
+  const dir = path.join(projectPath, '.gitmir', 'model');
+  const dims = ['modules','entities','serverUnits','serverFunctions','apiRoutes','frontendUnits','events','processes','statusFlows','reactions'];
+  const readJson = (f: string): any => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+  const index = readJson(path.join(dir, 'index.json'));
+  const model: Record<string, unknown[]> = {};
+  let any = !!index;
+  for (const d of dims) {
+    const arr = readJson(path.join(dir, d + '.json'));
+    model[d] = Array.isArray(arr) ? arr : [];
+    if (model[d].length) any = true;
+  }
+  if (!any) return { error: 'This project has no .gitmir/model/ yet — build it with the gitmir-model skill first.' };
+
+  const name = (displayName || (index && index.project) || path.basename(projectPath) || 'Product model').toString().slice(0, 120);
+  const payload = { name, index, model, brief: readJson(path.join(projectPath, '.gitmir', 'brief.json')) };
+  // </script> inside the data would end the tag early; escaping < is enough and is exact.
+  const json = JSON.stringify(payload).replace(/</g, '\\u003c');
+
+  const css = (HTML.match(/<style>([\s\S]*?)<\/style>/) || ['', ''])[1] || '';
+  const V = (f: string) => path.join(import.meta.dirname, 'vendor', f);
+  // fonts.css points at /vendor/fonts/*.woff2 — inline them, or the file only looks right
+  // on a machine that happens to have the dashboard running.
+  let fonts = '';
+  try {
+    fonts = fs.readFileSync(V('fonts.css'), 'utf8').replace(/url\(([^)]+)\)/g, (m, raw) => {
+      const rel = String(raw).replace(/['"]/g, '').trim();
+      if (!rel.startsWith('/vendor/fonts/')) return m;
+      try {
+        const b = fs.readFileSync(path.join(import.meta.dirname, rel.replace(/^\//, '')));
+        return 'url(data:font/woff2;base64,' + b.toString('base64') + ')';
+      } catch { return m; }
+    });
+  } catch {}
+  const elk = fs.readFileSync(V('elk.bundled.js'), 'utf8');
+  const app = fs.readFileSync(path.join(import.meta.dirname, 'public', 'app.js'), 'utf8');
+
+  const html = `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>${hesc(name)} — product model</title>
+<style>${fonts}</style>
+<style>${css}</style>
+<style>
+  .share-top{display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; padding:16px 22px; border-bottom:1px solid var(--line)}
+  .share-nm{font-size:17px; font-weight:650; color:var(--txt)}
+  .share-at{font-family:var(--font-mono); font-size:11px; color:var(--dim2)}
+  .share-ro{margin-left:auto; font-family:var(--font-mono); font-size:10.5px; text-transform:uppercase; letter-spacing:.14em; color:var(--cyan-soft); border:1px solid rgba(47,216,255,.35); padding:3px 10px}
+  .share-main{padding:18px 22px 60px}
+  body{overflow:auto}
+</style>
+</head><body>
+<div class="share-top">
+  <span class="share-nm" id="shareName"></span>
+  <span class="share-at" id="shareAt"></span>
+  <span class="share-ro">read only</span>
+</div>
+<main class="main share-main" id="main">
+  <div class="model-head"><div class="model-subnav" id="modelNav"></div></div>
+  <div id="modelView"><div class="model-empty">Loading…</div></div>
+</main>
+<div class="toast" id="toast"></div>
+<script id="gitmir-share" type="application/json">${json}</script>
+<script>window.__GITMIR_SHARE__ = JSON.parse(document.getElementById('gitmir-share').textContent);</script>
+<script>${elk}</script>
+<script>${app}</script>
+</body></html>`;
+
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'model';
+  return { html, filename: slug + '-model.html' };
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://localhost:${PORT}`);
   try {
@@ -522,6 +605,25 @@ const server = http.createServer(async (req, res) => {
       } catch {
         res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
         return res.end('public/app.js is missing — the dashboard cannot run without it.');
+      }
+    }
+    // A shared view of the model, as one self-contained HTML file: the model, the same
+    // renderer the dashboard runs, the stylesheet, the layout engine and the fonts, all
+    // inlined. It opens from a file:// URL with no server and no network, which is the
+    // point — the recipient installs nothing and there is nothing for them to change.
+    if (req.method === 'GET' && url.pathname === '/api/share/export') {
+      const p = url.searchParams.get('path') || '';
+      try {
+        const built = buildShareBundle(p, url.searchParams.get('name') || '');
+        if ('error' in built) return sendJSON(res, 400, { error: built.error });
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Content-Disposition': 'attachment; filename="' + built.filename + '"',
+          'Cache-Control': 'no-store',
+        });
+        return res.end(built.html);
+      } catch (e) {
+        return sendJSON(res, 500, { error: String((e as Error)?.message || e) });
       }
     }
     if (req.method === 'GET' && url.pathname.startsWith('/vendor/')) {
@@ -1053,6 +1155,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/team/status') {
       return sendJSON(res, 200, relay.status());
     }
+    if (req.method === 'POST' && url.pathname === '/api/team/share-view') {
+      const b = await readBody(req);
+      return sendJSON(res, 200, await relay.shareView({ name: typeof b.name === 'string' ? b.name : '' }));
+    }
     if (req.method === 'POST' && url.pathname === '/api/team/share-model') {
       return sendJSON(res, 200, relay.shareModel());
     }
@@ -1302,6 +1408,7 @@ const HTML = /* html */ `<!doctype html>
   .mpill.active{background:var(--accent); color:#1a0f0a; border-color:var(--accent)}
   .model-head .upd{margin-left:auto; color:var(--dim2); font-size:11.5px}
   .mrefresh{background:var(--panel2); border:1px solid var(--line2); color:var(--dim); width:32px; height:32px; border-radius:8px; cursor:pointer; font-size:15px}
+  .mshare{width:auto; padding:0 12px; white-space:nowrap; letter-spacing:.06em}
   .mrefresh:hover{color:var(--txt)}
   .model-empty{color:var(--dim2); font-size:13px; line-height:1.65; padding:20px 0}
   .model-empty code{background:var(--panel2); padding:1px 6px; border-radius:5px; font-size:12px}
@@ -1422,6 +1529,19 @@ const HTML = /* html */ `<!doctype html>
   .stale-b code{font-family:var(--font-mono); font-size:11.5px; color:var(--cyan-soft)}
   .stale-fix{margin-top:11px; font-size:13px; padding:9px 14px}
   .tab-btn .badge.stale{ background:#ffb86b; color:#1a0f0a; border-color:#ffb86b }
+
+  /* share a read-only view */
+  .share-modal{max-width:820px}
+  .share-opts{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:14px}
+  .share-opt{border:1px solid var(--line); padding:14px 15px; background:rgba(0,0,0,.22); display:flex; flex-direction:column; gap:9px}
+  .share-h{font-family:var(--font-mono); text-transform:uppercase; letter-spacing:.14em; font-size:11px; color:var(--cyan-soft)}
+  .share-d{color:var(--dim); font-size:12.5px; line-height:1.65; flex:1}
+  .share-opt button{align-self:flex-start}
+  .share-out{font-size:12px; line-height:1.6; min-height:1.2em; color:var(--dim2); word-break:break-all}
+  .share-out.ok{color:var(--ok); display:flex; gap:9px; align-items:center; flex-wrap:wrap}
+  .share-out.ok code{font-family:var(--font-mono); font-size:11.5px; color:var(--cyan-soft)}
+  .share-out.err{color:#ff5c6e}
+  @media (max-width:820px){ .share-opts{grid-template-columns:1fr} }
 
   /* model ingest — a big source being eaten one fragment at a time */
   .ingest{display:none; margin-bottom:14px; padding:13px 15px; border:1px solid rgba(47,216,255,.32); background:linear-gradient(180deg,rgba(47,216,255,.07),rgba(47,216,255,.02))}
