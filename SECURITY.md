@@ -149,7 +149,7 @@ watcher, no automatic sync — one press, one snapshot.
   only the email addresses you list, who must sign in. The page carries `noindex`.
 - **How long it lives:** 30 days by default. "Never" is a choice you make, not what you
   get by leaving the field alone.
-- **How to kill it:** *Settings → Shared links* on ide.gitmir.com. Revoking deletes the
+- **How to kill it:** *Settings → Shared links* on ide.gitmir.com (`/settings#shared`). Revoking deletes the
   stored model, not just the listing. That screen is on your account, signed in, on
   purpose: creating a share is something a machine does, ending one is something a person
   does where it can be audited.

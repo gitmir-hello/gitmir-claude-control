@@ -1542,7 +1542,9 @@ const HTML = /* html */ `<!doctype html>
 
   /* share a read-only map */
   .share-modal{max-width:640px}
-  .sh-key{margin-top:6px}
+  /* Every child of .ctx-modal carries its own 18px gutter — the modal itself has none. */
+  .sh-body{padding:16px 18px 4px; overflow:auto}
+  .sh-key{margin-top:0}
   .sh-key label,.sh-exp label{display:block; font-family:var(--font-mono); text-transform:uppercase; letter-spacing:.14em; font-size:10.5px; color:var(--cyan-soft); margin-bottom:6px}
   .sh-note{margin-top:6px; color:var(--dim2); font-size:12px}
   .sh-modes{margin-top:16px; display:flex; flex-direction:column; gap:10px}

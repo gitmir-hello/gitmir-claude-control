@@ -17,6 +17,7 @@ function openSharePopup(){
     '<div class="ctx-modal share-modal">'+
       '<div class="ctx-head"><div class="ctx-title">Share this map</div><button class="ctx-x" title="Close (Esc)">✕</button></div>'+
 
+      '<div class="sh-body">'+
       '<div class="sh-key'+(mem.key?' has':'')+'">'+
         '<label>Workspace key</label>'+
         '<input class="ti" id="shKey" type="password" autocomplete="off" spellcheck="false" placeholder="paste the key from ide.gitmir.com" value="'+esc(mem.key||'')+'">'+
@@ -43,6 +44,7 @@ function openSharePopup(){
       '</div>'+
 
       '<div class="sh-out" id="shOut"></div>'+
+      '</div>'+
 
       '<div class="ctx-actions">'+
         '<button class="run sh-go">Create link</button>'+
@@ -94,13 +96,13 @@ function openSharePopup(){
         (access==='people'
           ? '<div class="sh-warn">Only the addresses you listed can open it, and they must sign in.</div>'
           : '<div class="sh-warn">Anybody holding this link can open it, so pass it on the way you would a password.</div>')+
-        '<div class="sh-manage"><a href="https://ide.gitmir.com/settings" target="_blank" rel="noopener">Manage or revoke your links ↗</a> — Settings → Shared links on ide.gitmir.com</div>';
+        '<div class="sh-manage"><a href="https://ide.gitmir.com/settings#shared" target="_blank" rel="noopener">Manage or revoke your links ↗</a> — Settings → Shared links on ide.gitmir.com</div>';
       out.querySelector('.sh-copy').addEventListener('click', async ()=>{ await copyToClipboard(r.url); toast('Link copied ✓'); });
       copyToClipboard(r.url).then(()=>toast('Link copied ✓')).catch(()=>{});
     } else {
       out.className='sh-out err';
       out.innerHTML=esc((r && r.error) || 'Share failed')+
-        ((r && /25 live links/.test(r.error||'')) ? ' <a href="https://ide.gitmir.com/settings" target="_blank" rel="noopener">Open Settings ↗</a>' : '');
+        ((r && /25 live links/.test(r.error||'')) ? ' <a href="https://ide.gitmir.com/settings#shared" target="_blank" rel="noopener">Open Settings ↗</a>' : '');
     }
   });
 }
