@@ -735,8 +735,25 @@ async function shareView(opts?: ShareOpts): Promise<ActionResult & { url?: strin
     }
     const link = typeof parsed.url === 'string' ? parsed.url : '';
     if (!link) return { ok: false, error: 'the relay accepted it but returned no link' };
-    log('share', `shared a read-only map: ${link}`);
-    return { ok: true, url: link, share: parsed.share || null };
+    // A relay that builds its links from the address it BINDS to hands back 0.0.0.0 or ::.
+    // Those are not destinations — nothing can open them — and the person would not find
+    // that out until after they had sent it to a client. We know the host we just posted
+    // to, so use it. Any other host is left alone; a self-hosted relay may legitimately
+    // answer with a different name than the one we called.
+    let out = link;
+    try {
+      const lu = new URL(link);
+      if (lu.hostname === '0.0.0.0' || lu.hostname === '::' || lu.hostname === '[::]') {
+        const eu = new URL(endpoint);
+        lu.protocol = eu.protocol; lu.hostname = eu.hostname; lu.port = eu.port;
+        out = lu.href;
+        log('share', `the relay returned a bind address; rewrote the link to ${eu.host}`);
+      }
+    } catch {
+      return { ok: false, error: 'the relay returned something that is not a URL' };
+    }
+    log('share', `shared a read-only map: ${out}`);
+    return { ok: true, url: out, share: parsed.share || null };
   } catch (e) {
     const msg = (e as Error)?.name === 'AbortError' ? 'the relay did not answer in 30s' : ((e as Error)?.message || String(e));
     return { ok: false, error: msg };
