@@ -1414,8 +1414,11 @@ const HTML = /* html */ `<!doctype html>
   .tp-pa{font-family:var(--font-mono); font-size:12px; color:var(--ink-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 
   .shell{display:flex; align-items:stretch; min-height:calc(100vh - var(--topbar-h))}
-  .main{flex:1; min-width:0; padding:22px 24px 60px}
-  .detail{max-width:1600px}
+  .main{flex:1; min-width:0; padding:22px 24px 60px; display:flex; flex-direction:column}
+  /* The preview frame asks for the height left over on screen. That only works if every
+     box between it and the shell passes the height down, so each one grows into the spare
+     space and none of them shrinks below its own content. */
+  .detail{max-width:1600px; display:flex; flex-direction:column; flex:1 0 auto; min-height:0}
 
   /* ---------- the holo component layer ----------
      Ported from dev/src/styles/holo.css so a card here is literally the same object as a
@@ -1910,8 +1913,10 @@ const HTML = /* html */ `<!doctype html>
   .pv-url{flex:1}
   .pv-pick.on{background:rgba(47,216,255,.14); border-color:var(--cyan); color:var(--cyan)}
   /* The preview pane fills the window: a fixed vh left dead space below the frame. */
-  .detail-wrap{display:flex; flex-direction:column; min-height:100%}
-  .pane[data-pane="preview"].active{display:flex; flex-direction:column; flex:1; min-height:0; padding-bottom:26px}
+  .detail-wrap{display:flex; flex-direction:column; flex:1 0 auto; min-height:0}
+  .pane[data-pane="preview"].active{display:flex; flex-direction:column; flex:1 0 auto; min-height:0; padding-bottom:0}
+  /* Every other tab wants room to breathe under the last card. Preview wants the pixels. */
+  .main:has(.pane[data-pane="preview"].active){padding-bottom:24px}
   .pv-frame-wrap{position:relative; flex:1; min-height:280px; border:1px solid var(--glass-brd);
     background-color:#061021;
     background-image:linear-gradient(rgba(120,210,255,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(120,210,255,.05) 1px, transparent 1px);
