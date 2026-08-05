@@ -478,6 +478,24 @@ async function previewFetch(rawUrl: string, allowLoopback: boolean): Promise<Pre
 // Everything served as HTML on the preview origin goes through here, so the picker
 // survives a redirect or a click on a link inside the site. Serving a second document
 // without the bridge is exactly how "Select" stopped doing anything.
+/**
+ * Replace `from` with `to` everywhere EXCEPT inside <script> element contents.
+ *
+ * Rewriting a script's body is what broke the preview on any Next.js App Router site: the
+ * React Server Components payload is a stream of rows prefixed with a hex length, so
+ * shortening a URL inside it makes every later offset wrong and the client decoder throws.
+ */
+function rewriteOutsideScripts(html: string, from: string, to: string): string {
+  const re = /<script\b[^>]*>[\s\S]*?<\/script\s*>/gi;
+  let out = '', last = 0, m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    out += html.slice(last, m.index).split(from).join(to);   // markup — rewrite
+    out += m[0];                                             // script — byte-exact
+    last = m.index + m[0].length;
+  }
+  return out + html.slice(last).split(from).join(to);
+}
+
 function preparePreviewHtml(buf: Buffer, finalUrl: string): string {
   let html = buf.toString('utf8');
   const fu = new URL(finalUrl);
@@ -485,7 +503,14 @@ function preparePreviewHtml(buf: Buffer, finalUrl: string): string {
   // which is the same origin as this document — no CORS anywhere.
   const base = `<base data-gitmir="base" href="${hesc(PREVIEW_ORIGIN + fu.pathname)}">`;
   html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + base) : base + html;
-  html = html.split(fu.origin + '/').join(PREVIEW_ORIGIN + '/');
+  // ...but ONLY in the markup, never inside a <script>. A framework can embed its own
+  // state there in a length-prefixed format — Next.js streams React Server Components as
+  // rows that begin with a hex character count — and this origin is one character shorter
+  // than a real one, so rewriting a URL inside that payload desynchronises the decoder.
+  // The page then renders, hydrates, throws "enqueueModel is not a function" and dies,
+  // which looks like a network failure and is not. Script contents are left byte-exact;
+  // any absolute URL in there simply resolves to the real site, which is harmless.
+  html = rewriteOutsideScripts(html, fu.origin + '/', PREVIEW_ORIGIN + '/');
   html = html.replace(/\scrossorigin(=("[^"]*"|'[^']*'|[^\s>]+))?/gi, '');
   const shim = 'try{localStorage.getItem("x")}catch(e){var __m={};var __s={getItem:function(k){return __m[k]===undefined?null:__m[k]},setItem:function(k,v){__m[k]=String(v)},removeItem:function(k){delete __m[k]},clear:function(){__m={}},key:function(i){return Object.keys(__m)[i]||null}};Object.defineProperty(__s,"length",{get:function(){return Object.keys(__m).length}});try{Object.defineProperty(window,"localStorage",{value:__s,configurable:true});Object.defineProperty(window,"sessionStorage",{value:__s,configurable:true})}catch(e2){}}try{document.cookie}catch(e){var __ck="";try{Object.defineProperty(document,"cookie",{get:function(){return __ck},set:function(v){var one=String(v).split(";")[0];if(one.indexOf("=")<0)return;var k=one.split("=")[0];var kept=__ck?__ck.split("; ").filter(function(x){return x.split("=")[0]!==k}):[];kept.push(one);__ck=kept.join("; ")},configurable:true})}catch(e2){}}';
   html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + `<script data-gitmir="shim">${shim}</script>`) : `<script data-gitmir="shim">${shim}</script>` + html;
