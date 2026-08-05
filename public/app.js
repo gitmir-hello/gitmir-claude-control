@@ -112,8 +112,12 @@ function openSharePopup(){
 // there is no second implementation to drift.
 const SHARE = window.__GITMIR_SHARE__ || null;
 
-const listEl = document.getElementById('list');
+const listEl = document.getElementById('list');      // the project tile grid
 const mainEl = document.getElementById('main');
+const detailEl = document.getElementById('detail');  // one project, once opened
+const railEl = document.getElementById('rail');
+const topProjEl = document.getElementById('topProj');
+const topToolsEl = document.getElementById('topTools');
 const countEl = document.getElementById('count');
 const searchEl = document.getElementById('search');
 let projects = [];
@@ -148,35 +152,85 @@ async function load(keepSelection){
   // open preview page and the copy you were about to make — and replays the panel
   // animation, which is the flash. This runs on every window focus, so it must only
   // rebuild when the selected project really changed.
-  if (before !== projSig(byPath(selected)) || !mainEl.firstChild) renderDetail();
+  if (before !== projSig(byPath(selected)) || (selected && !detailEl.firstChild)) renderDetail();
   else refreshDetailBits();
 }
 
+// The home screen. Projects are the whole surface here rather than a column beside
+// something else, because until you have opened one there is nothing else to look at.
 function renderList(){
   const q = searchEl.value.trim().toLowerCase();
   const list = projects.filter(p => !q || displayName(p).toLowerCase().includes(q) || p.path.toLowerCase().includes(q));
-  countEl.textContent = projects.length || '';
+  countEl.textContent = projects.length ? projects.length + (projects.length === 1 ? ' project' : ' projects') : '';
   listEl.innerHTML = '';
   if (!list.length){
-    const e = document.createElement('div'); e.className='list-empty';
-    e.textContent = projects.length ? 'Nothing found' : 'No projects yet';
+    const e = document.createElement('div'); e.className='grid-empty';
+    e.innerHTML = projects.length
+      ? 'Nothing matches <b>' + esc(searchEl.value.trim()) + '</b>.'
+      : 'No projects yet. <b>＋ Add project</b> and point it at any folder on any disk — '
+        + 'then open it, run Claude in it, and the model, the queue and the log fill up as it works.';
     listEl.appendChild(e); return;
   }
-  for (const p of list){
+  list.forEach((p, i) => {
     const el = document.createElement('div');
-    el.className = 'item' + (p.exists ? '' : ' missing') + (p.path===selected ? ' active' : '');
-    el.draggable = true; el.dataset.path = p.path;
+    el.className = 'tile' + (p.exists ? '' : ' missing');
+    el.draggable = true; el.dataset.path = p.path; el.tabIndex = 0;
+    el.style.setProperty('--enter', Math.min(i * 70, 840) + 'ms');
     const h = hue(displayName(p));
     el.innerHTML =
-      '<div class="bar" style="background:hsl('+h+',55%,58%)"></div>' +
-      '<div class="txt"><div class="nm"></div><div class="pa"></div></div>' +
-      '<span class="miss" title="folder not found">⚠</span>';
-    el.querySelector('.nm').textContent = displayName(p);
-    el.querySelector('.pa').textContent = p.path;
-    el.addEventListener('click', ()=>{ if(selected!==p.path){ modelSrc=null; logicEntityId=null; } selected = p.path; renderList(); renderDetail(); });
+      '<div class="t-top"><span class="t-dot" style="background:hsl(' + h + ',55%,58%)"></span>' +
+        '<span class="t-nm"></span></div>' +
+      '<div class="t-pa"></div>' +
+      '<div class="t-chips"></div>';
+    el.querySelector('.t-nm').textContent = displayName(p);
+    el.querySelector('.t-pa').textContent = p.path;
+    const chips = el.querySelector('.t-chips');
+    if (!p.exists) chips.innerHTML = '<span class="chip warn">folder missing</span>';
+    else {
+      const bits = [];
+      bits.push(p.hasModel ? '<span class="chip on">model</span>' : '<span class="chip">no model</span>');
+      const q = p.queue || {};
+      if (q.pending) bits.push('<span class="chip warn">' + q.pending + ' open</span>');
+      else if (q.done) bits.push('<span class="chip on">queue clear</span>');
+      if (p.tasks) bits.push('<span class="chip">' + p.tasks + ' done</span>');
+      chips.innerHTML = bits.join('');
+    }
+    const open = () => { if(selected!==p.path){ modelSrc=null; logicEntityId=null; } selected = p.path; renderDetail(); };
+    el.addEventListener('click', open);
+    el.addEventListener('keydown', e => { if(e.key==='Enter' || e.key===' '){ e.preventDefault(); open(); } });
     wireDrag(el);
     listEl.appendChild(el);
-  }
+  });
+}
+
+// Home and project are two different screens, not two states of one. The rail and the
+// project header only exist once something is open; the search and Add only when nothing is.
+function setShell(open){
+  listEl.classList.toggle('off', !!open);
+  railEl.classList.toggle('on', !!open);
+  topProjEl.classList.toggle('on', !!open);
+  topToolsEl.style.display = open ? 'none' : 'flex';
+  countEl.style.display = open ? 'none' : '';
+}
+
+const RAIL = [
+  { tab:'settings', g:'⚙', l:'Setup' },
+  { tab:'tasks',    g:'▤', l:'Tasks',   badge:'taskBadge' },
+  { tab:'model',    g:'◫', l:'Model',   badge:'modelBadge' },
+  { tab:'queue',    g:'▦', l:'Queue',   badge:'queueBadge' },
+  { tab:'team',     g:'⇄', l:'Team',    badge:'teamBadge' },
+  { tab:'preview',  g:'⌖', l:'Preview', only:'preview' },
+];
+function renderRail(){
+  railEl.innerHTML = RAIL
+    .filter(r => r.only !== 'preview' || PREVIEW_OK)
+    .map(r => '<button class="rl" data-tab="' + r.tab + '" title="' + r.l + '">'
+      + '<span class="g">' + r.g + '</span><span class="l">' + r.l + '</span>'
+      + (r.badge ? '<span class="badge" id="' + r.badge + '"></span>' : '') + '</button>').join('')
+    + '<div class="rail-foot">'
+    + '<a href="https://github.com/gitmir-hello/gitmir-claude-control" target="_blank" rel="noopener">SRC</a>'
+    + '<span>AGPL</span></div>';
+  railEl.querySelectorAll('.rl').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
 }
 
 let taskTimer = null;
@@ -184,7 +238,7 @@ let queueTimer = null;
 let activeTab = 'settings';
 function setTab(tab){
   activeTab = tab;
-  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
+  document.querySelectorAll('.rl').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
   document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('active', p.dataset.pane===tab));
   clearInterval(queueTimer);
   if(tab==='model' && selected) loadModel(selected);
@@ -196,31 +250,13 @@ function renderDetail(){
   const p = byPath(selected);
   clearInterval(taskTimer);
   if (!p){
-    // An empty dashboard should say what this is FOR, not just which button exists.
-    mainEl.innerHTML =
-      '<div class="placeholder"><div class="big">◧</div>' +
-      '<div class="ph-h">Three steps to a living model of your product</div>' +
-      '<ol class="ph-steps">' +
-        '<li><b>＋ Add project</b> — point it at any folder on any disk.</li>' +
-        '<li><b>▶ Run Claude</b> — opens a terminal in that folder with <code>claude</code> running.</li>' +
-        '<li>In <b>Settings</b> copy <b>📋 gitmir-model</b> and paste it into that session (⌘V + Enter). ' +
-          'Claude reads the real code and writes <code>.gitmir/model/</code> — then the <b>Model</b> tab fills with ' +
-          'your entity lifecycles, data flows and processes, and clicking any of them gives you an exact brief for the next task.</li>' +
-      '</ol>' +
-      '<div class="ph-note">Everything runs and stays on this machine. Nothing is uploaded.</div>' +
-      '</div>';
+    setShell(false);
+    detailEl.innerHTML = '';
+    renderList();
     return;
   }
   const wrap = document.createElement('div'); wrap.className='detail-wrap';
   wrap.innerHTML =
-    '<div class="tabs"><div class="tabs-inner">' +
-      '<button class="tab-btn" data-tab="settings">Settings</button>' +
-      '<button class="tab-btn" data-tab="tasks">Tasks <span class="badge" id="taskBadge"></span></button>' +
-      '<button class="tab-btn" data-tab="model">Model <span class="badge" id="modelBadge"></span></button>' +
-      '<button class="tab-btn" data-tab="queue">Queue <span class="badge" id="queueBadge"></span></button>' +
-      '<button class="tab-btn" data-tab="team">Team <span class="badge" id="teamBadge"></span></button>' +
-      (PREVIEW_OK ? '<button class="tab-btn" data-tab="preview">Preview</button>' : '') +
-    '</div></div>' +
     '<div class="pane" data-pane="settings">' +
       '<div class="field"><div class="row-lbl"><label>Name</label><span class="saved" id="savedN">saved ✓</span></div>' +
         '<input class="f-name" id="fName"></div>' +
@@ -282,7 +318,15 @@ function renderDetail(){
       '<div class="tasks-head"><span class="t">Team Bridge — route model &amp; tasks between your machines</span><span class="upd" id="teamUpd"></span></div>' +
       '<div id="teamView"><div class="model-empty">Loading…</div></div>' +
     '</div>';
-  mainEl.innerHTML = ''; mainEl.appendChild(wrap);
+  setShell(true);
+  renderRail();
+  topProjEl.innerHTML =
+    '<button class="tp-back" title="All projects">←</button>' +
+    '<span class="tp-nm"></span><span class="tp-pa"></span>';
+  topProjEl.querySelector('.tp-nm').textContent = displayName(p);
+  topProjEl.querySelector('.tp-pa').textContent = p.path;
+  topProjEl.querySelector('.tp-back').addEventListener('click', ()=>{ selected=null; renderDetail(); });
+  detailEl.innerHTML = ''; detailEl.appendChild(wrap);
 
   const nameEl = wrap.querySelector('#fName');
   const descEl = wrap.querySelector('#fDesc');

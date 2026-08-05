@@ -580,7 +580,6 @@ function buildShareBundle(projectPath: string, displayName: string): { html: str
   .share-at{font-family:var(--font-mono); font-size:11px; color:var(--dim2)}
   .share-ro{margin-left:auto; font-family:var(--font-mono); font-size:10.5px; text-transform:uppercase; letter-spacing:.14em; color:var(--cyan-soft); border:1px solid rgba(47,216,255,.35); padding:3px 10px}
   .share-main{padding:18px 22px 60px}
-  body{overflow:auto}
 </style>
 </head><body>
 <div class="share-top">
@@ -815,12 +814,33 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, { platform: process.platform, pickerAvailable: nativePickerAvailable(), relayUrl: relay.status().url, preview: PREVIEW_ON, previewOrigin: PREVIEW_ORIGIN });
     }
     if (req.method === 'GET' && url.pathname === '/api/projects') {
-      const list = loadProjects().map((p) => ({
-        name: p.name || '',
-        path: p.path,
-        description: p.description || '',
-        exists: fs.existsSync(p.path),
-      }));
+      // A tile that only says its own name is a folder shortcut. These three counts are
+      // what makes the home screen worth looking at: whether the product has been mapped,
+      // whether work is waiting, and whether anything has happened here at all. All three
+      // are a directory listing, so this stays cheap enough to run on every refresh.
+      const countIn = (dir: string): number => {
+        try { return fs.readdirSync(dir).filter((f) => f.endsWith('.md')).length; } catch { return 0; }
+      };
+      const list = loadProjects().map((p) => {
+        const exists = fs.existsSync(p.path);
+        let hasModel = false, todo = 0, verify = 0, done = 0, tasks = 0;
+        if (exists) {
+          try { hasModel = fs.existsSync(path.join(p.path, '.gitmir', 'model', 'index.json')); } catch {}
+          todo = countIn(path.join(p.path, 'tasks', 'todo'));
+          verify = countIn(path.join(p.path, 'tasks', 'verify'));
+          done = countIn(path.join(p.path, 'tasks', 'done'));
+          try {
+            const log = JSON.parse(fs.readFileSync(path.join(p.path, '.claude', 'tasks.json'), 'utf8'));
+            tasks = Array.isArray(log) ? log.length : Array.isArray(log && log.tasks) ? log.tasks.length : 0;
+          } catch {}
+        }
+        return {
+          name: p.name || '', path: p.path, description: p.description || '', exists,
+          hasModel, tasks,
+          // Unproven work is still open work — the same rule the Queue badge uses.
+          queue: { pending: todo + verify, done },
+        };
+      });
       return sendJSON(res, 200, { projects: list });
     }
     if (req.method === 'GET' && url.pathname === '/api/tasks') {
@@ -1293,78 +1313,180 @@ const HTML = /* html */ `<!doctype html>
     color-scheme:dark;
   }
   *{box-sizing:border-box}
-  html,body{margin:0;height:100%}
+    html,body{margin:0}
   body{
-    background:#04060a; color:var(--ink-1); height:100vh; display:flex;
-    font:14px/1.5 var(--font-ui); -webkit-font-smoothing:antialiased; overflow:hidden; position:relative;
-  }
-  body::before{ content:""; position:fixed; inset:0; z-index:-2; pointer-events:none;
-    background:
-      radial-gradient(1100px 760px at 12% -8%, rgba(47,216,255,.12), transparent 60%),
-      radial-gradient(1000px 900px at 100% 2%, rgba(78,168,255,.10), transparent 58%),
-      radial-gradient(1200px 820px at 50% 118%, rgba(52,240,166,.06), transparent 60%),
-      linear-gradient(180deg,#03060f,#04081a 45%,#02040c);
-  }
-  body::after{ content:""; position:fixed; inset:0; z-index:-1; pointer-events:none; opacity:.5;
-    background-image:
-      linear-gradient(rgba(47,216,255,.045) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(47,216,255,.045) 1px, transparent 1px);
-    background-size:34px 34px;
-    -webkit-mask-image:radial-gradient(130% 100% at 50% -10%, #000 35%, transparent 88%);
-    mask-image:radial-gradient(130% 100% at 50% -10%, #000 35%, transparent 88%);
+      background:var(--bg-0); color:var(--ink-1); min-height:100vh; display:block;
+      font:14px/1.5 var(--font-ui); -webkit-font-smoothing:antialiased; position:relative;
   }
   button{font-family:inherit}
 
-  /* ---------- sidebar ---------- */
-  .side{
-    width:330px; min-width:330px; height:100%; display:flex; flex-direction:column;
-    background:#111319; border-right:1px solid var(--line);
+  /* ---------- the environment ----------
+     This is what makes it read as the IDE and not as a dark page: four nebula radials
+     over a vertical gradient, three still blurred blobs, a 7px scanline film, and a
+     56px grid floor laid back 70deg on a 420px perspective and masked upward. Copied
+     from holo.css value for value. Nothing here animates — a blur(60px) blob repainted
+     every frame is one of the most expensive things a GPU can be asked to do. */
+  .holo-env{position:fixed; inset:0; z-index:0; overflow:hidden; pointer-events:none;
+    background:
+      radial-gradient(1100px 760px at 14% -8%, rgba(47,216,255,.16), transparent 60%),
+      radial-gradient(1000px 900px at 100% 4%, rgba(78,168,255,.14), transparent 58%),
+      radial-gradient(1200px 800px at 50% 116%, rgba(52,240,166,.08), transparent 60%),
+      radial-gradient(900px 700px at 88% 90%, rgba(78,168,255,.10), transparent 60%),
+      linear-gradient(180deg,#03060f 0%,#04081a 45%,#02040c 100%)}
+  .holo-env::after{content:""; position:absolute; inset:0;
+    background:linear-gradient(transparent 0%, rgba(47,216,255,.022) 50%, transparent 100%);
+    background-size:100% 7px; opacity:.5}
+  .holo-blob{position:absolute; border-radius:50%; filter:blur(60px); opacity:.55}
+  .holo-blob.b1{width:480px; height:480px; left:-130px; top:-90px;
+    background:radial-gradient(circle, rgba(47,216,255,.34), transparent 70%)}
+  .holo-blob.b2{width:560px; height:560px; right:-170px; top:6%;
+    background:radial-gradient(circle, rgba(78,168,255,.30), transparent 70%)}
+  .holo-blob.b3{width:640px; height:640px; left:32%; bottom:-260px;
+    background:radial-gradient(circle, rgba(52,240,166,.16), transparent 70%)}
+  .holo-floor{position:absolute; left:50%; bottom:-10%; width:220vw; height:70vh;
+    transform:translateX(-50%) perspective(420px) rotateX(70deg); transform-origin:bottom center;
+    background-image:
+      linear-gradient(rgba(47,216,255,.16) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(47,216,255,.16) 1px, transparent 1px);
+    background-size:56px 56px;
+    -webkit-mask-image:linear-gradient(to top,#000 0%,rgba(0,0,0,.5) 30%,transparent 78%);
+    mask-image:linear-gradient(to top,#000 0%,rgba(0,0,0,.5) 30%,transparent 78%);
+    opacity:.6}
+
+  /* ---------- shell: topbar, rail, grid ---------- */
+  .topbar,.shell{position:relative; z-index:1}
+  .topbar{position:sticky; top:0; z-index:40; height:var(--topbar-h); display:flex; align-items:center; gap:14px;
+    padding:0 18px; border-bottom:1px solid var(--line); background:rgba(4,8,16,.86); backdrop-filter:blur(14px)}
+  .brand-link{display:flex; align-items:center; flex-shrink:0}
+  .brand-logo{height:19px; display:block}
+  .brand-sub{font-family:var(--font-mono); font-size:11px; letter-spacing:.2em; text-transform:uppercase; color:var(--ink-3);
+    padding-left:14px; border-left:1px solid var(--line); white-space:nowrap}
+  .topbar .c{font-family:var(--font-mono); font-size:11px; color:var(--ink-3)}
+  .top-tools{margin-left:auto; display:flex; gap:10px; align-items:center}
+  .top-tools .search{width:230px; height:32px; padding:0 11px; background:var(--panel2); border:1px solid var(--line);
+    color:var(--ink-0); font-family:var(--font-ui); font-size:13px; outline:none; transition:border-color .16s}
+  .top-tools .search:focus{border-color:var(--line2)}
+  .top-tools .add{height:32px; padding:0 14px; background:var(--cyan); border:none; color:#05070c; cursor:pointer;
+    font-family:var(--font-mono); font-size:11px; letter-spacing:.12em; text-transform:uppercase; font-weight:600; white-space:nowrap}
+  .top-tools .add:hover{background:var(--cyan-soft)}
+  .top-proj{display:none; align-items:center; gap:12px; min-width:0}
+  .top-proj.on{display:flex}
+  .tp-back{width:28px; height:28px; flex-shrink:0; background:none; border:1px solid var(--line); color:var(--ink-2);
+    cursor:pointer; font-size:14px; line-height:1}
+  .tp-back:hover{border-color:var(--line2); color:var(--cyan)}
+  .tp-nm{font-size:14px; font-weight:650; color:var(--ink-0); white-space:nowrap}
+  .tp-pa{font-family:var(--font-mono); font-size:11px; color:var(--ink-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+
+  .shell{display:flex; align-items:stretch; min-height:calc(100vh - var(--topbar-h))}
+  .main{flex:1; min-width:0; padding:22px 24px 60px}
+  .detail{max-width:1600px}
+
+  /* ---------- home: project tiles ---------- */
+  /* The panel treatment is the IDE glass panel: a 158deg white sheen over a 165deg navy
+     body, a cyan-tinted hairline, and the eight corner-bracket arms painted as background
+     layers on one pseudo-element rather than four extra nodes. */
+  .grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(min(290px,100%),1fr)); gap:18px}
+  .grid.off{display:none}
+  .tile{position:relative; isolation:isolate; padding:18px 18px 16px; cursor:pointer;
+    display:flex; flex-direction:column; gap:9px; min-height:132px;
+    background:
+      linear-gradient(158deg,rgba(255,255,255,.05) 0%,rgba(255,255,255,0) 42%),
+      linear-gradient(165deg,rgba(18,36,66,.62) 0%,rgba(9,18,38,.78) 60%,rgba(5,11,24,.82) 100%);
+    border:1px solid var(--glass-brd);
+    box-shadow:0 0 44px rgba(2,8,16,.5), inset 0 0 34px rgba(40,120,180,.06);
+    transition:transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+    animation:materialize .5s cubic-bezier(.2,.7,.3,1) backwards; animation-delay:var(--enter,0s)}
+  .tile::before{content:""; position:absolute; inset:-1px; pointer-events:none; z-index:1;
+    background:
+      linear-gradient(90deg,transparent,rgba(95,222,255,.55),transparent) 50% 0 / calc(100% - 44px) 1px no-repeat,
+      linear-gradient(var(--cc),var(--cc)) 0 0 / var(--cb) var(--cw) no-repeat,
+      linear-gradient(var(--cc),var(--cc)) 0 0 / var(--cw) var(--cb) no-repeat,
+      linear-gradient(var(--cc),var(--cc)) 100% 0 / var(--cb) var(--cw) no-repeat,
+      linear-gradient(var(--cc),var(--cc)) 100% 0 / var(--cw) var(--cb) no-repeat,
+      linear-gradient(var(--cc),var(--cc)) 0 100% / var(--cb) var(--cw) no-repeat,
+      linear-gradient(var(--cc),var(--cc)) 0 100% / var(--cw) var(--cb) no-repeat,
+      linear-gradient(var(--cc),var(--cc)) 100% 100% / var(--cb) var(--cw) no-repeat,
+      linear-gradient(var(--cc),var(--cc)) 100% 100% / var(--cw) var(--cb) no-repeat;
+    filter:drop-shadow(0 0 4px rgba(95,222,255,.7)); opacity:.55; transition:opacity .18s ease}
+  .tile::after{content:""; position:absolute; z-index:-1; left:10%; right:10%; bottom:-13px; height:46%;
+    border-radius:50%; background:radial-gradient(72% 100% at 50% 100%,rgba(47,216,255,.22),transparent 72%);
+    filter:blur(18px); opacity:.45; pointer-events:none;
+    transition:opacity .25s ease, filter .25s ease, bottom .25s ease}
+  .tile:hover{transform:translateY(-2px); border-color:var(--glass-brd-strong);
+    box-shadow:var(--glow-soft), 0 0 0 1px rgba(47,216,255,.25), 0 0 30px rgba(47,216,255,.12)}
+  .tile:hover::before{opacity:1}
+  .tile:hover::after{opacity:.8; filter:blur(22px); bottom:-17px}
+  .tile:focus-visible{outline:2px solid var(--cyan); outline-offset:3px}
+  .t-top{display:flex; align-items:center; gap:9px; min-width:0}
+  .t-dot{width:3px; height:16px; flex-shrink:0}
+  .t-nm{font-family:var(--font-ui); font-size:15px; font-weight:650; letter-spacing:-.01em; color:#fff;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .t-pa{font-family:var(--font-mono); font-size:11px; color:var(--ink-3); line-height:1.5; word-break:break-all;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden}
+  .t-chips{margin-top:auto; display:flex; gap:6px; flex-wrap:wrap; padding-top:6px}
+  /* badge formula from the IDE: text light, border .35-.4 alpha, fill .08-.1 of the same hue */
+  .chip{display:inline-flex; align-items:center; height:20px; padding:0 8px; font-family:var(--font-mono);
+    font-size:10.5px; font-weight:600; letter-spacing:.04em; text-transform:uppercase;
+    border:1px solid var(--glass-brd); background:rgba(255,255,255,.03); color:var(--ink-2); white-space:nowrap}
+  .chip.on{color:var(--cyan-soft); border-color:rgba(47,216,255,.35); background:rgba(47,216,255,.08)}
+  .chip.warn{color:#ffd08a; border-color:rgba(255,179,71,.4); background:rgba(255,179,71,.1)}
+  .tile.missing{opacity:.6}
+  .tile.dragover{border-color:var(--cyan)}
+  .grid-empty{grid-column:1/-1; padding:70px 24px; text-align:center; color:var(--ink-2); font-size:13.5px; line-height:1.7}
+  .grid-empty b{color:var(--cyan-soft); font-weight:600}
+  .grid-empty{max-width:640px; margin:0 auto; text-align:left}
+  .ge-h{font-family:var(--font-ui); font-size:19px; font-weight:650; letter-spacing:-.02em; color:#fff; margin-bottom:16px; text-align:center}
+  .ge-steps{margin:0; padding-left:20px; display:flex; flex-direction:column; gap:11px}
+  .ge-steps li{padding-left:4px}
+  .ge-steps code{font-family:var(--font-mono); font-size:11.5px; color:var(--cyan-soft)}
+  .ge-note{margin-top:18px; padding-top:14px; border-top:1px solid var(--glass-brd); font-family:var(--font-mono); font-size:11px; letter-spacing:.06em; color:var(--ink-3); text-align:center}
+
+
+  /* ---------- rail ---------- */
+  /* The IDE nav-item active state: a 3px cyan tick outside the item, a faint cyan
+     gradient wash, and a cyan border — the tab does not move, the light does. */
+  .rail{display:none; width:var(--rail-w); flex-shrink:0; flex-direction:column; gap:3px; padding:12px 8px;
+    border-right:1px solid var(--glass-brd);
+    background:linear-gradient(180deg,rgba(15,30,58,.97),rgba(10,20,42,.97));
+    position:sticky; top:var(--topbar-h); height:calc(100vh - var(--topbar-h))}
+  .rail.on{display:flex}
+  .rl{position:relative; width:100%; padding:10px 2px 8px; background:none; border:1px solid transparent;
+    cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:5px;
+    color:#c0c6cd; transition:all .14s ease}
+  .rl:hover{color:#fff; background:rgba(255,255,255,.05)}
+  .rl .g{font-size:17px; line-height:1}
+  .rl .l{font-family:var(--font-mono); font-size:9px; letter-spacing:.1em; text-transform:uppercase}
+  .rl.active{color:#fff;
+    background:linear-gradient(100deg,rgba(47,216,255,.14),rgba(47,216,255,.04));
+    border-color:rgba(47,216,255,.28);
+    box-shadow:inset 0 0 0 1px rgba(47,216,255,.08), 0 0 18px rgba(47,216,255,.08)}
+  .rl.active .g{color:var(--cyan); filter:drop-shadow(0 0 6px rgba(47,216,255,.6))}
+  .rl.active::before{content:""; position:absolute; left:-8px; top:50%; transform:translateY(-50%);
+    width:3px; height:20px; background:var(--cyan); box-shadow:0 0 12px var(--cyan)}
+  .rl .badge{position:absolute; top:4px; right:6px; min-width:16px; height:16px; padding:0 4px;
+    display:inline-flex; align-items:center; justify-content:center; font-family:var(--font-mono);
+    font-size:9px; font-weight:600; background:rgba(47,216,255,.08); color:var(--cyan-soft);
+    border:1px solid rgba(47,216,255,.35)}
+  .rl .badge:empty{display:none}
+  .rl .badge.stale{background:rgba(255,179,71,.1); color:#ffd08a; border-color:rgba(255,179,71,.4)}
+  .rail-foot{margin-top:auto; padding-top:10px; border-top:1px solid var(--glass-brd);
+    display:flex; flex-direction:column; align-items:center; gap:4px}
+  .rail-foot a{font-family:var(--font-mono); font-size:9px; letter-spacing:.08em; color:var(--ink-3); text-decoration:none}
+  .rail-foot a:hover{color:var(--cyan-soft)}
+  .rail-foot span{font-family:var(--font-mono); font-size:8.5px; color:var(--faint)}
+
+
+  @media (max-width:760px){
+    .top-tools .search{width:130px}
+    .rail{--rail-w:60px}
+    .main{padding:16px 14px 50px}
   }
-  .side-top{padding:16px 16px 12px; border-bottom:1px solid var(--line)}
-  .brand{display:flex;align-items:center;gap:9px;font-weight:650;letter-spacing:.2px;margin-bottom:14px}
-  .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent)}
-  .brand .c{color:var(--dim);font-weight:500;font-size:13px;margin-left:auto}
-  .add{
-    width:100%; display:inline-flex; align-items:center; justify-content:center; gap:8px;
-    background:var(--accent); color:#1a0f0a; border:none; font-weight:650;
-    padding:11px; border-radius:10px; cursor:pointer; font-size:14px;
-    transition:filter .15s ease, transform .06s ease;
-  }
-  .add:hover{filter:brightness(1.06)} .add:active{transform:translateY(1px)}
-  .search{
-    width:100%; margin-top:10px; background:var(--panel2); border:1px solid var(--line);
-    color:var(--txt); padding:9px 11px; border-radius:9px; outline:none; font-size:14px;
-  }
-  .search:focus{border-color:var(--accent)}
-  .list{flex:1; overflow-y:auto; padding:8px}
-  .item{
-    display:flex; align-items:center; gap:10px; padding:10px 11px; border-radius:10px;
-    cursor:pointer; border:1px solid transparent; margin-bottom:2px;
-  }
-  .item:hover{background:var(--panel)}
-  .item.active{background:var(--panel2); border-color:var(--line2)}
-  .item .bar{width:4px; align-self:stretch; border-radius:3px; flex:0 0 auto}
-  .item .txt{min-width:0; flex:1}
-  .item .nm{font-weight:600; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-  .item .pa{color:var(--dim2); font-size:11.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px}
-  .item.missing .nm{color:var(--dim)}
-  .item .miss{color:var(--danger); font-size:11px; display:none}
-  .item.missing .miss{display:inline}
-  .item.drag{opacity:.4} .item.dragover{border-color:var(--accent)}
-  .list-empty{color:var(--dim2); text-align:center; padding:40px 16px; font-size:13px}
+
 
   /* ---------- detail ---------- */
-  .main{flex:1; height:100%; overflow-y:auto; display:flex; flex-direction:column}
   .placeholder{margin:auto; text-align:center; color:var(--dim2); padding:40px}
   .placeholder .big{font-size:44px; margin-bottom:14px; opacity:.5}
   .detail-wrap{width:100%}
-  .tabs{position:sticky; top:0; z-index:3; background:var(--bg); border-bottom:1px solid var(--line)}
-  .tabs-inner{max-width:none; margin:0; padding:0 17px; display:flex; gap:2px}
-  .tab-btn{background:none; border:none; color:var(--dim); font-size:14px; font-weight:600; padding:16px 15px 14px; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px}
-  .tab-btn:hover{color:var(--txt)}
-  .tab-btn.active{color:var(--txt); border-bottom-color:var(--accent)}
-  .tab-btn .badge{margin-left:7px; background:var(--panel2); color:var(--dim); font-size:11px; padding:1px 7px; border-radius:10px; font-weight:600}
-  .tab-btn.active .badge{background:var(--accent); color:#1a0f0a}
   .pane{display:none; max-width:none; margin:0; padding:26px 32px 60px}
   .pane.active{display:block}
   .d-path{
@@ -1575,7 +1697,6 @@ const HTML = /* html */ `<!doctype html>
   .stale-b{margin-top:5px; color:var(--dim); font-size:12.5px; line-height:1.6}
   .stale-b code{font-family:var(--font-mono); font-size:11.5px; color:var(--cyan-soft)}
   .stale-fix{margin-top:11px; font-size:13px; padding:9px 14px}
-  .tab-btn .badge.stale{ background:#ffb86b; color:#1a0f0a; border-color:#ffb86b }
 
   /* share a read-only map */
   .share-modal{max-width:640px}
@@ -1729,7 +1850,6 @@ const HTML = /* html */ `<!doctype html>
   .ta-k{font-family:var(--font-mono); font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--cyan); min-width:62px; flex-shrink:0}
   .ta-t{color:var(--dim); flex:1; word-break:break-word}
   .ta-time{color:var(--dim2); font-size:11px; font-family:var(--font-mono); flex-shrink:0}
-  .tab-btn .badge.on{background:rgba(52,240,166,.14); color:var(--ok); border-color:rgba(52,240,166,.4)}
 
   .ph-h{font-size:16px; font-weight:650; color:var(--txt); margin:14px 0 4px}
   .ph-steps{list-style:none; counter-reset:s; padding:0; margin:14px 0 0; max-width:620px; text-align:left}
@@ -1763,9 +1883,6 @@ const HTML = /* html */ `<!doctype html>
   .toast,.tab-btn .badge,.rw,.op-table code,.model-empty code,.mmsrc,.d-path .rev{ border-radius:0 !important }
 
   /* sidebar → glass */
-  .side{ background:linear-gradient(180deg,rgba(8,16,32,.72),rgba(5,10,22,.84)); border-right:1px solid var(--glass-brd); backdrop-filter:blur(8px) }
-  .side-top{ border-bottom:1px solid var(--glass-brd); position:relative }
-  .side-top::after{ content:""; position:absolute; left:16px; right:16px; bottom:-1px; height:1px; background:linear-gradient(90deg,transparent,rgba(95,222,255,.5),transparent) }
   .brand{ font-family:var(--font-ui); text-transform:uppercase; letter-spacing:.16em; font-size:13px; font-weight:600; color:#fff; gap:10px }
   .brand .c{ font-family:var(--font-mono); letter-spacing:.04em; text-transform:none }
   .brand-logo{ height:19px; width:auto; display:block; filter:drop-shadow(0 0 8px rgba(47,216,255,.45)); -webkit-user-select:none; user-select:none }
@@ -1774,7 +1891,6 @@ const HTML = /* html */ `<!doctype html>
   .brand-link:active{ opacity:.75 }
   .brand-sub{ font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; color:var(--ink-2); text-transform:uppercase; padding-left:10px; border-left:1px solid var(--glass-brd) }
   /* AGPL-3.0 section 13: anyone using this over a network must be able to get the source. */
-  .side-foot{ display:flex; align-items:center; gap:8px; padding:10px 16px; border-top:1px solid var(--glass-brd); flex-shrink:0 }
   .brand-src{ font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3); text-decoration:none; border:1px solid var(--faint); padding:3px 8px }
   .brand-src:hover{ color:var(--cyan); border-color:rgba(47,216,255,.45) }
   .foot-lic{ font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em; color:var(--ink-3) }
@@ -1798,17 +1914,8 @@ const HTML = /* html */ `<!doctype html>
   .search::placeholder,.f-desc::placeholder{ color:var(--ink-3) }
 
   /* project list → nav */
-  .item.active{ background:linear-gradient(100deg,rgba(47,216,255,.14),rgba(47,216,255,.04)); border-color:rgba(47,216,255,.28); box-shadow:inset 0 0 0 1px rgba(47,216,255,.06), 0 0 18px rgba(47,216,255,.08); position:relative }
-  .item.active::after{ content:""; position:absolute; left:-8px; top:50%; transform:translateY(-50%); width:3px; height:18px; background:var(--cyan); box-shadow:0 0 12px var(--cyan) }
-  .item .pa{ font-family:var(--font-mono) }
-  .item.dragover{ border-color:var(--cyan) }
 
   /* tabs */
-  .tabs{ background:rgba(4,7,15,.85); border-bottom:1px solid var(--glass-brd); backdrop-filter:blur(8px) }
-  .tab-btn{ font-family:var(--font-mono); text-transform:uppercase; letter-spacing:.12em; font-size:12px }
-  .tab-btn.active{ color:var(--cyan); border-bottom-color:var(--cyan); text-shadow:0 0 12px rgba(47,216,255,.5) }
-  .tab-btn .badge{ background:rgba(47,216,255,.1); color:var(--cyan-soft); border:1px solid rgba(47,216,255,.3); font-family:var(--font-mono) }
-  .tab-btn.active .badge{ background:var(--cyan); color:#05070c; border-color:var(--cyan) }
 
   /* labels → HUD eyebrow (mono, uppercase, cyan) */
   label,.skills-label,.ov-sec,.tasks-head .t{ font-family:var(--font-mono); letter-spacing:.18em; color:var(--cyan-soft); font-size:11px }
@@ -1865,34 +1972,29 @@ const HTML = /* html */ `<!doctype html>
 </style>
 </head>
 <body>
-  <aside class="side">
-    <div class="side-top">
-      <div class="brand"><a class="brand-link" href="https://ide.gitmir.com" target="_blank" rel="noopener" title="Open ide.gitmir.com"><img class="brand-logo" src="/vendor/gitmir-wordmark.svg" alt="GitMir IDE" draggable="false"></a><span class="brand-sub">Claude Control</span><span class="c" id="count"></span></div>
-      <button class="add" id="addBtn">＋ Add project</button>
-      <input class="search" id="search" placeholder="Search…" autocomplete="off">
-    </div>
-    <div class="list" id="list"></div>
-    <div class="side-foot">
-      <a class="brand-src" href="https://github.com/gitmir-hello/gitmir-claude-control" target="_blank" rel="noopener">Source</a>
-      <span class="foot-lic">AGPL-3.0</span>
-    </div>
-  </aside>
+  <div class="holo-env" aria-hidden="true">
+    <i class="holo-blob b1"></i><i class="holo-blob b2"></i><i class="holo-blob b3"></i>
+    <div class="holo-floor"></div>
+  </div>
 
-  <main class="main" id="main">
-    <div class="placeholder" id="placeholder">
-      <div class="big">◧</div>
-      <div class="ph-h">Three steps to a living model of your product</div>
-      <ol class="ph-steps">
-        <li><b>＋ Add project</b> — point it at any folder on any disk.</li>
-        <li><b>▶ Run Claude</b> — opens a terminal in that folder with <code>claude</code> running.</li>
-        <li>In <b>Settings</b> copy <b>📋 gitmir-model</b> and paste it into that session (⌘V + Enter).
-            Claude reads the real code and writes <code>.gitmir/model/</code> — then the <b>Model</b> tab fills
-            with your entity lifecycles, data flows and processes, and clicking any of them gives you an exact
-            brief for the next task.</li>
-      </ol>
-      <div class="ph-note">Everything runs and stays on this machine. Nothing is uploaded.</div>
+  <header class="topbar">
+    <a class="brand-link" href="https://ide.gitmir.com" target="_blank" rel="noopener" title="Open ide.gitmir.com"><img class="brand-logo" src="/vendor/gitmir-wordmark.svg" alt="GitMir IDE" draggable="false"></a>
+    <span class="brand-sub">Claude Control</span>
+    <span class="c" id="count"></span>
+    <div class="top-proj" id="topProj"></div>
+    <div class="top-tools" id="topTools">
+      <input class="search" id="search" placeholder="Search projects…" autocomplete="off">
+      <button class="add" id="addBtn">＋ Add project</button>
     </div>
-  </main>
+  </header>
+
+  <div class="shell" id="shell">
+    <nav class="rail" id="rail" aria-label="Project sections"></nav>
+    <main class="main" id="main">
+      <div class="grid" id="list"></div>
+      <div class="detail" id="detail"></div>
+    </main>
+  </div>
 
   <div class="toast" id="toast"></div>
 
