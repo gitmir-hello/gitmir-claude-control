@@ -2798,6 +2798,11 @@ function objectFacts(kind, id, m){
     (modObj&&modObj.owner?' · owner <b>'+esc(modObj.owner)+'</b>':'')+'</span></div>';
   html+='<div class="of-row"><span class="of-k">Who may</span><span class="of-v">'+
     (roles.length?esc(roles.join(' · ')):'<i>no role recorded in the model</i>')+'</span></div>';
+  // Where it lives, when the model recorded it. This is what turns "the model named
+  // three functions" into "open these three files" without a search.
+  if(Array.isArray(o.paths)&&o.paths.length)
+    html+='<div class="of-row"><span class="of-k">Lives in</span><span class="of-v">'+
+      o.paths.slice(0,6).map(x=>'<code class="of-p">'+esc(String(x).slice(0,160))+'</code>').join('')+'</span></div>';
   if(o.sensitivity==='high')
     html+='<div class="of-row"><span class="of-k">Care</span><span class="of-v sens">marked sensitive — money, credentials or personal data</span></div>';
   if(hist.length)
