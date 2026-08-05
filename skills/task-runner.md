@@ -24,8 +24,12 @@ first** (files are named with a sortable number prefix), and keep going:
    exactly. If the project has a `.gitmir/model/`, treat it as the source of truth
    and update it after any code change (per the GitMir model rule).
 5. **Hand off to verification.** Append a short `## Outcome` (what changed, files
-   touched) and **move the file to `tasks/verify/`**. Never to `tasks/done/`.
-6. **Count what is left, out loud**, in one line — nothing more:
+   touched) and **move the file to `tasks/verify/`**. Never to `tasks/done/`. If the
+   task carries a `Touches:` line, correct it to the ids you actually changed — that
+   line is what the impact view reads, and a wrong one is worse than none.
+6. **Record what you touched.** When writing the task into `.claude/tasks.json`
+   (task-log), fill `touched` with the ids of the model objects you changed.
+7. **Count what is left, out loud**, in one line — nothing more:
 
         queue: 4 todo, 2 verify — continuing
 
@@ -33,6 +37,20 @@ first** (files are named with a sortable number prefix), and keep going:
    what you have built, do not ask whether to continue — see below. That one line is
    the only thing you say between tasks; it keeps the remaining count in front of both
    of us, so a run that ends early is obvious instead of invisible.
+
+## Approval
+
+Some projects approve a change before it is built: the dashboard writes an
+`Approved: <when> by <who>` line into the task file. Two rules:
+
+- **Never remove or edit that line.** It is a record of a decision, not your bookkeeping.
+- **If any task in `tasks/` carries one, the project is using approvals.** Then, before
+  claiming an unapproved task, say so plainly in your one-line count:
+
+        queue: 4 todo, 2 verify — next one is not approved, taking it anyway
+
+  Say it and continue. Do not stall the queue waiting for an approval that may never
+  come — but do not let an unapproved change go by silently either.
 
 ## When you may stop
 

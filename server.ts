@@ -1048,7 +1048,7 @@ const server = http.createServer(async (req, res) => {
       // through would put phantom nodes in the blast radius.
       const known = modelIdSet(path.join(p, '.gitmir', 'model'));
       const heat: Record<string, number> = {};
-      const tasks: { col: string; file: string; n: number; title: string; ids: string[]; declared: boolean; mtime: number }[] = [];
+      const tasks: { col: string; file: string; n: number; title: string; ids: string[]; declared: boolean; approved: string | null; mtime: number }[] = [];
       for (const col of ['todo', 'inprogress', 'verify', 'done']) {
         const dir = path.join(p, 'tasks', col);
         let files: string[] = [];
@@ -1066,7 +1066,9 @@ const server = http.createServer(async (req, res) => {
             : idList(text.match(MODEL_ID) || []).filter((i) => known.has(i));
           for (const i of ids) heat[i] = (heat[i] || 0) + 1;
           let mtime = 0; try { mtime = fs.statSync(path.join(dir, f)).mtimeMs; } catch {}
-          tasks.push({ col, file: f, n: Number((/^(\d+)/.exec(f) || [])[1]) || 0, title, ids, declared: declaredIds.length > 0, mtime });
+          const ap = /^\s*approved\s*:\s*(.+)$/im.exec(text);
+          tasks.push({ col, file: f, n: Number((/^(\d+)/.exec(f) || [])[1]) || 0, title, ids,
+            declared: declaredIds.length > 0, approved: ap ? ap[1].trim().slice(0, 80) : null, mtime });
         }
       }
       let history: { id: string; title: string; ts: string; status: string; touched: string[]; files: string[] }[] = [];
@@ -1087,6 +1089,45 @@ const server = http.createServer(async (req, res) => {
         });
       } catch {}
       return sendJSON(res, 200, { tasks, history, heat, knownIds: known.size });
+    }
+    // Approving a task is a line written into the task file itself, next to Type: and
+    // Touches:. It travels with the task through the queue folders, survives being
+    // moved, and is readable by whoever picks the task up — including Claude.
+    if (req.method === 'POST' && url.pathname === '/api/task-approve') {
+      const body = await readBody(req);
+      const p = String(body.path || '');
+      const col = String(body.col || '');
+      const file = path.basename(String(body.file || ''));
+      const by = String(body.by || '').trim().slice(0, 60);
+      const undo = !!body.undo;
+      if (!p || !['todo', 'inprogress', 'verify', 'done'].includes(col) || !file.endsWith('.md')) {
+        return sendJSON(res, 400, { error: 'bad request' });
+      }
+      const full = path.join(p, 'tasks', col, file);
+      let text: string;
+      try { text = fs.readFileSync(full, 'utf8'); } catch { return sendJSON(res, 404, { error: 'not found' }); }
+      const lines = text.split('\n');
+      const at = lines.findIndex((l) => /^\s*approved\s*:/i.test(l));
+      if (undo) {
+        if (at === -1) return sendJSON(res, 200, { ok: true, approved: null });
+        lines.splice(at, 1);
+        fs.writeFileSync(full, lines.join('\n'));
+        return sendJSON(res, 200, { ok: true, approved: null });
+      }
+      const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
+      const line = 'Approved: ' + stamp + (by ? ' by ' + by : '');
+      if (at !== -1) lines[at] = line;
+      else {
+        // Under the last header line (Type:/Touches:) if there is one, otherwise under
+        // the title — so the file still reads top-down.
+        let ins = lines.findIndex((l) => l.trim().startsWith('#'));
+        ins = ins === -1 ? 0 : ins + 1;
+        while (ins < lines.length && !lines[ins].trim()) ins++;              // past the blank line
+        while (ins < lines.length && /^\s*[A-Za-z][A-Za-z ]*:/.test(lines[ins])) ins++;
+        lines.splice(ins, 0, line);
+      }
+      fs.writeFileSync(full, lines.join('\n'));
+      return sendJSON(res, 200, { ok: true, approved: line.slice('Approved: '.length) });
     }
     if (req.method === 'GET' && url.pathname === '/api/model') {
       const p = url.searchParams.get('path') || '';
@@ -1850,7 +1891,25 @@ const HTML = /* html */ `<!doctype html>
   .imp-flow .tag{font-family:var(--font-mono); font-size:9px; letter-spacing:.08em; text-transform:uppercase;
     color:var(--c-api); margin-left:8px}
   .imp-flow .steps{display:block; font-family:var(--font-mono); font-size:11px; color:var(--ink-3); margin-top:4px}
-  .imp-actions{display:flex; gap:9px; margin-top:22px}
+  .imp-actions{display:flex; gap:9px; margin-top:22px; align-items:center; flex-wrap:wrap}
+  .imp-appr{font-family:var(--font-mono); font-size:11px; color:var(--c-ok);
+    border:1px solid rgba(52,240,166,.4); padding:6px 11px}
+  .imp-appr-h{font-size:11.5px; color:var(--ink-3); margin-top:9px; max-width:64ch; line-height:1.5}
+  .imp-ok{color:var(--c-ok); font-size:12px; flex:none}
+  .imp-item.adhoc{border-bottom:1px solid rgba(120,210,255,.18)}
+  .imp-item.adhoc .imp-col{color:var(--ink-3)}
+  .imp-search{width:100%; padding:9px 12px; font-family:var(--font-mono); font-size:12.5px; border-radius:0;
+    background:rgba(6,14,30,.7); border:1px solid var(--glass-brd); color:#fff}
+  .imp-search:focus{outline:none; border-color:var(--cyan)}
+  .imp-sugg{display:flex; flex-wrap:wrap; gap:6px; margin-top:9px}
+  .imp-sg{display:inline-flex; align-items:center; gap:7px; font-family:var(--font-mono); font-size:11px;
+    padding:4px 9px; cursor:pointer; border-radius:0; background:transparent;
+    border:1px solid var(--glass-brd); color:var(--ink-1)}
+  .imp-sg:hover{border-color:var(--cyan); color:#fff}
+  .imp-sg .k{font-size:9px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-3)}
+  .imp-chip.rm .x{color:var(--ink-3); margin-left:3px}
+  .imp-chip.rm:hover .x{color:var(--c-danger)}
+  .imp-none{font-size:12px; color:var(--ink-3)}
 
   /* ---- timeline ---- */
   .tl-head{font-size:12.5px; color:var(--ink-2); margin-bottom:16px; max-width:70ch; line-height:1.55}

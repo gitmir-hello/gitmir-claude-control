@@ -135,6 +135,49 @@ The planner also covers the negative case — the invalid input, the empty list,
 unauthorised call — and marks a step `(manual)` where only a human can judge it,
 rather than inventing a fake automated check.
 
+### 3b. And you can see that radius before you agree to the change
+
+The planner writes a `Touches:` line naming the model objects a task will change.
+The **Impact** view walks those ids through the model and shows what sits
+downstream — the data, the endpoints, the screens, the events, the flows a person
+walks through — then scores it:
+
+    Business risk  MEDIUM   reaches 20% of the product · 81 of 409 points
+
+    1 × 2   module boundaries crossed     a change inside one area is a smaller thing
+    1 × 3   user journeys affected        someone walks through these
+    2 × 1   screens in reach              what a user would see change
+
+The score is a **share of the product**, not a raw number: 30 points means "most
+of it" in a nine-module product and "a corner" in a ninety-one module one, so it
+is divided by what the whole product would score. Every component is shown with
+its count and its weight, because a number nobody can check is a number nobody
+trusts.
+
+**Approve this change** writes an `Approved: <when> by <who>` line into the task
+file. It travels with the task through the queue and whoever runs it can see it —
+including Claude, which is told never to edit that line and to say out loud when
+it is about to run something unapproved.
+
+There is also a **what-if**: pick objects by hand and read the same analysis
+before any task exists.
+
+### 3c. What has been changing, and where
+
+The same link — task to model object — read backwards gives the product's own
+history. **Timeline** lists every task that named part of the model, oldest first,
+with what it touched. The product map takes **layers** over the same structure:
+
+| Layer | What it paints |
+|---|---|
+| Heat | how often work has touched each area |
+| Risk | what a change there would reach |
+| Ownership | who is accountable, as recorded in the model |
+| This change | where the task picked in Impact lands — solid where it changes something, faint where the change arrives on its own |
+
+None of it is declared. Heat is counted from real tasks, risk is walked from real
+links, and ownership is blank rather than guessed when the model does not say.
+
 ### 4. The checks get run for real, and a failure is not a `done`
 
 From [`skills/task-runner.md`](skills/task-runner.md):

@@ -2338,7 +2338,8 @@ function riskCeiling(m){
 }
 
 /* ---------------- Impact — what a piece of work changes, before it runs ---------------- */
-let impactPick = null;               // file name of the selected task
+let impactPick = null;               // file name of the selected task, or '__adhoc'
+let adhocIds = [];                   // objects picked by hand for a what-if estimate
 
 async function loadChanges(force){
   const p = selected; if(!p) return null;
@@ -2374,30 +2375,39 @@ async function renderImpact(view, m){
       'The <b>task-planner</b> skill writes a <code>Touches:</code> line with the ids a task will change — that line is what this view reads.</div>';
     return;
   }
-  if(!withIds.some(t=>t.file===impactPick)) impactPick = withIds[0].file;
+  if(impactPick!=='__adhoc' && !withIds.some(t=>t.file===impactPick)) impactPick = withIds[0].file;
 
   const rows = withIds.map(t=>{
     const br = blastRadius(t.ids, m);
     return { t, br, risk: riskOf(br, m) };
   });
+  const adhocRow = ()=>{
+    const br=blastRadius(adhocIds, m);
+    return { t:{file:'__adhoc', col:'', title:'What if we change…', ids:adhocIds, declared:true, approved:null, adhoc:true},
+             br, risk:riskOf(br,m) };
+  };
 
   let html='<div class="imp-wrap"><div class="imp-list">';
   html+='<div class="imp-list-h">'+withIds.length+' task(s) that name part of the model</div>';
+  html+='<button class="imp-item adhoc'+(impactPick==='__adhoc'?' on':'')+'" data-f="__adhoc">'+
+    '<span class="imp-col">what if</span><span class="imp-t">Estimate a change by hand</span></button>';
   for(const r of rows){
     html+='<button class="imp-item'+(r.t.file===impactPick?' on':'')+'" data-f="'+esc(r.t.file)+'">'+
       '<span class="imp-col '+esc(r.t.col)+'">'+esc(COL_LABEL[r.t.col]||r.t.col)+'</span>'+
       '<span class="imp-t">'+esc(r.t.title)+'</span>'+
+      (r.t.approved?'<span class="imp-ok" title="'+esc(r.t.approved)+'">✓</span>':'')+
       '<span class="imp-r '+r.risk.level+'">'+esc(r.risk.level)+'</span>'+
       '</button>';
   }
   html+='</div><div class="imp-detail" id="impDetail"></div></div>';
   view.innerHTML=html;
+  const pickRow=()=> impactPick==='__adhoc' ? adhocRow() : rows.find(r=>r.t.file===impactPick);
   view.querySelectorAll('.imp-item').forEach(b=>b.addEventListener('click',()=>{
     impactPick=b.dataset.f;
     view.querySelectorAll('.imp-item').forEach(x=>x.classList.toggle('on', x.dataset.f===impactPick));
-    drawImpactDetail(rows.find(r=>r.t.file===impactPick), m);
+    drawImpactDetail(pickRow(), m);
   }));
-  drawImpactDetail(rows.find(r=>r.t.file===impactPick), m);
+  drawImpactDetail(pickRow(), m);
 }
 
 function drawImpactDetail(row, m){
@@ -2417,14 +2427,19 @@ function drawImpactDetail(row, m){
     ['Modules',          br.modules.length, null],
   ];
   let h='<div class="imp-head"><div class="imp-title">'+esc(t.title)+'</div>'+
-    '<div class="imp-sub"><code>tasks/'+esc(t.col)+'/'+esc(t.file)+'</code> · '+
-    (t.declared
-      ? 'declared by the task on its <code>Touches:</code> line'
-      : 'inferred from every model id the task mentions — add a <code>Touches:</code> line for a deliberate one')+
+    '<div class="imp-sub">'+(t.adhoc
+      ? 'Pick the objects a change would touch and read the same analysis a queued task gets.'
+      : '<code>tasks/'+esc(t.col)+'/'+esc(t.file)+'</code> · '+(t.declared
+          ? 'declared by the task on its <code>Touches:</code> line'
+          : 'inferred from every model id the task mentions — add a <code>Touches:</code> line for a deliberate one'))+
     '</div></div>';
 
+  if(t.adhoc) h+='<div class="imp-sec">Objects</div>'+
+    '<input class="imp-search" id="impSearch" placeholder="Type a name — entity, function, endpoint, screen, event…" autocomplete="off">'+
+    '<div class="imp-sugg" id="impSugg"></div>';
   h+='<div class="imp-sec">Changes directly</div><div class="imp-chips">';
-  for(const id of br.seed) h+='<button class="imp-chip" data-id="'+esc(id)+'"><span class="k">'+esc(kindOf(id)||'')+'</span>'+esc(labelOf(id,m))+'</button>';
+  if(!br.seed.length) h+='<span class="imp-none">Nothing picked yet.</span>';
+  for(const id of br.seed) h+='<button class="imp-chip'+(t.adhoc?' rm':'')+'" data-id="'+esc(id)+'"><span class="k">'+esc(kindOf(id)||'')+'</span>'+esc(labelOf(id,m))+(t.adhoc?'<span class="x">✕</span>':'')+'</button>';
   h+='</div>';
 
   h+='<div class="imp-sec">Impact analysis <span class="imp-note">everything within '+br.hops+' hops of that, counted from the model’s own links</span></div>';
@@ -2457,14 +2472,34 @@ function drawImpactDetail(row, m){
       '<span class="steps">'+esc((p.steps||[]).map(s=>resolveRef(s.refKind,s.refId,m)).join(' → '))+'</span></div>';
     h+='</div>';
   }
-  h+='<div class="imp-actions"><button class="ghost imp-map">Show on map</button>'+
+  h+= t.adhoc ? '<div class="imp-actions"><button class="ghost imp-map">Show on map</button><button class="ghost imp-copy">Copy impact</button></div>'
+    : '<div class="imp-actions">'+
+     (t.approved
+       ? '<span class="imp-appr">Approved '+esc(t.approved)+'</span><button class="ghost imp-unappr">Withdraw</button>'
+       : '<button class="run imp-appr-b">Approve this change</button>')+
+     '<button class="ghost imp-map">Show on map</button>'+
      '<button class="ghost imp-copy">Copy impact</button>'+
-     '<button class="ghost imp-open">Open task file</button></div>';
+     '<button class="ghost imp-open">Open task file</button></div>'+
+     (t.approved?'':'<div class="imp-appr-h">Approving writes an <code>Approved:</code> line into the task file. It travels with the task and whoever runs it can see it — including Claude.</div>');
   box.innerHTML=h;
   box.querySelectorAll('.imp-chip[data-id]').forEach(b=>b.addEventListener('click',()=>{
     const id=b.dataset.id, k=kindOf(id);
+    // In a what-if the chip is the selection, so clicking removes it; elsewhere it opens.
+    if(t.adhoc){ adhocIds=adhocIds.filter(x=>x!==id); drawImpactDetail(Object.assign({},row,{br:blastRadius(adhocIds,m)}), m); redrawAdhoc(m); return; }
     if(['entity','function','route','event','frontend','module','process'].includes(k)) openContextPopup(k,id);
   }));
+  if(t.adhoc) wireAdhocSearch(m);
+  const setAppr=async(undo)=>{
+    try{
+      const r=await (await fetch('/api/task-approve',{method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({path:selected,col:t.col,file:t.file,undo:!!undo})})).json();
+      if(!r.ok){ toast('Could not write to the task file', true); return; }
+      t.approved=r.approved; changesData=null; drawImpactDetail(row,m); renderImpact(document.getElementById('modelView'),m);
+      toast(undo?'Approval withdrawn':'Approved ✓');
+    }catch{ toast('Could not write to the task file', true); }
+  };
+  const ab=box.querySelector('.imp-appr-b'); if(ab) ab.addEventListener('click',()=>setAppr(false));
+  const ub=box.querySelector('.imp-unappr'); if(ub) ub.addEventListener('click',()=>setAppr(true));
   const mp=box.querySelector('.imp-map');
   if(mp) mp.addEventListener('click',()=>{ mapLayer='change'; modelView='map'; renderModelNav(); renderModelView(); });
   const cp=box.querySelector('.imp-copy');
@@ -2771,4 +2806,33 @@ function objectFacts(kind, id, m){
       (hist.length>6?'<span class="of-h more">+'+(hist.length-6)+' more</span>':'')+'</span></div>';
   html+='</div>';
   return html;
+}
+
+// Searching the model by name so a change can be described before a task exists.
+function redrawAdhoc(m){
+  const br=blastRadius(adhocIds,m);
+  drawImpactDetail({ t:{file:'__adhoc',col:'',title:'What if we change…',ids:adhocIds,declared:true,approved:null,adhoc:true},
+    br, risk:riskOf(br,m) }, m);
+}
+function wireAdhocSearch(m){
+  const inp=document.getElementById('impSearch'), sug=document.getElementById('impSugg');
+  if(!inp||!sug) return;
+  const pool=[];
+  for(const [k,coll] of Object.entries(KIND_COLLECTION))
+    for(const o of (m[coll]||[])) if(o&&o.id) pool.push({id:o.id, k, label:labelOf(o.id,m)});
+  const draw=()=>{
+    const q=inp.value.trim().toLowerCase();
+    if(!q){ sug.innerHTML=''; return; }
+    const hits=pool.filter(x=>!adhocIds.includes(x.id) &&
+      (x.label.toLowerCase().includes(q)||x.id.toLowerCase().includes(q))).slice(0,12);
+    sug.innerHTML = hits.length
+      ? hits.map(x=>'<button class="imp-sg" data-id="'+esc(x.id)+'"><span class="k">'+esc(x.k)+'</span>'+esc(x.label)+'</button>').join('')
+      : '<span class="imp-none">Nothing in the model matches that.</span>';
+    sug.querySelectorAll('.imp-sg').forEach(b=>b.addEventListener('click',()=>{
+      adhocIds=adhocIds.concat([b.dataset.id]); inp.value=''; redrawAdhoc(m);
+      const again=document.getElementById('impSearch'); if(again) again.focus();
+    }));
+  };
+  inp.addEventListener('input', draw);
+  draw();
 }
