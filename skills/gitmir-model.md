@@ -107,16 +107,21 @@ strongly encouraged.
 
 ### Module — `modules.json`
 ```ts
-{ id, name, key?, description, parentId?: ID, icon?, order?: number }
+{ id, name, key?, description, parentId?: ID, icon?, order?: number,
+  owner?: string, paths?: string[] }
 ```
 The product's top-level areas (Orders, Billing, Analytics…). `parentId` nests
-sub-areas. `key` is a short stable slug.
+sub-areas. `key` is a short stable slug. `owner` is the team or person
+accountable for the area — write it only where the repo actually says so
+(CODEOWNERS, a README, a docs page), never a guess: the interface shows it as
+"ask them before changing this".
 
 ### Entity — `entities.json`
 ```ts
 { id, name, tableName, description, storage: "table"|"view"|"aggregate"|"external",
   serverUnitId: ID, moduleId?: ID, derivedFrom?: ID[], fields: Field[],
-  rowCount?: number, sampleRows?: object[] }
+  rowCount?: number, sampleRows?: object[],
+  sensitivity?: "high"|"normal", paths?: string[] }
 
 Field = { id, name, type: FieldType, isPrimary?, isNullable?, isUnique?,
           refEntityId?: ID, note? }
@@ -127,6 +132,11 @@ FieldType = "uuid"|"string"|"text"|"int"|"bigint"|"float"|"decimal"|"bool"
 service (set `derivedFrom` to the source entity ids); `external` = owned by
 another system. A foreign key is a Field with `type:"ref"` and `refEntityId`
 pointing at the target entity.
+
+Set `sensitivity: "high"` on entities holding money, payment details, credentials
+or personal data. It is the one risk input the graph cannot derive: touching
+`ent-order-total` and touching `ent-ui-preference` look identical as edges, and
+they are not the same change. Leave it off when the data is ordinary.
 
 Example:
 ```json
@@ -142,7 +152,7 @@ Example:
 ### ServerUnit — `serverUnits.json`
 ```ts
 { id, name, kind: ServerUnitKind, description, entityIds: ID[], dependsOn: ID[],
-  moduleId?: ID }
+  moduleId?: ID, paths?: string[] }
 ServerUnitKind = "service"|"controller"|"worker"|"gateway"|"integration"
                |"scheduler"|"auth"
 ```
@@ -154,7 +164,8 @@ serverUnits it calls.
 { id, name, serverUnitId: ID, operation: ServerOperation, description,
   routeId?: ID, moduleId?: ID,
   readsFieldIds: ID[], writesFieldIds: ID[], callsFunctionIds: ID[],
-  emitsEventIds: ID[], subscribesEventIds: ID[] }
+  emitsEventIds: ID[], subscribesEventIds: ID[],
+  roles?: string[], paths?: string[] }
 ServerOperation = "list"|"getById"|"create"|"update"|"delete"
                 |"business_action"|"resolver"|"subscriber"|"job"
 ```
@@ -175,14 +186,16 @@ Example:
 ### ApiRoute — `apiRoutes.json`
 ```ts
 { id, method: "GET"|"POST"|"PUT"|"PATCH"|"DELETE", path, name, description,
-  serverUnitId: ID, moduleId?: ID, auth: boolean }
+  serverUnitId: ID, moduleId?: ID, auth: boolean, roles?: string[], paths?: string[] }
 ```
-One per HTTP endpoint. `auth` = does it require authentication.
+One per HTTP endpoint. `auth` = does it require authentication; `roles` = which
+roles may call it, when the code checks a role and not just a session.
 
 ### FrontendUnit — `frontendUnits.json`
 ```ts
 { id, name, kind: FrontendUnitKind, description, consumesRouteIds: ID[],
   dependsOn: ID[], emitsEventIds?: ID[], subscribesEventIds?: ID[], moduleId?: ID,
+  paths?: string[],
   // per-screen data-flow tree (Layer 2, optional):
   nodeKind?: "container"|"array"|"element"|"algorithm", parentId?: ID,
   inputs?: { key, from? }[], outputs?: { key, isArray?, source? }[] }
@@ -204,7 +217,8 @@ event graph together across serverFunctions and frontendUnits.
 ### BusinessProcess — `processes.json`  (the "why" layer)
 ```ts
 { id, name, description, triggerKind: "ui"|"api"|"event"|"schedule",
-  triggerRefId?: ID, moduleId?: ID, steps: ProcessStep[] }
+  triggerRefId?: ID, moduleId?: ID, steps: ProcessStep[],
+  audience?: "customer"|"staff"|"system" }
 ProcessStep = { refKind: "function"|"route"|"event"|"entity"|"frontend",
                 refId: ID, note? }
 ```
@@ -212,6 +226,12 @@ An end-to-end flow told as an ordered list of steps, each pointing (by
 `refKind`+`refId`) at a real object already in the model. This is the layer that
 explains business intent — "checkout" as a path through functions, events and
 entities. `triggerRefId` points at what starts it (a route id, an event id…).
+
+`audience` separates the two kinds of flow that otherwise look alike: `customer`
+and `staff` processes are **user journeys** — a person moves through them, and
+breaking one is visible to that person — while `system` is machinery nobody
+walks through. Set it wherever you can tell; the interface lists journeys
+separately from internal flows.
 
 ### StatusFlow — `statusFlows.json`  (state machine + transition effects)
 ```ts
@@ -257,6 +277,15 @@ Rough mapping to look for:
 - **Status/enum columns with lifecycle logic** (`status`, `state`, `phase`) → `statusFlows`.
 - **Triggers, computed columns, `@computed`, recalculation logic, post-save hooks** → `reactions`.
 - **README / product docs / top-level folder names** → `modules` and their descriptions.
+- **The file each object was found in** → `paths` (repo-relative, e.g.
+  `src/orders/service.ts`). Record it as you go, while you have the file open —
+  it is free then and expensive to reconstruct later. Several paths are fine when
+  an object genuinely spans files; leave it off rather than guessing.
+- **CODEOWNERS, a team table in the README, `@owner` tags** → `owner` on the module.
+- **Role checks around a handler** (`requireRole("admin")`, guards, policies,
+  middleware) → `roles` on the route or function. Only what the code enforces.
+- **Money, payment details, credentials, personal data** → `sensitivity:"high"`
+  on that entity.
 
 Work top-down: identify modules → entities → server units → routes → frontend
 (Layer 1), then walk the operations to fill functions/events/processes/flows

@@ -32,6 +32,7 @@ Create `tasks/todo/NNN-<slug>.md` (zero-padded number prefix so they run in orde
     # <short task title>
 
     Type: build
+    Touches: ent-order, sf-refund-order, ev-order-refunded
 
     ## Context
     <the relevant slice of the product — pull it from `.gitmir/model/` if present:
@@ -44,6 +45,26 @@ Create `tasks/todo/NNN-<slug>.md` (zero-padded number prefix so they run in orde
 
     ## Verify
     <the numbered steps that prove it works — see below. MANDATORY.>
+
+## The `Touches:` line
+
+List the ids of the model objects **this task will change** — not everything it
+reads. One line, comma-separated, ids exactly as they appear in
+`.gitmir/model/*.json`. Omit the line only when the project has no model.
+
+This is what turns a queue into an impact estimate. Before the task runs, the
+interface walks those ids through the model and shows what else is downstream:
+which modules the change crosses, which processes and journeys run through it,
+which endpoints and screens sit on top, and what that scores as risk. Someone can
+then approve it — or split it — before any code is written.
+
+Get the distinction right: a task that reads `ent-user` to render a name and
+writes `ent-invoice` touches `ent-invoice`. Putting both in overstates the blast
+radius, and an inflated radius trains people to ignore it.
+
+Without the line the interface falls back to every model id mentioned anywhere in
+the file, and labels the result inferred. That is a worse estimate than one you
+write deliberately.
 
 ## Writing the `## Verify` section
 

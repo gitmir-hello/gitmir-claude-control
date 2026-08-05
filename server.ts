@@ -78,6 +78,62 @@ function stripFrontmatter(text: string): string {
   return text;
 }
 
+// ---------- model ids carried by tasks ----------
+// Model ids are prefixed per collection (ent-, sf-, ev-, …) — see the gitmir-model
+// skill. Matching on those prefixes is what lets a task name real objects in plain
+// text without a second file format to keep in sync.
+const MODEL_ID = /\b(?:mod|ent|f|su|sf|rt|fe|ev|proc|sfw|rx)-[a-z0-9][a-z0-9-]{0,60}\b/g;
+function idList(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const out: string[] = [];
+  for (const x of v.slice(0, 400)) {
+    const s = String(x == null ? '' : x).trim().slice(0, 80);
+    if (s && !out.includes(s)) out.push(s);
+  }
+  return out;
+}
+// Read the ids a task declares it will touch. Two spellings are accepted because
+// both read naturally in a task file: a `Touches:` line next to `Type:`, and a
+// `## Touches` section listing one id per bullet. Ids are only taken from those
+// places — the `## Context` section legitimately names ids the task merely reads,
+// and counting those as changes would inflate every blast radius.
+function parseTouches(text: string): string[] {
+  const lines = text.split('\n');
+  let picked = '';
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const inline = /^\s*touches\s*:\s*(.*)$/i.exec(line);
+    if (inline) {
+      picked += ' ' + inline[1];
+      for (let j = i + 1; j < lines.length && /^\s+\S/.test(lines[j]); j++) picked += ' ' + lines[j];
+      continue;
+    }
+    if (/^\s*#{1,6}\s*touches\b/i.test(line)) {
+      for (let j = i + 1; j < lines.length && !/^\s*#{1,6}\s/.test(lines[j]); j++) picked += ' ' + lines[j];
+    }
+  }
+  return idList(picked.match(MODEL_ID) || []);
+}
+
+// Every id the model actually defines, fields included. Used to throw away ids a
+// task mentions that the model does not know.
+function modelIdSet(dir: string): Set<string> {
+  const out = new Set<string>();
+  let files: string[] = [];
+  try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.json') && f !== 'index.json'); } catch { return out; }
+  for (const f of files) {
+    let arr: unknown;
+    try { arr = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch { continue; }
+    if (!Array.isArray(arr)) continue;
+    for (const o of arr as any[]) {
+      if (!o || typeof o !== 'object') continue;
+      if (typeof o.id === 'string') out.add(o.id);
+      if (Array.isArray(o.fields)) for (const fl of o.fields) if (fl && typeof fl.id === 'string') out.add(fl.id);
+    }
+  }
+  return out;
+}
+
 // ---------- osascript helpers ----------
 function osascript(script: string, args: string[] = []): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -976,6 +1032,62 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 404, { error: 'not found' });
       }
     }
+    // ---- what work touches which part of the product ----
+    // The model says how the product works today. On its own it cannot answer "what
+    // will this change" or "what has been changing lately", because nothing links a
+    // task to the objects it affects. This reads that link from two places: a
+    // `Touches:` line the planner writes into each task file (what a task intends to
+    // touch, before it runs) and a `touched` array in .claude/tasks.json (what a
+    // finished task actually touched). Everything downstream — blast radius, risk,
+    // the timeline, the heat map — is a view over these two lists.
+    if (req.method === 'GET' && url.pathname === '/api/changes') {
+      const p = url.searchParams.get('path') || '';
+      if (!p) return sendJSON(res, 400, { error: 'no path' });
+      // Only ids that exist in the model count. A task naming `sf-something-else`
+      // that was never modelled is a typo or a stale reference, and letting it
+      // through would put phantom nodes in the blast radius.
+      const known = modelIdSet(path.join(p, '.gitmir', 'model'));
+      const heat: Record<string, number> = {};
+      const tasks: { col: string; file: string; n: number; title: string; ids: string[]; declared: boolean; mtime: number }[] = [];
+      for (const col of ['todo', 'inprogress', 'verify', 'done']) {
+        const dir = path.join(p, 'tasks', col);
+        let files: string[] = [];
+        try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.md')).sort(); } catch { continue; }
+        for (const f of files.slice(0, 400)) {
+          let text = '';
+          try { text = fs.readFileSync(path.join(dir, f), 'utf8').slice(0, 60000); } catch { continue; }
+          const title = (text.split('\n').find((l) => l.trim()) || f).replace(/^#+\s*/, '').trim().slice(0, 160);
+          // A `Touches:` line is the task saying so itself. Without one, fall back to
+          // every model id the task mentions anywhere: the planner is told to write
+          // the slice of the product a task touches into `## Context`, so those ids
+          // are a statement of scope, not a coincidence — but say which it was.
+          const declaredIds = parseTouches(text).filter((i) => known.has(i));
+          const ids = declaredIds.length ? declaredIds
+            : idList(text.match(MODEL_ID) || []).filter((i) => known.has(i));
+          for (const i of ids) heat[i] = (heat[i] || 0) + 1;
+          let mtime = 0; try { mtime = fs.statSync(path.join(dir, f)).mtimeMs; } catch {}
+          tasks.push({ col, file: f, n: Number((/^(\d+)/.exec(f) || [])[1]) || 0, title, ids, declared: declaredIds.length > 0, mtime });
+        }
+      }
+      let history: { id: string; title: string; ts: string; status: string; touched: string[]; files: string[] }[] = [];
+      try {
+        const data = JSON.parse(fs.readFileSync(path.join(p, '.claude', 'tasks.json'), 'utf8'));
+        const arr = Array.isArray(data) ? data : (Array.isArray(data.tasks) ? data.tasks : []);
+        history = arr.slice(0, 1000).filter((t: unknown) => t && typeof t === 'object').map((t: any) => {
+          const touched = idList(t.touched).filter((i) => known.has(i));
+          for (const i of touched) heat[i] = (heat[i] || 0) + 1;
+          return {
+            id: String(t.id == null ? '' : t.id).slice(0, 40),
+            title: String(t.title == null ? '' : t.title).slice(0, 200),
+            ts: typeof t.ts === 'string' ? t.ts.slice(0, 40) : '',
+            status: String(t.status == null ? '' : t.status).slice(0, 20),
+            touched,
+            files: (Array.isArray(t.files) ? t.files : []).slice(0, 40).map((x: unknown) => String(x).slice(0, 200)),
+          };
+        });
+      } catch {}
+      return sendJSON(res, 200, { tasks, history, heat, knownIds: known.size });
+    }
     if (req.method === 'GET' && url.pathname === '/api/model') {
       const p = url.searchParams.get('path') || '';
       // `src` selects whose model to read: the project's own, or a teammate's
@@ -1671,6 +1783,136 @@ const HTML = /* html */ `<!doctype html>
   .sk-tile.done .sk-art{color:var(--c-ok); filter:drop-shadow(0 0 18px rgba(52,240,166,.7))}
   .sk-tile.done .sk-go{color:var(--c-ok)}
   .skills-empty{color:var(--ink-3); font-size:13px}
+
+  /* ---- layers over the product map ---- */
+  .lay-bar{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:0 0 14px}
+  .lay-l{font-family:var(--font-mono); font-size:10px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-3)}
+  .lay{font-family:var(--font-mono); font-size:11px; letter-spacing:.04em; padding:5px 11px; cursor:pointer;
+    background:transparent; color:var(--ink-2); border:1px solid var(--glass-brd); border-radius:0;
+    transition:color .15s ease, border-color .15s ease, background .15s ease}
+  .lay:hover{color:#fff; border-color:rgba(120,210,255,.4)}
+  .lay.on{color:#05070c; background:var(--cyan); border-color:var(--cyan); font-weight:600}
+  .lay-h{font-size:12px; color:var(--ink-3); margin-left:4px}
+
+  /* ---- impact ---- */
+  .imp-wrap{display:grid; grid-template-columns:minmax(230px,300px) 1fr; gap:20px; align-items:start}
+  @media (max-width:1000px){ .imp-wrap{grid-template-columns:1fr} }
+  .imp-list{border:1px solid var(--glass-brd); background:var(--l2-card); max-height:70vh; overflow:auto}
+  .imp-list-h{font-family:var(--font-mono); font-size:10px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--ink-3); padding:11px 13px; border-bottom:1px solid var(--glass-brd)}
+  .imp-item{display:flex; align-items:center; gap:8px; width:100%; text-align:left; padding:9px 13px; cursor:pointer;
+    background:transparent; border:0; border-bottom:1px solid rgba(120,210,255,.08); font-family:inherit; color:var(--ink-1)}
+  .imp-item:hover{background:rgba(47,216,255,.06)}
+  .imp-item.on{background:rgba(47,216,255,.12); color:#fff}
+  .imp-col{font-family:var(--font-mono); font-size:9px; letter-spacing:.08em; text-transform:uppercase;
+    padding:2px 5px; border:1px solid currentColor; color:var(--ink-3); flex:none}
+  .imp-col.todo{color:var(--c-api)} .imp-col.inprogress{color:var(--c-event)}
+  .imp-col.verify{color:var(--c-frontend)} .imp-col.done{color:var(--c-ok)}
+  .imp-t{flex:1; font-size:12.5px; line-height:1.35; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .imp-r{font-family:var(--font-mono); font-size:9px; letter-spacing:.08em; text-transform:uppercase; flex:none}
+  .imp-r.low{color:var(--c-ok)} .imp-r.medium{color:var(--c-warn)} .imp-r.high{color:var(--c-danger)}
+  .imp-detail{min-width:0}
+  .imp-head{margin-bottom:18px}
+  .imp-title{font-size:18px; font-weight:600; color:#fff; line-height:1.3}
+  .imp-sub{font-size:12px; color:var(--ink-3); margin-top:5px}
+  .imp-sec{font-family:var(--font-mono); font-size:10px; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--ink-3); margin:20px 0 10px; display:flex; align-items:baseline; gap:10px}
+  .imp-note{font-family:var(--font-body); font-size:11.5px; letter-spacing:0; text-transform:none; color:var(--ink-3)}
+  .imp-chips{display:flex; flex-wrap:wrap; gap:7px}
+  .imp-chip{display:inline-flex; align-items:center; gap:6px; font-family:var(--font-mono); font-size:11px;
+    padding:5px 9px; background:rgba(47,216,255,.08); border:1px solid rgba(47,216,255,.28); color:#dff4ff;
+    cursor:pointer; border-radius:0}
+  .imp-chip:hover{background:rgba(47,216,255,.18)}
+  .imp-chip .k{font-size:9px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-3)}
+  .imp-chip.mod{background:rgba(126,140,255,.1); border-color:rgba(126,140,255,.32); color:#cfd6ff; cursor:default}
+  .imp-chip .own{font-size:10px; color:var(--ink-3)}
+  .imp-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(124px,1fr)); gap:10px}
+  .imp-card{border:1px solid var(--glass-brd); background:var(--l2-card); padding:12px 13px}
+  .imp-n{font-family:var(--font-mono); font-size:24px; font-weight:700; color:#fff; line-height:1}
+  .imp-l{font-size:11.5px; color:var(--ink-2); margin-top:5px}
+  .imp-d{font-size:10.5px; color:var(--c-api); margin-top:3px}
+  .imp-risk{margin-top:22px; border:1px solid var(--glass-brd); background:var(--l2-card); padding:15px 16px}
+  .imp-risk.medium{border-color:rgba(255,184,107,.4)} .imp-risk.high{border-color:rgba(255,85,102,.5)}
+  .imp-risk-h{display:flex; align-items:baseline; gap:11px}
+  .imp-risk-l{font-family:var(--font-mono); font-size:10px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-3)}
+  .imp-risk-v{font-size:17px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--c-ok)}
+  .imp-risk.medium .imp-risk-v{color:var(--c-warn)} .imp-risk.high .imp-risk-v{color:var(--c-danger)}
+  .imp-risk-s{font-family:var(--font-mono); font-size:11px; color:var(--ink-3)}
+  .imp-risk-t{width:100%; border-collapse:collapse; margin-top:11px; font-size:12px}
+  .imp-risk-t td{padding:5px 10px 5px 0; border-top:1px solid rgba(120,210,255,.08); vertical-align:top}
+  .imp-risk-t td.n{font-family:var(--font-mono); color:#fff; white-space:nowrap}
+  .imp-risk-t td.l{color:var(--ink-1)}
+  .imp-risk-t td.w{color:var(--ink-3); font-size:11.5px}
+  .imp-risk-none{font-size:12px; color:var(--ink-3); margin-top:7px}
+  .imp-flows{display:flex; flex-direction:column; gap:8px}
+  .imp-flow{border-left:2px solid var(--glass-brd); padding:6px 0 6px 11px; font-size:12.5px; color:var(--ink-1)}
+  .imp-flow.j{border-left-color:var(--c-api)}
+  .imp-flow .tag{font-family:var(--font-mono); font-size:9px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--c-api); margin-left:8px}
+  .imp-flow .steps{display:block; font-family:var(--font-mono); font-size:11px; color:var(--ink-3); margin-top:4px}
+  .imp-actions{display:flex; gap:9px; margin-top:22px}
+
+  /* ---- timeline ---- */
+  .tl-head{font-size:12.5px; color:var(--ink-2); margin-bottom:16px; max-width:70ch; line-height:1.55}
+  .tl{display:flex; flex-direction:column}
+  .tl-row{display:grid; grid-template-columns:88px 1fr; gap:14px; padding:11px 0;
+    border-top:1px solid rgba(120,210,255,.1)}
+  .tl-when{font-family:var(--font-mono); font-size:11px; color:var(--ink-3); padding-top:2px}
+  .tl-row.log .tl-when{color:var(--c-ok)}
+  .tl-t{font-size:13px; color:var(--ink-1); line-height:1.4; display:flex; gap:9px; align-items:baseline}
+  .tl-st{font-family:var(--font-mono); font-size:9px; letter-spacing:.08em; text-transform:uppercase;
+    padding:1px 5px; border:1px solid currentColor; flex:none; color:var(--ink-3)}
+  .tl-st.todo{color:var(--c-api)} .tl-st.inprogress{color:var(--c-event)}
+  .tl-st.verify{color:var(--c-frontend)} .tl-st.done{color:var(--c-ok)}
+  .tl-ids{display:flex; flex-wrap:wrap; gap:5px; margin-top:7px}
+  .tl-id{font-family:var(--font-mono); font-size:10.5px; padding:2px 7px; cursor:pointer; border-radius:0;
+    background:rgba(47,216,255,.07); border:1px solid rgba(47,216,255,.22); color:#cfeaff}
+  .tl-id:hover{background:rgba(47,216,255,.18)}
+  .tl-more{font-family:var(--font-mono); font-size:10.5px; color:var(--ink-3); align-self:center}
+  .tl-files{font-family:var(--font-mono); font-size:10.5px; color:var(--ink-3); margin-top:6px}
+
+  /* ---- journeys ---- */
+  .jr-group{margin:26px 0 14px}
+  .jr-group:first-child{margin-top:0}
+  .jr-group-t{font-family:var(--font-mono); font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--cyan)}
+  .jr-group-h{font-size:12.5px; color:var(--ink-3); margin-top:5px}
+  .jr-trig{font-family:var(--font-mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--ink-3); margin-left:10px}
+  .jr-steps{width:100%; border-collapse:collapse; margin:10px 0 14px; font-size:12px}
+  .jr-steps th{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--ink-3); text-align:left; padding:0 10px 6px 0; font-weight:400}
+  .jr-steps td{padding:6px 10px 6px 0; border-top:1px solid rgba(120,210,255,.09); vertical-align:top; color:var(--ink-2)}
+  .jr-steps td.n{font-family:var(--font-mono); color:var(--ink-3); width:22px}
+  .jr-steps td.s b{color:#fff; font-weight:600}
+  .jr-steps td.s .note{display:block; font-size:11px; color:var(--ink-3); margin-top:2px}
+  .jr-steps td.k{font-family:var(--font-mono); font-size:10.5px; color:var(--ink-3)}
+  .jr-steps td.r code{font-family:var(--font-mono); font-size:11px; color:var(--c-api)}
+  .jr-steps td.e{color:var(--c-event); font-family:var(--font-mono); font-size:11px}
+
+  /* ---- the facts strip at the top of an object card ---- */
+  .of{display:flex; flex-direction:column; gap:1px; margin:0 0 14px; background:rgba(120,210,255,.1)}
+  .of-row{display:grid; grid-template-columns:96px 1fr; gap:12px; padding:9px 12px; background:var(--l2-card-2)}
+  .of-k{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.12em; text-transform:uppercase;
+    color:var(--ink-3); padding-top:2px}
+  .of-v{font-size:12.5px; color:var(--ink-1); line-height:1.5}
+  .of-v i{color:var(--ink-3); font-style:normal}
+  .of-v.sens{color:var(--c-warn)}
+  .of-r{display:inline-block; font-family:var(--font-mono); font-size:11px; color:var(--ink-2); margin:0 8px 4px 0;
+    padding:2px 8px; cursor:pointer; background:transparent; border:1px solid var(--glass-brd); border-radius:0}
+  .of-r:hover{border-color:rgba(120,210,255,.42); color:#fff}
+  .of-r.on{background:rgba(47,216,255,.14); border-color:rgba(47,216,255,.45); color:#fff}
+  .of-r b{color:#fff}
+  .of-exp{display:none; flex-wrap:wrap; gap:5px; margin:6px 0 2px}
+  .of-exp.on{display:flex}
+  .of-dep{font-family:var(--font-mono); font-size:10.5px; padding:2px 7px; cursor:pointer; border-radius:0;
+    background:rgba(47,216,255,.07); border:1px solid rgba(47,216,255,.22); color:#cfeaff}
+  .of-dep:hover{background:rgba(47,216,255,.2)}
+  .of-h{display:block; font-size:12px; color:var(--ink-2); margin-top:2px}
+  .of-h:first-child{margin-top:0}
+  .of-h i{font-family:var(--font-mono); font-size:10.5px; font-style:normal; color:var(--ink-3); margin-right:7px}
+  .of-h.more{color:var(--ink-3)}
+
+
 
 
   /* ---------- task log ---------- */

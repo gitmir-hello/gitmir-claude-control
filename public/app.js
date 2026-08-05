@@ -501,12 +501,26 @@ let modelSrc = null;   // null = this project's own model; otherwise a teammate'
 let mermaidReady = null;
 const MODEL_VIEWS = [
   {key:'map', label:'Product map'},
+  {key:'impact', label:'Impact'},
+  {key:'journeys', label:'Journeys'},
   {key:'logic', label:'Business logic'},
-  {key:'overview', label:'Overview'},
+  {key:'decisions', label:'Decisions'},
+  {key:'events', label:'Events'},
   {key:'er', label:'Data (ER)'},
   {key:'flow', label:'Data flow'},
-  {key:'processes', label:'Processes'},
+  {key:'timeline', label:'Timeline'},
+  {key:'overview', label:'Overview'},
 ];
+// Layers paint the product map with something other than its own structure: how much
+// each area has been changing, what a change there would cost, who to ask first.
+const MAP_LAYERS = [
+  {key:'none',  label:'Structure', hint:'The product as it is wired.'},
+  {key:'heat',  label:'Heat',      hint:'How often work has touched each area.'},
+  {key:'risk',  label:'Risk',      hint:'What a change in each area would reach.'},
+  {key:'owner', label:'Ownership', hint:'Who is accountable for each area.'},
+  {key:'change',label:'This change', hint:'Where the task picked in Impact lands.'},
+];
+let mapLayer='none';
 const EFF_RU={create:'create',update:'update',recalculate:'recalculate',sync:'sync',notify:'notify',link:'link',delete:'delete'};
 
 let elkReady=null;
@@ -592,8 +606,12 @@ function nodeSvg(n){
   const PAD=11;                      // right-hand breathing room inside the card
   const nameAvail = w - 14 - PAD - 13;   // 13px for the leading glyph + its space
   const subAvail  = w - 15 - PAD;
-  let inner='<rect x="0" y="0" width="'+w+'" height="'+h+'" rx="8" class="hcard" stroke="'+acc+'"/>'+
-            '<rect x="0" y="0" width="3" height="'+h+'" rx="1.5" fill="'+acc+'"/>';
+  let inner='<rect x="0" y="0" width="'+w+'" height="'+h+'" rx="8" class="hcard" stroke="'+acc+'"/>';
+  // A layer's intensity is painted as a wash across the card, so the reading is the
+  // picture rather than a number someone has to compare by eye.
+  if(typeof md.heat==='number' && md.heat>0)
+    inner+='<rect x="0" y="0" width="'+w+'" height="'+h+'" rx="8" fill="'+acc+'" opacity="'+(0.06+md.heat*0.3).toFixed(3)+'"/>';
+  inner+='<rect x="0" y="0" width="3" height="'+h+'" rx="1.5" fill="'+acc+'"/>';
   // Full text stays reachable on hover, so clipping never loses information.
   const full=[md.label, md.sub].filter(Boolean).join(' — ');
   if(full) inner+='<title>'+esc(full)+'</title>';
@@ -924,11 +942,17 @@ async function renderModelView(){
   const m=modelData.model;
   if(modelView==='logic') return renderLogic(view, m);
   if(modelView==='overview') return renderOverview(view, modelData);
-  if(modelView==='processes') return renderProcesses(view, m);
+  if(modelView==='journeys') return renderProcesses(view, m);
+  if(modelView==='impact') return renderImpact(view, m);
+  if(modelView==='timeline') return renderTimeline(view, m);
+  if(modelView==='decisions') return renderDecisions(view, m);
+  if(modelView==='events') return renderEvents(view, m);
   view.innerHTML='';
   const box=document.createElement('div'); view.appendChild(box);
   if(modelView==='map'){
     // This is the view shown to a client, so say what the picture means in their words.
+    const layerData = mapLayer==='none' ? null : await mapLayerData(m);
+    box.appendChild(mapLayerBar(layerData));
     const cap=document.createElement('div'); cap.className='map-cap';
     // No apostrophes in here on purpose: this string is emitted from a template literal.
     cap.innerHTML='Each block is an area of the product — what it owns (◆) and how much of it there is. '+
@@ -938,7 +962,7 @@ async function renderModelView(){
       '<span class="map-cap2">Read it together with whoever asked for the product: if a line is missing or points the wrong way, the understanding is wrong — and that is far cheaper to find now than after it is built.</span>';
     box.appendChild(cap);
     const d=document.createElement('div'); box.appendChild(d);
-    return renderElk(d, graphProductMap(m));
+    return renderElk(d, graphProductMap(m, layerData));
   }
   if(modelView==='er') return renderElk(box, graphER(m));
   if(modelView==='flow') return renderElk(box, graphFlow(m));
@@ -1051,6 +1075,7 @@ function openContextPopup(kind,id){
       '<div class="ctx-note">'+(modelSrc
         ? 'Deterministic context from the model shared by <b>'+esc(srcLabel())+'</b>. <b>Send to team</b> delivers it to <b>everyone currently online</b> in your workspace (the relay broadcasts — it cannot target one person), landing in their <code>tasks/todo/</code>. <b>Queue here</b> instead writes it into this local project.'
         : 'Deterministic context — assembled from the model by walking id-links. Paste into Claude, or turn it into a queued task.')+'</div>'+
+      objectFacts(kind, id, m)+
       '<pre class="ctx-pre">'+esc(ctx)+'</pre>'+
       // A shared view is read-only: it has no project on disk to queue into and no bridge
       // to send over. Copying context still works — that is the useful half for a reader.
@@ -1066,6 +1091,15 @@ function openContextPopup(kind,id){
       '</div>'+
     '</div>';
   ov.classList.add('show');
+  // Expanding a reach group, and stepping from here to any object it named.
+  ov.querySelectorAll('.of-r').forEach(b=>b.addEventListener('click',()=>{
+    const k=b.dataset.k, box=ov.querySelector('.of-exp[data-k="'+k+'"]');
+    const on=b.classList.toggle('on'); if(box) box.classList.toggle('on', on);
+  }));
+  ov.querySelectorAll('.of-dep').forEach(b=>b.addEventListener('click',()=>{
+    const nid=b.dataset.id, nk=kindOf(nid);
+    if(['entity','function','route','event','frontend','module','process'].includes(nk)){ close(); openContextPopup(nk,nid); }
+  }));
   const ta=ov.querySelector('.ctx-task');   // absent in a shared view — guarded below
   const CTXPRE='This is deterministic context extracted from the product information model — the GitMir multidimensional object model that lives in the .gitmir/ folder of this project. It maps how this element connects to the rest of the product (data, server logic, API, frontend, events, business processes, status flows, reactions) by stable ids. Use it to fully understand the context, so the task is carried out accurately and completely.';
   const withTask=()=> CTXPRE+'\n\n'+ctx + (ta && ta.value.trim()? '\n\n---\n## Task\n'+ta.value.trim() : '');
@@ -1288,7 +1322,7 @@ function renderOverview(view, d){
 // business areas and the lines between them. Everything here is aggregated up from the
 // fine-grained model — which module writes whose data, who notifies whom, who calls
 // whom — so it cannot drift from what the code actually does.
-function graphProductMap(m){
+function graphProductMap(m, layer){
   const mods=m.modules||[], ents=m.entities||[], sf=m.serverFunctions||[],
         fe=m.frontendUnits||[], ev=m.events||[], rt=m.apiRoutes||[];
   const owner=fieldOwner(m);
@@ -1319,10 +1353,15 @@ function graphProductMap(m){
     const meta=[]; if(b.screens) meta.push(b.screens+' screen'+(b.screens>1?'s':''));
     if(b.actions) meta.push(b.actions+' action'+(b.actions>1?'s':''));
     if(meta.length) lines.push('▤ '+meta.join(' · '));
+    // A layer replaces the area's own summary with what the layer measures. The
+    // structure stays identical — only the reading of it changes.
+    const lay = layer && layer.per.get(id);
+    if(lay) lines.unshift((layer.kind==='owner'?'☗ ':layer.kind==='heat'?'▮ ':'⚠ ')+lay.text);
     const W=272;
     const dl = b.desc ? wrapPx(b.desc, W-15-11, CW_MONO).slice(0,2) : [];
     const h = 32 + dl.length*SUB_LH + Math.max(1,lines.length)*18 + 10;
     nodes.push({id, w:W, h, meta:{kind:'module', label:modName(id), sub:b.desc, subLines:dl, fields:lines,
+      heat: lay ? lay.t : null,
       ref: id===OTHER?null:{k:'module', id}}});
   }
 
@@ -1397,22 +1436,64 @@ function graphFlow(m){
 }
 
 // ----- processes -----
+// Journeys and internal flows are the same object in the model and a different thing
+// to a reader: one is a path a person walks, the other is machinery. Journeys come
+// first, and every step says what it actually runs — the endpoint, the data it moves,
+// the events it raises — because "step 4 of checkout" is only useful with that under it.
 async function renderProcesses(view, m){
   const procs=m.processes||[];
   if(!procs.length){ view.innerHTML='<div class="model-empty">No business processes in the model.</div>'; return; }
   view.innerHTML='';
-  // ELK layout is async, so a source/project switch can land mid-loop. Bail out
-  // rather than grafting this model's diagrams onto the newly loaded one's pane.
+  const journeys=procs.filter(isJourney), internal=procs.filter(p=>!isJourney(p));
   const mine=modelReq;
-  for(const p of procs){
-    if(mine!==modelReq || !view.isConnected) return;
-    const block=document.createElement('div'); block.className='proc-block';
-    block.innerHTML='<div class="proc-title">'+esc(p.name||p.id)+'</div>'+
-      (p.description?'<div class="proc-desc">'+esc(p.description)+'</div>':'')+
-      '<div class="proc-diagram"></div>';
-    view.appendChild(block);
-    await renderElk(block.querySelector('.proc-diagram'), graphProcess(p, m));
+  for(const [group,list,hint] of [
+    ['User journeys', journeys, 'A person moves through these. If one breaks, they see it.'],
+    ['Internal flows', internal, 'Machinery — triggered by an event, a schedule or another service.'],
+  ]){
+    if(!list.length) continue;
+    const head=document.createElement('div'); head.className='jr-group';
+    head.innerHTML='<div class="jr-group-t">'+esc(group)+'</div><div class="jr-group-h">'+esc(hint)+'</div>';
+    view.appendChild(head);
+    for(const p of list){
+      if(mine!==modelReq || !view.isConnected) return;
+      const block=document.createElement('div'); block.className='proc-block';
+      block.innerHTML='<div class="proc-title">'+esc(p.name||p.id)+
+          '<span class="jr-trig">'+esc(p.triggerKind||'')+(p.audience?' · '+esc(p.audience):'')+'</span></div>'+
+        (p.description?'<div class="proc-desc">'+esc(p.description)+'</div>':'')+
+        journeyStepsHtml(p, m)+
+        '<div class="proc-diagram"></div>';
+      view.appendChild(block);
+      await renderElk(block.querySelector('.proc-diagram'), graphProcess(p, m));
+    }
   }
+}
+
+// One row per step: what it is, where it lives, and what it moves.
+function journeyStepsHtml(p, m){
+  const steps=p.steps||[]; if(!steps.length) return '';
+  const owner=fieldOwner(m);
+  let h='<table class="jr-steps"><thead><tr><th></th><th>Step</th><th>Kind</th><th>Endpoint</th><th>Data</th><th>Events</th></tr></thead><tbody>';
+  steps.forEach((s,i)=>{
+    const o=objById(s.refId,m)||{};
+    let route='', data='', evs='';
+    if(s.refKind==='function'){
+      const rt=o.routeId&&objById(o.routeId,m); if(rt) route=(rt.method||'')+' '+(rt.path||'');
+      const wr=[...new Set((o.writesFieldIds||[]).map(f=>owner.get(f)).filter(Boolean))].map(id=>labelOf(id,m));
+      const rd=[...new Set((o.readsFieldIds||[]).map(f=>owner.get(f)).filter(Boolean))].map(id=>labelOf(id,m));
+      data=[wr.length?'writes '+wr.join(', '):'', rd.length?'reads '+rd.join(', '):''].filter(Boolean).join(' · ');
+      evs=(o.emitsEventIds||[]).map(id=>labelOf(id,m)).join(', ');
+    } else if(s.refKind==='route'){ route=(o.method||'')+' '+(o.path||''); }
+    else if(s.refKind==='frontend'){ route=(o.consumesRouteIds||[]).map(id=>labelOf(id,m)).join(', '); }
+    else if(s.refKind==='entity'){ data=(o.fields||[]).length+' fields'; }
+    h+='<tr data-k="'+esc(s.refKind)+'" data-id="'+esc(s.refId)+'">'+
+      '<td class="n">'+(i+1)+'</td>'+
+      '<td class="s"><b>'+esc(resolveRef(s.refKind,s.refId,m))+'</b>'+(s.note?'<span class="note">'+esc(s.note)+'</span>':'')+'</td>'+
+      '<td class="k">'+esc(s.refKind)+'</td>'+
+      '<td class="r"><code>'+esc(route)+'</code></td>'+
+      '<td class="d">'+esc(data)+'</td>'+
+      '<td class="e">'+esc(evs)+'</td></tr>';
+  });
+  return h+'</tbody></table>';
 }
 
 // ----- business logic (entity-centric) -----
@@ -2096,3 +2177,598 @@ else {
   setInterval(teamPoll, 3500);
 }
 
+
+/* =========================================================================
+   Change reach — what a piece of work touches, and what that reaches.
+
+   The model says how the product works now. It cannot, on its own, answer
+   "what will this change break", because that question is about a proposed
+   change and the model has no notion of one. These functions supply it: a
+   task names the objects it will touch, and the graph says what sits
+   downstream of those objects.
+   ========================================================================= */
+
+let changesData = null;              // {tasks, history, heat, knownIds}
+let changesFor  = null;              // the project path changesData belongs to
+
+const KIND_BY_PREFIX = { mod:'module', ent:'entity', f:'field', su:'serverUnit', sf:'function',
+  sfw:'statusFlow', rt:'route', fe:'frontend', ev:'event', proc:'process', rx:'reaction' };
+function kindOf(id){ return KIND_BY_PREFIX[String(id||'').split('-')[0]] || null; }
+
+const KIND_COLLECTION = { module:'modules', entity:'entities', serverUnit:'serverUnits',
+  function:'serverFunctions', route:'apiRoutes', frontend:'frontendUnits', event:'events',
+  process:'processes', statusFlow:'statusFlows', reaction:'reactions' };
+function objById(id, m){
+  const k=kindOf(id); if(!k) return null;
+  if(k==='field'){ for(const e of (m.entities||[])) for(const f of (e.fields||[])) if(f.id===id) return f; return null; }
+  return ((m[KIND_COLLECTION[k]]||[]).find(x=>x.id===id))||null;
+}
+function labelOf(id, m){ const o=objById(id,m); if(!o) return id;
+  if(kindOf(id)==='route') return ((o.method||'')+' '+(o.path||o.name||'')).trim();
+  return o.name||o.id; }
+function moduleOf(id, m){
+  const o=objById(id,m); if(!o) return null;
+  if(kindOf(id)==='module') return id;
+  if(o.moduleId) return o.moduleId;
+  // Not every object carries moduleId; fall back to the unit or entity that does.
+  if(o.serverUnitId){ const su=objById(o.serverUnitId,m); if(su&&su.moduleId) return su.moduleId; }
+  if(kindOf(id)==='statusFlow'&&o.entityId){ const e=objById(o.entityId,m); if(e&&e.moduleId) return e.moduleId; }
+  return null;
+}
+
+// Adjacency where an edge a → b reads "if a changes, b is affected". Direction
+// matters: a function that WRITES an entity reaches it, one that only READS it
+// does not — but a change to the entity reaches every reader.
+function reachIndex(m){
+  const adj=new Map();
+  const add=(a,b)=>{ if(!a||!b||a===b) return; if(!adj.has(a)) adj.set(a,new Set()); adj.get(a).add(b); };
+  const owner=fieldOwner(m);
+  for(const [fid,eid] of owner){ add(fid,eid); add(eid,fid); }
+  for(const e of (m.entities||[])){
+    for(const f of (e.fields||[])) if(f.type==='ref'&&f.refEntityId) add(f.refEntityId, e.id);
+    for(const src of (e.derivedFrom||[])) add(src, e.id);
+  }
+  for(const fl of (m.statusFlows||[])){
+    if(fl.entityId){ add(fl.entityId, fl.id); add(fl.id, fl.entityId); }
+    for(const t of (fl.transitions||[])) for(const ef of (t.effects||[])) if(ef.entityId) add(fl.id, ef.entityId);
+  }
+  for(const r of (m.reactions||[])){
+    if(r.trigger&&r.trigger.entityId) add(r.trigger.entityId, r.id);
+    for(const ef of (r.effects||[])) if(ef.entityId) add(r.id, ef.entityId);
+  }
+  for(const f of (m.serverFunctions||[])){
+    for(const fid of (f.writesFieldIds||[])){ const e=owner.get(fid); if(e) add(f.id,e); }
+    for(const fid of (f.readsFieldIds||[])){ const e=owner.get(fid); if(e) add(e,f.id); }
+    for(const c of (f.callsFunctionIds||[])) add(c, f.id);      // callee changes → caller affected
+    for(const ev of (f.emitsEventIds||[])) add(f.id, ev);
+    for(const ev of (f.subscribesEventIds||[])) add(ev, f.id);
+    if(f.routeId){ add(f.id, f.routeId); add(f.routeId, f.id); }
+    if(f.serverUnitId) add(f.serverUnitId, f.id);
+  }
+  for(const fe of (m.frontendUnits||[])){
+    for(const rid of (fe.consumesRouteIds||[])) add(rid, fe.id);
+    for(const d of (fe.dependsOn||[])) add(d, fe.id);
+    for(const ev of (fe.subscribesEventIds||[])) add(ev, fe.id);
+    for(const ev of (fe.emitsEventIds||[])) add(fe.id, ev);
+  }
+  for(const su of (m.serverUnits||[])){
+    for(const eid of (su.entityIds||[])) add(su.id, eid);
+    for(const d of (su.dependsOn||[])) add(d, su.id);
+  }
+  for(const p of (m.processes||[])) for(const s of (p.steps||[])) if(s.refId) add(s.refId, p.id);
+  return adj;
+}
+
+// Everything within `hops` of the seed, with the distance kept so the interface can
+// show "directly changed" apart from "downstream of it". Unbounded reach on a
+// connected product is just the whole product, which tells nobody anything.
+function blastRadius(seedIds, m, hops){
+  hops = hops==null ? 2 : hops;
+  const adj = reachIndex(m);
+  const seed = seedIds.filter(id=>objById(id,m));
+  const dist = new Map(seed.map(id=>[id,0]));
+  let front = seed.slice();
+  for(let h=1; h<=hops && front.length; h++){
+    const next=[];
+    for(const id of front) for(const nb of (adj.get(id)||[])) if(!dist.has(nb)){ dist.set(nb,h); next.push(nb); }
+    front=next;
+  }
+  const byKind={};
+  for(const [id,d] of dist){ const k=kindOf(id); if(!k) continue; (byKind[k]=byKind[k]||[]).push({id,d}); }
+  for(const k of Object.keys(byKind)) byKind[k].sort((a,b)=>a.d-b.d || a.id.localeCompare(b.id));
+  const modules=new Set();
+  for(const id of dist.keys()){ const md=moduleOf(id,m); if(md) modules.add(md); }
+  return { seed, dist, byKind, modules:[...modules], hops };
+}
+
+// A journey is a process a person walks through. `audience` says so when the model
+// records it; before that field existed a ui-triggered process meant the same thing.
+function isJourney(p){
+  if(p.audience) return p.audience==='customer'||p.audience==='staff';
+  return p.triggerKind==='ui';
+}
+
+// Risk, shown as its own arithmetic. A single number nobody can check is a number
+// nobody trusts, so every component is listed with what it counted.
+function riskOf(br, m){
+  const got=k=>(br.byKind[k]||[]).map(x=>x.id);
+  const procs=got('process').map(id=>objById(id,m)).filter(Boolean);
+  const journeys=procs.filter(isJourney);
+  const sensitive=got('entity').map(id=>objById(id,m)).filter(e=>e&&e.sensitivity==='high');
+  const callers=(br.byKind.function||[]).filter(x=>x.d>0).length;
+  const parts=[
+    { k:'modules',   n:Math.max(0,br.modules.length-1), w:2, l:'module boundaries crossed',
+      why:'a change inside one area is a smaller thing than one that spans several' },
+    { k:'journeys',  n:journeys.length, w:3, l:'user journeys affected',
+      why:'someone walks through these — breaking one is visible to them' },
+    { k:'processes', n:procs.length-journeys.length, w:1, l:'internal processes affected',
+      why:'machinery that runs behind the product' },
+    { k:'lifecycle', n:got('statusFlow').length, w:3, l:'lifecycles touched',
+      why:'state machines carry effects that fire on every transition' },
+    { k:'sensitive', n:sensitive.length, w:4, l:'sensitive data reached',
+      why:'money, credentials or personal data — marked in the model, not guessed' },
+    { k:'routes',    n:got('route').length, w:1, l:'API endpoints in reach',
+      why:'each one is a contract something outside already depends on' },
+    { k:'screens',   n:got('frontend').length, w:1, l:'screens in reach',
+      why:'what a user would see change' },
+    { k:'callers',   n:callers, w:1, l:'other functions downstream',
+      why:'code that runs through the changed part' },
+  ].filter(p=>p.n>0);
+  const score=parts.reduce((s,p)=>s+p.n*p.w,0);
+  // A raw point score is not comparable between a nine-module product and a ninety-one
+  // module one: the same number means "most of it" in the first and "a corner" in the
+  // second. Divide by what the whole product would score, and the level becomes a share
+  // of the product a change reaches — the same reading in every project.
+  const max=riskCeiling(m);
+  const share = max ? score/max : 0;
+  const level = share>=0.25 ? 'high' : share>=0.08 ? 'medium' : 'low';
+  return { parts, score, max, share, level };
+}
+
+// What the whole product would score if a change reached every part of it.
+function riskCeiling(m){
+  const procs=m.processes||[], journeys=procs.filter(isJourney);
+  const tot={ modules:Math.max(0,(m.modules||[]).length-1), journeys:journeys.length,
+    processes:procs.length-journeys.length, lifecycle:(m.statusFlows||[]).length,
+    sensitive:(m.entities||[]).filter(e=>e&&e.sensitivity==='high').length,
+    routes:(m.apiRoutes||[]).length, screens:(m.frontendUnits||[]).length,
+    callers:Math.max(0,(m.serverFunctions||[]).length-1) };
+  const W={modules:2,journeys:3,processes:1,lifecycle:3,sensitive:4,routes:1,screens:1,callers:1};
+  return Object.keys(W).reduce((s,k)=>s+tot[k]*W[k],0);
+}
+
+/* ---------------- Impact — what a piece of work changes, before it runs ---------------- */
+let impactPick = null;               // file name of the selected task
+
+async function loadChanges(force){
+  const p = selected; if(!p) return null;
+  if(!force && changesData && changesFor===p) return changesData;
+  try{
+    const r = await fetch('/api/changes?path='+encodeURIComponent(p));
+    changesData = await r.json(); changesFor = p;
+  }catch{ changesData=null; }
+  return changesData;
+}
+
+const COL_LABEL = { todo:'todo', inprogress:'running', verify:'verify', done:'done' };
+
+async function renderImpact(view, m){
+  // A shared model is a snapshot of someone else's product; their task queue does not
+  // travel with it, so there is nothing to compute a radius over.
+  if(modelSrc){ view.innerHTML='<div class="model-empty">Impact is computed from this project’s own task queue. Switch the source back to your model to see it.</div>'; return; }
+  // With no model there is nothing to compute a radius against, and saying "write a
+  // Touches: line" would send someone to fix the wrong thing.
+  if(!(m.modules||[]).length && !(m.entities||[]).length && !(m.serverFunctions||[]).length){
+    view.innerHTML='<div class="model-empty">There is no model for this project yet. Build one with the <b>gitmir-model</b> skill — impact is measured against it.</div>';
+    return;
+  }
+  view.innerHTML='<div class="model-empty">Reading the queue…</div>';
+  const ch = await loadChanges(true);
+  if(!ch || !ch.tasks || !ch.tasks.length){
+    view.innerHTML='<div class="model-empty">No tasks in <code>tasks/</code> yet. Plan some with the <b>task-planner</b> skill and this fills in.</div>';
+    return;
+  }
+  const withIds = ch.tasks.filter(t=>t.ids.length);
+  if(!withIds.length){
+    view.innerHTML='<div class="model-empty">'+ch.tasks.length+' task(s), none of them naming an object from the model. '+
+      'The <b>task-planner</b> skill writes a <code>Touches:</code> line with the ids a task will change — that line is what this view reads.</div>';
+    return;
+  }
+  if(!withIds.some(t=>t.file===impactPick)) impactPick = withIds[0].file;
+
+  const rows = withIds.map(t=>{
+    const br = blastRadius(t.ids, m);
+    return { t, br, risk: riskOf(br, m) };
+  });
+
+  let html='<div class="imp-wrap"><div class="imp-list">';
+  html+='<div class="imp-list-h">'+withIds.length+' task(s) that name part of the model</div>';
+  for(const r of rows){
+    html+='<button class="imp-item'+(r.t.file===impactPick?' on':'')+'" data-f="'+esc(r.t.file)+'">'+
+      '<span class="imp-col '+esc(r.t.col)+'">'+esc(COL_LABEL[r.t.col]||r.t.col)+'</span>'+
+      '<span class="imp-t">'+esc(r.t.title)+'</span>'+
+      '<span class="imp-r '+r.risk.level+'">'+esc(r.risk.level)+'</span>'+
+      '</button>';
+  }
+  html+='</div><div class="imp-detail" id="impDetail"></div></div>';
+  view.innerHTML=html;
+  view.querySelectorAll('.imp-item').forEach(b=>b.addEventListener('click',()=>{
+    impactPick=b.dataset.f;
+    view.querySelectorAll('.imp-item').forEach(x=>x.classList.toggle('on', x.dataset.f===impactPick));
+    drawImpactDetail(rows.find(r=>r.t.file===impactPick), m);
+  }));
+  drawImpactDetail(rows.find(r=>r.t.file===impactPick), m);
+}
+
+function drawImpactDetail(row, m){
+  const box=document.getElementById('impDetail'); if(!box||!row) return;
+  const { t, br, risk } = row;
+  const got=k=>(br.byKind[k]||[]);
+  const direct=k=>got(k).filter(x=>x.d===0).length;
+  const states=got('statusFlow').reduce((s,x)=>{ const fl=objById(x.id,m); return s+((fl&&fl.states||[]).length); },0);
+  const cards=[
+    ['Business objects', got('entity').length, direct('entity')],
+    ['Methods',          got('function').length, direct('function')],
+    ['Events',           got('event').length, direct('event')],
+    ['States',           states, null],
+    ['API endpoints',    got('route').length, direct('route')],
+    ['Screens',          got('frontend').length, direct('frontend')],
+    ['Journeys',         got('process').map(x=>objById(x.id,m)).filter(p=>p&&isJourney(p)).length, null],
+    ['Modules',          br.modules.length, null],
+  ];
+  let h='<div class="imp-head"><div class="imp-title">'+esc(t.title)+'</div>'+
+    '<div class="imp-sub"><code>tasks/'+esc(t.col)+'/'+esc(t.file)+'</code> · '+
+    (t.declared
+      ? 'declared by the task on its <code>Touches:</code> line'
+      : 'inferred from every model id the task mentions — add a <code>Touches:</code> line for a deliberate one')+
+    '</div></div>';
+
+  h+='<div class="imp-sec">Changes directly</div><div class="imp-chips">';
+  for(const id of br.seed) h+='<button class="imp-chip" data-id="'+esc(id)+'"><span class="k">'+esc(kindOf(id)||'')+'</span>'+esc(labelOf(id,m))+'</button>';
+  h+='</div>';
+
+  h+='<div class="imp-sec">Impact analysis <span class="imp-note">everything within '+br.hops+' hops of that, counted from the model’s own links</span></div>';
+  h+='<div class="imp-grid">';
+  for(const [l,n,d] of cards) h+='<div class="imp-card"><div class="imp-n">'+n+'</div><div class="imp-l">'+esc(l)+'</div>'+
+    (d!=null&&d>0&&d<n?'<div class="imp-d">'+d+' directly</div>':'')+'</div>';
+  h+='</div>';
+
+  h+='<div class="imp-risk '+risk.level+'"><div class="imp-risk-h"><span class="imp-risk-l">Business risk</span>'+
+     '<span class="imp-risk-v">'+esc(risk.level)+'</span>'+
+     '<span class="imp-risk-s">reaches '+Math.round(risk.share*100)+'% of the product · '+risk.score+' of '+risk.max+' points</span></div>';
+  if(risk.parts.length){
+    h+='<table class="imp-risk-t"><tbody>';
+    for(const p of risk.parts) h+='<tr><td class="n">'+p.n+' × '+p.w+'</td><td class="l">'+esc(p.l)+'</td><td class="w">'+esc(p.why)+'</td></tr>';
+    h+='</tbody></table>';
+  } else h+='<div class="imp-risk-none">Nothing downstream of what this touches.</div>';
+  h+='</div>';
+
+  const mods=br.modules.map(id=>objById(id,m)).filter(Boolean);
+  if(mods.length){
+    h+='<div class="imp-sec">Areas affected</div><div class="imp-chips">';
+    for(const md of mods) h+='<span class="imp-chip mod">'+esc(md.name||md.id)+(md.owner?'<span class="own">'+esc(md.owner)+'</span>':'')+'</span>';
+    h+='</div>';
+  }
+  const procs=got('process').map(x=>objById(x.id,m)).filter(Boolean);
+  if(procs.length){
+    h+='<div class="imp-sec">Flows that run through it</div><div class="imp-flows">';
+    for(const p of procs) h+='<div class="imp-flow'+(isJourney(p)?' j':'')+'"><b>'+esc(p.name||p.id)+'</b>'+
+      (isJourney(p)?'<span class="tag">journey</span>':'')+
+      '<span class="steps">'+esc((p.steps||[]).map(s=>resolveRef(s.refKind,s.refId,m)).join(' → '))+'</span></div>';
+    h+='</div>';
+  }
+  h+='<div class="imp-actions"><button class="ghost imp-map">Show on map</button>'+
+     '<button class="ghost imp-copy">Copy impact</button>'+
+     '<button class="ghost imp-open">Open task file</button></div>';
+  box.innerHTML=h;
+  box.querySelectorAll('.imp-chip[data-id]').forEach(b=>b.addEventListener('click',()=>{
+    const id=b.dataset.id, k=kindOf(id);
+    if(['entity','function','route','event','frontend','module','process'].includes(k)) openContextPopup(k,id);
+  }));
+  const mp=box.querySelector('.imp-map');
+  if(mp) mp.addEventListener('click',()=>{ mapLayer='change'; modelView='map'; renderModelNav(); renderModelView(); });
+  const cp=box.querySelector('.imp-copy');
+  if(cp) cp.addEventListener('click',()=>{ copyToClipboard(impactText(row,m)); cp.textContent='Copied'; setTimeout(()=>cp.textContent='Copy impact',1200); });
+  const op=box.querySelector('.imp-open');
+  if(op) op.addEventListener('click',()=>openTaskPopup(selected,t.col,t.file));
+}
+
+function impactText(row, m){
+  const { t, br, risk }=row; const L=[];
+  L.push('# Impact — '+t.title);
+  L.push('task: tasks/'+t.col+'/'+t.file+(t.declared?' (Touches: declared)':' (inferred from mentions)'));
+  L.push('');
+  L.push('## Changes directly');
+  for(const id of br.seed) L.push('- '+labelOf(id,m)+'  ('+kindOf(id)+', '+id+')');
+  const grp=[['entity','Business objects'],['function','Methods'],['event','Events'],
+    ['route','API endpoints'],['frontend','Screens'],['statusFlow','Lifecycles'],['process','Flows']];
+  L.push(''); L.push('## Within '+br.hops+' hops');
+  for(const [k,l] of grp){ const a=(br.byKind[k]||[]).filter(x=>x.d>0); if(a.length) L.push('- '+l+': '+a.map(x=>labelOf(x.id,m)).join(', ')); }
+  L.push(''); L.push('## Areas: '+br.modules.map(id=>labelOf(id,m)).join(', '));
+  L.push(''); L.push('## Business risk: '+risk.level+' — reaches '+Math.round(risk.share*100)+'% of the product ('+risk.score+' of '+risk.max+' points)');
+  for(const p of risk.parts) L.push('- '+p.n+' × '+p.w+'  '+p.l);
+  return L.join('\n');
+}
+
+/* ---------------- Timeline — the product changing, in the order it changed ---------------- */
+async function renderTimeline(view, m){
+  if(modelSrc){ view.innerHTML='<div class="model-empty">The timeline is built from this project’s own queue and task log.</div>'; return; }
+  view.innerHTML='<div class="model-empty">Reading the record…</div>';
+  const ch=await loadChanges(true);
+  if(!ch){ view.innerHTML='<div class="model-empty">Could not read the task record.</div>'; return; }
+  // Two records exist and they answer different questions: the queue is the plan
+  // (ordered by task number), the log is what actually happened (stamped with a time).
+  // Show them as one column, log entries carrying their date.
+  const items=[];
+  for(const h of (ch.history||[])) items.push({ kind:'log', at:h.ts||'', title:h.title, ids:h.touched||[], files:h.files||[], status:h.status });
+  for(const t of (ch.tasks||[])) items.push({ kind:'task', at:'', n:t.n, col:t.col, title:t.title, ids:t.ids, file:t.file });
+  if(!items.length){ view.innerHTML='<div class="model-empty">Nothing recorded yet — no tasks in <code>tasks/</code> and no <code>.claude/tasks.json</code>.</div>'; return; }
+  const done=items.filter(i=>i.kind==='log'||i.col==='done');
+  const rest=items.filter(i=>!(i.kind==='log'||i.col==='done'));
+  done.sort((a,b)=> String(a.at).localeCompare(String(b.at)) || (a.n||0)-(b.n||0));
+  rest.sort((a,b)=> (a.n||0)-(b.n||0));
+  const seq=done.concat(rest);
+
+  let h='<div class="tl-head">Every task that named part of the model, oldest first. '+
+    'The bar under each one is what it touched — click a chip to open that object.</div><div class="tl">';
+  for(const it of seq){
+    const when = it.at ? esc(String(it.at).slice(0,10)) : (it.n?('#'+String(it.n).padStart(3,'0')):'—');
+    const state = it.kind==='log' ? (it.status||'log') : (COL_LABEL[it.col]||it.col);
+    h+='<div class="tl-row'+(it.kind==='log'?' log':'')+'">'+
+      '<div class="tl-when">'+when+'</div>'+
+      '<div class="tl-body"><div class="tl-t"><span class="tl-st '+esc(it.kind==='log'?'done':it.col)+'">'+esc(state)+'</span>'+esc(it.title)+'</div>';
+    if(it.ids.length){
+      h+='<div class="tl-ids">';
+      for(const id of it.ids.slice(0,14)) h+='<button class="tl-id" data-id="'+esc(id)+'">'+esc(labelOf(id,m))+'</button>';
+      if(it.ids.length>14) h+='<span class="tl-more">+'+(it.ids.length-14)+'</span>';
+      h+='</div>';
+    } else if(it.files && it.files.length){
+      h+='<div class="tl-files">'+esc(it.files.slice(0,6).join(' · '))+'</div>';
+    }
+    h+='</div></div>';
+  }
+  h+='</div>';
+  view.innerHTML=h;
+  view.querySelectorAll('.tl-id').forEach(b=>b.addEventListener('click',()=>{
+    const id=b.dataset.id, k=kindOf(id);
+    if(['entity','function','route','event','frontend','module','process'].includes(k)) openContextPopup(k,id);
+  }));
+}
+
+/* ---------------- Events — what happens, and what happens next ---------------- */
+// An event graph is not a list of events. The useful shape is the chain: something
+// raises OrderPaid, a handler reacts and raises InventoryReserved, and so on. That
+// chain exists in the model as emits/subscribes and is drawn here by following it.
+function graphEvents(m){
+  const evs=m.events||[], fns=(m.serverFunctions||[]).concat(m.frontendUnits||[]);
+  const nodes=[], edges=[], have=new Set();
+  const put=(id,w,h,meta)=>{ if(have.has(id)) return; have.add(id); nodes.push({id,w,h,meta}); };
+  for(const ev of evs){
+    const sub=ev.description?String(ev.description):'';
+    const W=200, L=sub?wrapPx(sub, W-15-11, CW_MONO):[];
+    put('ev_'+mSafe(ev.id), W, L.length?subH(L.length):40,
+      {kind:'event', label:ev.name||ev.id, sub, subLines:L, ref:{k:'event',id:ev.id}});
+  }
+  for(const f of fns){
+    const subs=(f.subscribesEventIds||[]).filter(id=>have.has('ev_'+mSafe(id)));
+    const emits=(f.emitsEventIds||[]).filter(id=>have.has('ev_'+mSafe(id)));
+    if(!subs.length && !emits.length) continue;
+    const isFe = f.consumesRouteIds!==undefined;
+    const nid='fn_'+mSafe(f.id);
+    put(nid, 190, 40, {kind:isFe?'frontend':'function', label:f.name||f.id, sub:'', subLines:[],
+      ref:{k:isFe?'frontend':'function', id:f.id}});
+    for(const id of subs) edges.push({from:'ev_'+mSafe(id), to:nid, kind:'spine', label:'handles'});
+    for(const id of emits) edges.push({from:nid, to:'ev_'+mSafe(id), kind:'effect', label:'raises'});
+  }
+  return {direction:'RIGHT', nodes, edges};
+}
+
+async function renderEvents(view, m){
+  const evs=m.events||[];
+  if(!evs.length){ view.innerHTML='<div class="model-empty">No domain events in the model.</div>'; return; }
+  const fns=(m.serverFunctions||[]).concat(m.frontendUnits||[]);
+  const orphan=evs.filter(ev=>!fns.some(f=>(f.emitsEventIds||[]).includes(ev.id))
+                            && !fns.some(f=>(f.subscribesEventIds||[]).includes(ev.id)));
+  view.innerHTML='';
+  const cap=document.createElement('div'); cap.className='map-cap';
+  cap.innerHTML='Follow a chain left to right: something raises an event, a handler reacts, and that handler raises the next one. '+
+    'A long chain is where one change travels furthest.'+
+    (orphan.length?'<span class="map-cap2"><b>'+orphan.length+' event(s)</b> with nothing raising or handling them: '+
+      esc(orphan.slice(0,8).map(e=>e.name||e.id).join(', '))+(orphan.length>8?'…':'')+
+      ' — either dead, or the model has not caught up with the code.</span>':'');
+  view.appendChild(cap);
+  const d=document.createElement('div'); view.appendChild(d);
+  await renderElk(d, graphEvents(m));
+}
+
+/* ---------------- Decisions — every point where the product chooses ---------------- */
+// Conditions live on status-flow transitions and reaction triggers. Scattered across
+// diagrams they read as annotations; gathered here they are the business rules.
+function graphDecisions(fl, m){
+  const nodes=[], edges=[]; const states=fl.states||[], trans=fl.transitions||[];
+  const sid=k=>'st_'+mSafe(k);
+  for(const st of states){
+    const sub=st.description?String(st.description):'';
+    const W=Math.max(150,Math.min(240, (String(st.name||st.key).length*8+36)));
+    const L=sub?wrapPx(sub, W-15-11, CW_MONO):[];
+    nodes.push({id:sid(st.key), w:Math.round(W), h:L.length?subH(L.length):40,
+      meta:{kind:'state', label:st.name||st.key, sub, subLines:L, ref:{k:'entity',id:fl.entityId}}});
+  }
+  trans.forEach((t,i)=>{
+    const cond=String(t.condition||'').trim();
+    if(cond){
+      const did='dc'+i;
+      const head=t.label||'decide';
+      const W=Math.max(170,Math.min(280, cond.length*6.6+40));
+      const L=wrapPx(cond, W-15-11, CW_MONO);
+      nodes.push({id:did, w:Math.round(W), h:subH(L.length),
+        meta:{kind:'trigger', label:head, sub:cond, subLines:L, ref:{k:'entity',id:fl.entityId}}});
+      edges.push({from:sid(t.from), to:did, kind:'spine'});
+      edges.push({from:did, to:sid(t.to), kind:'branch', label:'holds'});
+    } else {
+      edges.push({from:sid(t.from), to:sid(t.to), kind:'spine', label:String(t.label||t.byRole||'').slice(0,24)});
+    }
+  });
+  return {direction:'DOWN', nodes, edges};
+}
+
+async function renderDecisions(view, m){
+  const flows=(m.statusFlows||[]).filter(fl=>(fl.transitions||[]).some(t=>(t.condition||'').trim()));
+  const rx=(m.reactions||[]).filter(r=>r.trigger&&(r.trigger.change||r.trigger.fieldName));
+  if(!flows.length && !rx.length){
+    view.innerHTML='<div class="model-empty">No decision points in the model. They come from <code>condition</code> on a status-flow transition and from reaction triggers — if the product does branch and none are recorded, the model is missing them.</div>';
+    return;
+  }
+  view.innerHTML='';
+  const cap=document.createElement('div'); cap.className='map-cap';
+  cap.innerHTML='Every place the product decides something. A diamond is the condition, the arrow out of it is what happens when it holds.'+
+    '<span class="map-cap2">Read these with whoever owns the rules: a wrong condition here is a wrong rule in production.</span>';
+  view.appendChild(cap);
+  const mine=modelReq;
+  for(const fl of flows){
+    if(mine!==modelReq || !view.isConnected) return;
+    const ent=objById(fl.entityId,m);
+    const block=document.createElement('div'); block.className='proc-block';
+    block.innerHTML='<div class="proc-title">'+esc(fl.name||fl.id)+
+        '<span class="jr-trig">'+esc(ent?(ent.name||ent.id):'')+(fl.fieldName?' · '+esc(fl.fieldName):'')+'</span></div>'+
+      '<div class="proc-diagram"></div>';
+    view.appendChild(block);
+    await renderElk(block.querySelector('.proc-diagram'), graphDecisions(fl, m));
+  }
+  if(rx.length){
+    const box=document.createElement('div'); box.className='logic-sec';
+    let h='<div class="logic-sec-t">⚡ Rules that fire on a change</div>';
+    for(const r of rx){
+      h+='<div class="rx-row"><b>'+esc(r.name||r.id)+'</b>'+
+        '<span class="rx-trig">when '+esc(labelOf(r.trigger.entityId,m))+(r.trigger.fieldName?'.'+esc(r.trigger.fieldName):'')+
+        (r.trigger.change?' '+esc(r.trigger.change):' changes')+'</span>'+
+        '<div class="rx-eff">→ '+esc((r.effects||[]).map(ef=>effLabel(ef,m)).join('; '))+'</div></div>';
+    }
+    box.innerHTML=h; view.appendChild(box);
+  }
+}
+
+/* ---------------- Layers over the product map ---------------- */
+function mapLayerBar(data){
+  const bar=document.createElement('div'); bar.className='lay-bar';
+  // The legend is written by whatever computed the layer, so it can say what it
+  // actually found — "no task has named an object yet" rather than a generic sentence.
+  const hint = (data && data.legend) || (MAP_LAYERS.find(l=>l.key===mapLayer)||MAP_LAYERS[0]).hint;
+  bar.innerHTML='<span class="lay-l">Layer</span>'+
+    MAP_LAYERS.map(l=>'<button class="lay'+(mapLayer===l.key?' on':'')+'" data-k="'+l.key+'">'+esc(l.label)+'</button>').join('')+
+    '<span class="lay-h">'+esc(hint)+'</span>';
+  bar.addEventListener('click',(e)=>{
+    const k=e.target&&e.target.dataset&&e.target.dataset.k; if(!k||k===mapLayer) return;
+    mapLayer=k; renderModelView();
+  });
+  return bar;
+}
+
+// One number per module, plus the wording that says what the number means. Each layer
+// is computed, never declared — except ownership, which is only ever what the model says.
+async function mapLayerData(m){
+  if(mapLayer==='change'){
+    const ch=await loadChanges(false);
+    const task=((ch&&ch.tasks)||[]).find(x=>x.file===impactPick);
+    if(!task) return { kind:'change', per:new Map(), legend:'Pick a task on the Impact view first — this layer lights up where that one lands.' };
+    const br=blastRadius(task.ids, m);
+    const per=new Map();
+    for(const id of br.seed){ const md=moduleOf(id,m); if(md) per.set(md,{n:2}); }
+    for(const id of br.dist.keys()){ const md=moduleOf(id,m); if(md && !per.has(md)) per.set(md,{n:1}); }
+    for(const [k,v] of per) per.set(k,{text: v.n===2?'changed here':'downstream', t: v.n===2?1:0.42});
+    return { kind:'change', per, legend:'“'+task.title+'” — solid where it changes something, faint where the change arrives on its own.' };
+  }
+  if(mapLayer==='owner'){
+    const out=new Map();
+    for(const mod of (m.modules||[])) if(mod.owner) out.set(mod.id, {text:String(mod.owner).slice(0,40), t:1});
+    return { kind:'owner', per:out, legend:'Owner as recorded in the model. Blank means nobody is recorded — not that nobody owns it.' };
+  }
+  if(mapLayer==='heat'){
+    const ch=await loadChanges(false);
+    const heat=(ch&&ch.heat)||{};
+    const per=new Map(); let max=0;
+    for(const [id,n] of Object.entries(heat)){
+      const mod=moduleOf(id,m); if(!mod) continue;
+      const v=(per.get(mod)||{n:0}).n+n; per.set(mod,{n:v}); if(v>max) max=v;
+    }
+    for(const [k,v] of per) per.set(k, {text:v.n+' touch'+(v.n===1?'':'es'), t: max?v.n/max:0});
+    return { kind:'heat', per, legend: max
+      ? 'How many tasks have named an object in that area. Brightest is the most worked-on part of the product.'
+      : 'No task has named an object from the model yet, so nothing is warm.' };
+  }
+  // risk: what changing anything in this area would reach
+  const per=new Map(); let max=0;
+  for(const mod of (m.modules||[])){
+    const seeds=[];
+    for(const k of ['entities','serverFunctions','apiRoutes','frontendUnits','events'])
+      for(const o of (m[k]||[])) if(moduleOf(o.id,m)===mod.id) seeds.push(o.id);
+    if(!seeds.length){ continue; }
+    const r=riskOf(blastRadius(seeds, m, 1), m);
+    per.set(mod.id, {n:r.score, level:r.level});
+    if(r.score>max) max=r.score;
+  }
+  for(const [k,v] of per) per.set(k, {text:v.level+' · '+v.n, t: max?v.n/max:0});
+  return { kind:'risk', per, legend:'What a change anywhere in the area would reach, scored the same way a task is. High means the area is entangled with the rest of the product.' };
+}
+
+/* ---------------- The object card — what it reaches, who may use it, what has changed it ---------------- */
+// The context text below this is for Claude. This part is for the person reading:
+// three questions the model can answer about any object without opening code.
+function objectFacts(kind, id, m){
+  const o=objById(id,m); if(!o) return '';
+  const br=blastRadius([id], m, 1);
+  const down=[...br.dist.entries()].filter(([,d])=>d>0).map(([x])=>x);
+  const groups=[['entity','data'],['function','logic'],['route','endpoints'],
+    ['frontend','screens'],['event','events'],['process','flows'],['statusFlow','lifecycles']];
+  let reach='';
+  for(const [k,l] of groups){
+    const a=down.filter(x=>kindOf(x)===k);
+    if(a.length) reach+='<button class="of-r" data-k="'+k+'"><b>'+a.length+'</b> '+esc(l)+'</button>';
+  }
+  // Every downstream object by name, one row each, so "expand Payments" is a click and
+  // not a re-read of the diagram.
+  let lists='';
+  for(const [k,l] of groups){
+    const a=down.filter(x=>kindOf(x)===k);
+    if(!a.length) continue;
+    lists+='<div class="of-exp" data-k="'+k+'">'+a.map(x=>
+      '<button class="of-dep" data-id="'+esc(x)+'">'+esc(labelOf(x,m))+'</button>').join('')+'</div>';
+  }
+  // Permissions: only what the model recorded, and say plainly when it recorded nothing.
+  const roles=[];
+  if(Array.isArray(o.roles)&&o.roles.length) roles.push(o.roles.join(', '));
+  if(kind==='route'&&o.auth) roles.push('signed in');
+  if(kind==='function'&&o.routeId){ const rt=objById(o.routeId,m);
+    if(rt&&Array.isArray(rt.roles)&&rt.roles.length) roles.push('via route: '+rt.roles.join(', ')); }
+  if(kind==='entity'){
+    const byRole=new Set();
+    for(const fl of (m.statusFlows||[])) if(fl.entityId===id)
+      for(const tr of (fl.transitions||[])) if(tr.byRole) byRole.add(tr.byRole);
+    if(byRole.size) roles.push('moves its lifecycle: '+[...byRole].join(', '));
+  }
+  const mod=moduleOf(id,m), modObj=mod&&objById(mod,m);
+
+  // What work has named this object — the object's own history, from the queue and the log.
+  let hist=[];
+  if(changesData && changesFor===selected){
+    for(const t of (changesData.tasks||[])) if(t.ids.includes(id)) hist.push({when:COL_LABEL[t.col]||t.col, title:t.title});
+    for(const h of (changesData.history||[])) if((h.touched||[]).includes(id)) hist.push({when:(h.ts||'').slice(0,10), title:h.title});
+  }
+
+  let html='<div class="of">';
+  html+='<div class="of-row"><span class="of-k">Reaches</span><span class="of-v">'+
+    (reach||'<i>nothing downstream</i>')+lists+'</span></div>';
+  html+='<div class="of-row"><span class="of-k">Area</span><span class="of-v">'+
+    (modObj?esc(modObj.name||modObj.id):'<i>not assigned to an area</i>')+
+    (modObj&&modObj.owner?' · owner <b>'+esc(modObj.owner)+'</b>':'')+'</span></div>';
+  html+='<div class="of-row"><span class="of-k">Who may</span><span class="of-v">'+
+    (roles.length?esc(roles.join(' · ')):'<i>no role recorded in the model</i>')+'</span></div>';
+  if(o.sensitivity==='high')
+    html+='<div class="of-row"><span class="of-k">Care</span><span class="of-v sens">marked sensitive — money, credentials or personal data</span></div>';
+  if(hist.length)
+    html+='<div class="of-row"><span class="of-k">Changed by</span><span class="of-v">'+
+      hist.slice(0,6).map(h=>'<span class="of-h"><i>'+esc(h.when)+'</i> '+esc(h.title)+'</span>').join('')+
+      (hist.length>6?'<span class="of-h more">+'+(hist.length-6)+' more</span>':'')+'</span></div>';
+  html+='</div>';
+  return html;
+}
