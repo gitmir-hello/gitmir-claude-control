@@ -167,6 +167,18 @@ const IPATH = {
   eye:      "M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
   refresh:  "M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5",
   code:     "M16 18l6-6-6-6M8 6l-6 6 6 6",
+  layers:   "M12 2 2 7l10 5 10-5-10-5zM2 12l10 5 10-5M2 17l10 5 10-5",
+  compass:  "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM16 8l-2 6-6 2 2-6 6-2z",
+  table:    "M3 4h18v16H3zM3 9h18M3 14h18M9 4v16M15 4v16",
+  filter:   "M3 4h18l-7 8v6l-4 2v-8L3 4z",
+  list:     "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
+  play:     "M5 3l14 9-14 9V3z",
+  shield:   "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z",
+  check:    "M20 6 9 17l-5-5",
+  branch:   "M6 3v12M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 6a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 6v3a6 6 0 0 1-6 6H6",
+  external: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3",
+  copy:     "M9 9h11v11H9zM5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1",
+  spark:    "M12 2v6M12 16v6M2 12h6M16 12h6M5 5l4 4M15 15l4 4M19 5l-4 4M9 15l-4 4",
   github:   "M9 19c-5 1.5-5-2.5-7-3m14 6v-3.9a3.4 3.4 0 0 0-1-2.6c3-.3 6.2-1.5 6.2-6.7A5.2 5.2 0 0 0 19.9 5 4.9 4.9 0 0 0 19.8 1.4S18.7 1 16 2.9a13.4 13.4 0 0 0-7 0C6.3 1 5.2 1.4 5.2 1.4A4.9 4.9 0 0 0 5.1 5 5.2 5.2 0 0 0 3.8 8.6c0 5.2 3.2 6.4 6.2 6.7a3.4 3.4 0 0 0-1 2.6V22",
 };
 function svgIcon(name, size, style){
@@ -400,22 +412,68 @@ async function loadSkillsList(){
   try{ SKILLS = (await (await fetch('/api/skills')).json()).skills || []; }catch{ SKILLS = []; }
   renderSkillButtons();
 }
+// Skills grouped by WHEN you reach for them, not alphabetically. Eleven flat buttons is a
+// list to read; four small groups is a decision you can make at a glance.
+const SKILL_GROUPS = [
+  { title:'Understand what exists',
+    hint:'Build a model of the product from the real code, then read it instead of the repo.',
+    items:{ 'gitmir-model':'schema', 'model-ingest':'layers', 'model-navigate':'compass' } },
+  { title:'Decide what to build',
+    hint:'Turn raw input into something precise enough to build from, before any code.',
+    items:{ 'product-docs-spec':'table', 'context-distillation':'filter' } },
+  { title:'Build and prove it',
+    hint:'Plan with checks, run the queue, audit the result, keep the record.',
+    items:{ 'task-planner':'list', 'task-runner':'play', 'app-audit':'shield', 'task-log':'check' } },
+  { title:'Work on code you inherited',
+    hint:'Change an old system without breaking it, or move it to a new stack at parity.',
+    items:{ 'legacy-maintenance':'branch', 'stack-port':'external' } },
+];
+
 function renderSkillButtons(){
   const box = document.getElementById('skillsBtns');
   if(!box) return;
   box.innerHTML = '';
   if(!SKILLS.length){ box.innerHTML = '<div class="skills-empty">no skills in skills.json</div>'; return; }
-  for(const s of SKILLS){
-    const it = document.createElement('div');
-    it.className = 'skill-item'; it.title = 'Copy — paste into Claude';
-    it.innerHTML =
-      '<div class="skill-info">'+
-        '<div class="skill-name">'+esc(s.title || s.name)+'</div>'+
-        (s.desc ? '<div class="skill-desc">'+esc(s.desc)+'</div>' : '')+
-      '</div>'+
-      '<span class="skill-copy">📋 Copy</span>';
-    it.addEventListener('click', ()=> copySkill(s.name, s.title || s.name));
-    box.appendChild(it);
+
+  const byName = {};
+  for(const s of SKILLS) byName[s.name] = s;
+  const placed = {};
+  const groups = SKILL_GROUPS.map(g => ({
+    title: g.title, hint: g.hint,
+    list: Object.keys(g.items).filter(n => byName[n]).map(n => { placed[n]=1; return [byName[n], g.items[n]]; }),
+  })).filter(g => g.list.length);
+  // A skill added to skills.json that this file has never heard of still shows up, rather
+  // than silently vanishing because it is not in a group.
+  const rest = SKILLS.filter(s => !placed[s.name]).map(s => [s, 'spark']);
+  if(rest.length) groups.push({ title:'Other', hint:'', list:rest });
+
+  for(const g of groups){
+    const sec = document.createElement('div');
+    sec.className = 'sk-group';
+    sec.innerHTML =
+      '<div class="sk-head"><span class="eyebrow">' + esc(g.title) + '</span><span class="hud-rule"></span></div>' +
+      (g.hint ? '<div class="sk-hint">' + esc(g.hint) + '</div>' : '') +
+      '<div class="sk-grid"></div>';
+    const grid = sec.querySelector('.sk-grid');
+    for(const [s, icon] of g.list){
+      const it = document.createElement('button');
+      it.className = 'sk-tile'; it.type = 'button';
+      it.title = 'Copy ' + (s.title || s.name) + ' — paste into Claude';
+      it.innerHTML =
+        '<span class="sk-ic">' + svgIcon(icon, 18) + '</span>' +
+        '<span class="sk-body">' +
+          '<span class="sk-name">' + esc(s.title || s.name) + '</span>' +
+          (s.desc ? '<span class="sk-desc">' + esc(s.desc) + '</span>' : '') +
+        '</span>' +
+        '<span class="sk-go">' + svgIcon('copy', 15) + '</span>';
+      it.addEventListener('click', async () => {
+        it.classList.add('done');
+        setTimeout(() => it.classList.remove('done'), 1400);
+        await copySkill(s.name, s.title || s.name);
+      });
+      grid.appendChild(it);
+    }
+    box.appendChild(sec);
   }
 }
 async function copySkill(name, title){

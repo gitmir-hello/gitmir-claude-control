@@ -1543,13 +1543,16 @@ const HTML = /* html */ `<!doctype html>
   .rl.active svg{color:var(--cyan); filter:drop-shadow(0 0 6px rgba(47,216,255,.6))}
   .rl.active::before{content:""; position:absolute; left:-8px; top:50%; transform:translateY(-50%);
     width:3px; height:20px; background:var(--cyan); box-shadow:0 0 12px var(--cyan)}
-  /* the count rides the icon rather than the whole button, so it cannot collide with the label */
-  .rl .badge{position:absolute; top:6px; right:9px; min-width:17px; height:17px; padding:0 4px; gap:0;
+  /* A solid white chip sitting on the icon. White because it has to read at a glance from
+     the corner of the eye against a dark rail — a tinted chip disappears into the panel. */
+  .rl .badge{position:absolute; top:7px; right:12px; min-width:18px; height:18px; padding:0 4px; gap:0;
     display:inline-flex; align-items:center; justify-content:center; font-family:var(--font-mono);
-    font-size:9.5px; font-weight:600; letter-spacing:0; text-transform:none;
-    background:rgba(47,216,255,.08); color:var(--cyan-soft); border:1px solid rgba(47,216,255,.35)}
+    font-size:10px; font-weight:700; letter-spacing:0; text-transform:none;
+    background:var(--ink-0); color:#05070c; border:1px solid var(--ink-0);
+    box-shadow:0 0 0 2px rgba(10,20,42,.95), 0 0 12px rgba(47,216,255,.35)}
   .rl .badge:empty{display:none}
-  .rl .badge.stale{background:rgba(255,179,71,.1); color:#ffd08a; border-color:rgba(255,179,71,.4)}
+  .rl .badge.stale{background:#ffb86b; color:#1a0f0a; border-color:#ffb86b;
+    box-shadow:0 0 0 2px rgba(10,20,42,.95), 0 0 12px rgba(255,184,107,.45)}
   .rail-foot{margin-top:auto; padding-top:12px; border-top:1px solid var(--glass-brd);
     display:flex; flex-direction:column; align-items:center; gap:6px}
   .rail-foot a{color:var(--ink-3); display:inline-flex; transition:color .14s ease}
@@ -1611,21 +1614,43 @@ const HTML = /* html */ `<!doctype html>
   }
   .del:hover{background:rgba(229,72,77,.12); border-color:rgba(229,72,77,.4)}
 
-  /* ---------- skills ---------- */
-  .skills-box{margin-top:22px; padding-top:20px; border-top:1px solid var(--line)}
-  .skills-label{color:var(--dim); font-size:12px; text-transform:uppercase; letter-spacing:.6px; margin-bottom:11px}
-  .skills-btns{display:flex; flex-direction:column; gap:8px}
-  .skill-item{display:flex; align-items:center; gap:14px; padding:11px 14px; cursor:pointer;
-    background:linear-gradient(165deg,rgba(18,36,66,.4),rgba(9,18,38,.6)); border:1px solid var(--glass-brd);
-    transition:border-color .15s ease, box-shadow .15s ease}
-  .skill-item:hover{border-color:var(--glass-brd-strong); box-shadow:0 0 18px rgba(47,216,255,.1)}
-  .skill-info{flex:1; min-width:0}
-  .skill-name{font-family:var(--font-mono); font-size:13px; font-weight:600; color:var(--cyan-soft); letter-spacing:.02em}
-  .skill-desc{color:var(--ink-2); font-size:12.5px; line-height:1.45; margin-top:4px}
-  .skill-copy{flex:0 0 auto; font-family:var(--font-mono); font-size:12px; color:var(--ink-2);
-    border:1px solid var(--faint); padding:6px 11px; white-space:nowrap}
-  .skill-item:hover .skill-copy{border-color:var(--cyan); color:var(--cyan)}
-  .skills-empty{color:var(--dim2); font-size:13px}
+  /* ---------- skills ----------
+     A grid of plates, grouped by when you reach for them. The whole plate is the button —
+     there is only one thing to do with a skill, so a separate Copy control would be a
+     second target for the same action. */
+  .skills-box{margin-top:26px; padding-top:22px; border-top:1px solid var(--glass-brd)}
+  .skills-label{font-family:var(--font-mono); font-size:11px; letter-spacing:.22em; text-transform:uppercase;
+    color:var(--cyan-soft); margin-bottom:20px}
+  .sk-group{margin-bottom:26px}
+  .sk-head{display:flex; align-items:center; gap:12px; margin-bottom:6px}
+  .eyebrow{font-family:var(--font-mono); font-size:11px; letter-spacing:.22em; text-transform:uppercase;
+    color:var(--cyan-soft); white-space:nowrap}
+  .hud-rule{flex:1; height:1px; background:linear-gradient(90deg,rgba(47,216,255,.5),transparent)}
+  .sk-hint{color:var(--ink-3); font-size:12.5px; line-height:1.5; margin-bottom:12px; max-width:760px}
+  .sk-grid{display:grid; gap:10px; grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr))}
+  .sk-tile{position:relative; display:flex; align-items:flex-start; gap:12px; text-align:left;
+    padding:14px 14px 14px 13px; cursor:pointer; font-family:inherit;
+    background:rgba(255,255,255,.02); border:1px solid var(--glass-brd); border-radius:0;
+    transition:border-color .16s ease, background .16s ease, transform .16s ease, box-shadow .16s ease}
+  .sk-tile:hover{border-color:rgba(47,216,255,.45); background:rgba(47,216,255,.04); transform:translateY(-2px);
+    box-shadow:0 0 0 1px rgba(47,216,255,.2), 0 0 22px rgba(47,216,255,.14)}
+  .sk-tile:focus-visible{outline:2px solid var(--cyan); outline-offset:2px}
+  .sk-ic{flex:none; width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center;
+    border:1px solid rgba(47,216,255,.3); background:rgba(47,216,255,.06); color:var(--cyan-soft);
+    box-shadow:inset 0 0 10px rgba(47,216,255,.12); transition:color .16s ease, box-shadow .16s ease}
+  .sk-tile:hover .sk-ic{color:var(--cyan); box-shadow:inset 0 0 14px rgba(47,216,255,.2), 0 0 12px rgba(47,216,255,.25)}
+  .sk-body{display:flex; flex-direction:column; gap:5px; min-width:0; flex:1}
+  .sk-name{font-family:var(--font-mono); font-size:12.5px; font-weight:600; letter-spacing:.02em; color:var(--ink-0)}
+  .sk-desc{font-size:12.5px; line-height:1.5; color:var(--ink-2);
+    display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden}
+  .sk-go{flex:none; color:var(--ink-3); transition:color .16s ease, transform .16s ease}
+  .sk-tile:hover .sk-go{color:var(--cyan-soft); transform:translateY(-1px)}
+  /* the confirmation is the tile itself — no toast needed to know it worked */
+  .sk-tile.done{border-color:rgba(52,240,166,.55); background:rgba(52,240,166,.06)}
+  .sk-tile.done .sk-ic{color:var(--c-ok); border-color:rgba(52,240,166,.5); background:rgba(52,240,166,.08)}
+  .sk-tile.done .sk-go{color:var(--c-ok)}
+  .skills-empty{color:var(--ink-3); font-size:13px}
+
 
   /* ---------- task log ---------- */
   .tasks-head{display:flex; align-items:center; gap:9px; margin-bottom:14px}
