@@ -1310,6 +1310,18 @@ const HTML = /* html */ `<!doctype html>
     --line:rgba(120,210,255,.14); --line2:rgba(120,210,255,.26);
     --txt:#e8f0ff; --dim:#8497b8; --dim2:#607692;
     --accent:#2fd8ff; --accent2:#8aecff; --danger:#ff5566; --ok:#34f0a6;
+    /* Adopted verbatim from ide.gitmir.com so the two products cannot drift apart. */
+    --l2-card:rgba(10,19,34,.66); --l2-card-2:rgba(14,26,46,.7); --l2-brd:rgba(120,210,255,.18);
+    --glass-bg:rgba(20,42,80,.28); --glass-bg-strong:rgba(12,26,54,.48);
+    --glow-soft:0 18px 50px rgba(0,0,0,.55);
+    --font-display:"Onest",system-ui,-apple-system,BlinkMacSystemFont,sans-serif;
+    /* named magenta in the source and actually a cool blue — the IDE has no pink in it. */
+    --magenta:#4ea8ff; --magenta-soft:#8fbcff;
+    --c-entity:#7e8cff; --c-server:#ffb86b; --c-api:#2fd8ff; --c-frontend:#4ea8ff;
+    --c-module:#34f0a6; --c-function:#19e3c2; --c-event:#ffd34c; --c-process:#a0b6ff;
+    --c-ok:#34f0a6; --c-warn:#ffb86b; --c-danger:#ff5566;
+    --rail-w:76px; --topbar-h:60px;
+    --enter:0s;   /* per-card entrance delay, set from JS like .stagger does */
     color-scheme:dark;
   }
   *{box-sizing:border-box}
@@ -1355,15 +1367,24 @@ const HTML = /* html */ `<!doctype html>
 
   /* ---------- shell: topbar, rail, grid ---------- */
   .topbar,.shell{position:relative; z-index:1}
+  /* AppHeader: 60px, 0 22px, the navy gradient, gap-4 on the left group. */
   .topbar{position:sticky; top:0; z-index:40; height:var(--topbar-h); display:flex; align-items:center; gap:16px;
-    padding:0 22px; border-bottom:1px solid var(--glass-brd);
+    padding:0 22px; border-bottom:1px solid var(--glass-brd); flex:none;
     background:linear-gradient(180deg,rgba(16,31,60,.97),rgba(11,21,44,.97))}
-  .brand-link{display:flex; align-items:center; flex-shrink:0}
-  .brand-logo{height:27px; display:block}
-  .brand-sub{font-family:var(--font-mono); font-size:12px; letter-spacing:.18em; text-transform:uppercase; color:var(--ink-2);
-    padding-left:16px; border-left:1px solid var(--glass-brd); white-space:nowrap}
+  .brand-link{display:inline-flex; align-items:center; flex-shrink:0; text-decoration:none}
+  /* The wordmark is not an image here — it is the holographic gradient painted through
+     the SVG as a mask, with the cyan bloom. Aspect ratio 118:24, height 26. */
+  .brand-logo{display:inline-block; height:26px; width:127.8px; flex:none;
+    background:linear-gradient(95deg, var(--cyan-soft) 0%, var(--cyan) 58%, var(--magenta-soft) 100%);
+    -webkit-mask-image:url(/vendor/gitmir-wordmark.svg); mask-image:url(/vendor/gitmir-wordmark.svg);
+    -webkit-mask-repeat:no-repeat; mask-repeat:no-repeat;
+    -webkit-mask-size:contain; mask-size:contain;
+    -webkit-mask-position:left center; mask-position:left center;
+    filter:drop-shadow(0 0 8px rgba(47,216,255,.45))}
+  .brand-sub{font-size:13px; font-weight:600; color:var(--ink-2); white-space:nowrap}
+  .brand-sep{color:var(--ink-3); display:inline-flex; align-items:center}
   .topbar .c{font-family:var(--font-mono); font-size:12px; color:var(--ink-3)}
-  .top-tools{margin-left:auto; display:flex; gap:10px; align-items:center}
+  .top-tools{margin-left:auto; display:flex; gap:12px; align-items:center; flex:none}
   .top-tools .search{width:250px}
   /* .btn-primary from holo.css: an ink-white plate that flips to luminous cyan on hover,
      not a cyan plate at rest. The white is what makes it the one obvious action on the page. */
@@ -1944,9 +1965,8 @@ const HTML = /* html */ `<!doctype html>
   /* sidebar → glass */
   .brand{ font-family:var(--font-ui); text-transform:uppercase; letter-spacing:.16em; font-size:13px; font-weight:600; color:#fff; gap:10px }
   .brand .c{ font-family:var(--font-mono); letter-spacing:.04em; text-transform:none }
-  .brand-logo{ height:19px; width:auto; display:block; filter:drop-shadow(0 0 8px rgba(47,216,255,.45)); -webkit-user-select:none; user-select:none }
   .brand-link{ display:block; line-height:0; cursor:pointer; transition:filter .15s ease, opacity .15s ease }
-  .brand-link:hover .brand-logo{ filter:drop-shadow(0 0 12px rgba(47,216,255,.85)) }
+  .brand-link:hover .brand-logo{filter:drop-shadow(0 0 12px rgba(47,216,255,.85))}
   .brand-link:active{ opacity:.75 }
   .brand-sub{ font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; color:var(--ink-2); text-transform:uppercase; padding-left:10px; border-left:1px solid var(--glass-brd) }
   /* AGPL-3.0 section 13: anyone using this over a network must be able to get the source. */
@@ -2037,7 +2057,8 @@ const HTML = /* html */ `<!doctype html>
   </div>
 
   <header class="topbar">
-    <a class="brand-link" href="https://ide.gitmir.com" target="_blank" rel="noopener" title="Open ide.gitmir.com"><img class="brand-logo" src="/vendor/gitmir-wordmark.svg" alt="GitMir IDE" draggable="false"></a>
+    <a class="brand-link" href="https://ide.gitmir.com" target="_blank" rel="noopener" title="Open ide.gitmir.com"><span class="brand-logo" role="img" aria-label="GitMir IDE"></span></a>
+    <span class="brand-sep"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg></span>
     <span class="brand-sub">Claude Control</span>
     <span class="c" id="count"></span>
     <div class="top-proj" id="topProj"></div>
