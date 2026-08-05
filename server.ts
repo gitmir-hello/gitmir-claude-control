@@ -1522,38 +1522,39 @@ const HTML = /* html */ `<!doctype html>
     font-size:11px; letter-spacing:.06em; color:var(--ink-3); text-align:center}
 
 
-  /* ---------- rail ---------- */
-  /* The IDE nav-item active state: a 3px cyan tick outside the item, a faint cyan
-     gradient wash, and a cyan border — the tab does not move, the light does. */
-  .rail{display:none; width:var(--rail-w); flex-shrink:0; flex-direction:column; gap:3px; padding:12px 8px;
+  /* ---------- rail ----------
+     Built like the IDE's vertical tab bar: icon over label, colour is the only thing that
+     moves between states, and the active glyph gets the cyan bloom. */
+  .rail{display:none; width:var(--rail-w); flex-shrink:0; flex-direction:column; gap:2px; padding:10px 8px;
     border-right:1px solid var(--glass-brd);
     background:linear-gradient(180deg,rgba(15,30,58,.97),rgba(10,20,42,.97));
     position:sticky; top:var(--topbar-h); height:calc(100vh - var(--topbar-h))}
   .rail.on{display:flex}
-  .rl{position:relative; width:100%; padding:10px 2px 8px; background:none; border:1px solid transparent;
-    cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:5px;
-    color:#c0c6cd; transition:all .14s ease}
+  .rl{position:relative; width:100%; padding:11px 2px 9px; background:none; border:1px solid transparent;
+    cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:6px;
+    color:#c0c6cd; font-family:var(--font-ui); transition:all .14s ease}
   .rl:hover{color:#fff; background:rgba(255,255,255,.05)}
-  .rl .g{font-size:17px; line-height:1}
-  .rl .l{font-family:var(--font-mono); font-size:9px; letter-spacing:.1em; text-transform:uppercase}
+  .rl svg{flex:none}
+  .rl .l{font-size:10.5px; font-weight:600; letter-spacing:.01em}
   .rl.active{color:#fff;
     background:linear-gradient(100deg,rgba(47,216,255,.14),rgba(47,216,255,.04));
     border-color:rgba(47,216,255,.28);
     box-shadow:inset 0 0 0 1px rgba(47,216,255,.08), 0 0 18px rgba(47,216,255,.08)}
-  .rl.active .g{color:var(--cyan); filter:drop-shadow(0 0 6px rgba(47,216,255,.6))}
+  .rl.active svg{color:var(--cyan); filter:drop-shadow(0 0 6px rgba(47,216,255,.6))}
   .rl.active::before{content:""; position:absolute; left:-8px; top:50%; transform:translateY(-50%);
     width:3px; height:20px; background:var(--cyan); box-shadow:0 0 12px var(--cyan)}
-  .rl .badge{position:absolute; top:4px; right:6px; min-width:16px; height:16px; padding:0 4px;
+  /* the count rides the icon rather than the whole button, so it cannot collide with the label */
+  .rl .badge{position:absolute; top:6px; right:9px; min-width:17px; height:17px; padding:0 4px; gap:0;
     display:inline-flex; align-items:center; justify-content:center; font-family:var(--font-mono);
-    font-size:9px; font-weight:600; background:rgba(47,216,255,.08); color:var(--cyan-soft);
-    border:1px solid rgba(47,216,255,.35)}
+    font-size:9.5px; font-weight:600; letter-spacing:0; text-transform:none;
+    background:rgba(47,216,255,.08); color:var(--cyan-soft); border:1px solid rgba(47,216,255,.35)}
   .rl .badge:empty{display:none}
   .rl .badge.stale{background:rgba(255,179,71,.1); color:#ffd08a; border-color:rgba(255,179,71,.4)}
-  .rail-foot{margin-top:auto; padding-top:10px; border-top:1px solid var(--glass-brd);
-    display:flex; flex-direction:column; align-items:center; gap:4px}
-  .rail-foot a{font-family:var(--font-mono); font-size:9px; letter-spacing:.08em; color:var(--ink-3); text-decoration:none}
+  .rail-foot{margin-top:auto; padding-top:12px; border-top:1px solid var(--glass-brd);
+    display:flex; flex-direction:column; align-items:center; gap:6px}
+  .rail-foot a{color:var(--ink-3); display:inline-flex; transition:color .14s ease}
   .rail-foot a:hover{color:var(--cyan-soft)}
-  .rail-foot span{font-family:var(--font-mono); font-size:8.5px; color:var(--faint)}
+  .rail-foot span{font-family:var(--font-mono); font-size:9px; letter-spacing:.06em; color:var(--faint)}
 
 
   @media (max-width:760px){

@@ -156,18 +156,28 @@ async function load(keepSelection){
   else refreshDetailBits();
 }
 
-// Feather-shaped, but at the IDE stroke weight of 1.7 so they sit with everything else.
-const ICON = (function(){
-  const w = function(d, extra){
-    return '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
-      + 'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"'
-      + (extra || '') + '>' + d + '</svg>';
-  };
-  return {
-    clock: w('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
-    code:  w('<path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/>', ' style="color:var(--cyan)"'),
-  };
-})();
+// The IDE icon set, verbatim: viewBox 24, no fill, currentColor stroke at 1.7 with round
+// caps and joins. Same geometry as every glyph in ide.gitmir.com, so nothing looks foreign.
+const IPATH = {
+  settings: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 0 1-4 0v-.1A1.6 1.6 0 0 0 7 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H1a2 2 0 0 1 0-4h.1A1.6 1.6 0 0 0 2.6 7a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H7a1.6 1.6 0 0 0 1-1.5V1a2 2 0 0 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V7a1.6 1.6 0 0 0 1.5 1H23a2 2 0 0 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z",
+  tasks:    "M9 11l3 3 8-8M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11",
+  schema:   "M5 4h5v4H5zM14 4h5v4h-5zM9 16h6v4H9zM7 8v4h10V8M12 12v4",
+  columns:  "M4 4h7v16H4zM13 4h7v16h-7z",
+  user:     "M20 21a8 8 0 0 0-16 0M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
+  eye:      "M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
+  refresh:  "M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5",
+  code:     "M16 18l6-6-6-6M8 6l-6 6 6 6",
+  github:   "M9 19c-5 1.5-5-2.5-7-3m14 6v-3.9a3.4 3.4 0 0 0-1-2.6c3-.3 6.2-1.5 6.2-6.7A5.2 5.2 0 0 0 19.9 5 4.9 4.9 0 0 0 19.8 1.4S18.7 1 16 2.9a13.4 13.4 0 0 0-7 0C6.3 1 5.2 1.4 5.2 1.4A4.9 4.9 0 0 0 5.1 5 5.2 5.2 0 0 0 3.8 8.6c0 5.2 3.2 6.4 6.2 6.7a3.4 3.4 0 0 0-1 2.6V22",
+};
+function svgIcon(name, size, style){
+  return '<svg width="' + (size||18) + '" height="' + (size||18) + '" viewBox="0 0 24 24" fill="none" '
+    + 'stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"'
+    + (style ? ' style="' + style + '"' : '') + '><path d="' + IPATH[name] + '"/></svg>';
+}
+const ICON = {
+  clock: svgIcon('refresh', 13),
+  code:  svgIcon('code', 13, 'color:var(--cyan)'),
+};
 
 // The home screen. Projects are the whole surface here rather than a column beside
 // something else, because until you have opened one there is nothing else to look at.
@@ -240,22 +250,22 @@ function setShell(open){
 }
 
 const RAIL = [
-  { tab:'settings', g:'⚙', l:'Setup' },
-  { tab:'tasks',    g:'▤', l:'Tasks',   badge:'taskBadge' },
-  { tab:'model',    g:'◫', l:'Model',   badge:'modelBadge' },
-  { tab:'queue',    g:'▦', l:'Queue',   badge:'queueBadge' },
-  { tab:'team',     g:'⇄', l:'Team',    badge:'teamBadge' },
-  { tab:'preview',  g:'⌖', l:'Preview', only:'preview' },
+  { tab:'settings', ic:'settings', l:'Setup' },
+  { tab:'tasks',    ic:'tasks',    l:'Tasks',   badge:'taskBadge' },
+  { tab:'model',    ic:'schema',   l:'Model',   badge:'modelBadge' },
+  { tab:'queue',    ic:'columns',  l:'Queue',   badge:'queueBadge' },
+  { tab:'team',     ic:'user',     l:'Team',    badge:'teamBadge' },
+  { tab:'preview',  ic:'eye',      l:'Preview', only:'preview' },
 ];
 function renderRail(){
   railEl.innerHTML = RAIL
     .filter(r => r.only !== 'preview' || PREVIEW_OK)
     .map(r => '<button class="rl" data-tab="' + r.tab + '" title="' + r.l + '">'
-      + '<span class="g">' + r.g + '</span><span class="l">' + r.l + '</span>'
+      + svgIcon(r.ic, 20) + '<span class="l">' + r.l + '</span>'
       + (r.badge ? '<span class="badge" id="' + r.badge + '"></span>' : '') + '</button>').join('')
     + '<div class="rail-foot">'
-    + '<a href="https://github.com/gitmir-hello/gitmir-claude-control" target="_blank" rel="noopener">SRC</a>'
-    + '<span>AGPL</span></div>';
+    + '<a href="https://github.com/gitmir-hello/gitmir-claude-control" target="_blank" rel="noopener" title="Source on GitHub">'
+    + svgIcon('github', 16) + '</a><span>AGPL</span></div>';
   railEl.querySelectorAll('.rl').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
 }
 
