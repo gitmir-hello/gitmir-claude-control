@@ -585,8 +585,11 @@ const server = http.createServer(async (req, res) => {
     // call carrying that Host. Correct for the frame, and disastrous for a person who typed
     // the address by hand: the shell loads and then every request 403s, so there are no
     // projects, no skills and no explanation. Send them to the name that works.
+    // Only for a TOP-LEVEL navigation. The framed site's own home link is a request for
+    // `/` on this very host, and redirecting that would send the frame to the dashboard.
     if (req.method === 'GET' && url.pathname === '/'
-        && String(req.headers.host || '') === PREVIEW_HOST + ':' + PORT) {
+        && String(req.headers.host || '') === PREVIEW_HOST + ':' + PORT
+        && !['iframe', 'frame', 'embed', 'object'].includes(String(req.headers['sec-fetch-dest'] || ''))) {
       res.writeHead(302, { Location: 'http://localhost:' + PORT + '/' });
       return res.end();
     }
