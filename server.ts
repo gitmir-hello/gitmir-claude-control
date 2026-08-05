@@ -581,6 +581,15 @@ function buildShareBundle(projectPath: string, displayName: string): { html: str
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://localhost:${PORT}`);
   try {
+    // 127.0.0.1 is reserved for the framed site, so the origin guard refuses every /api/
+    // call carrying that Host. Correct for the frame, and disastrous for a person who typed
+    // the address by hand: the shell loads and then every request 403s, so there are no
+    // projects, no skills and no explanation. Send them to the name that works.
+    if (req.method === 'GET' && url.pathname === '/'
+        && String(req.headers.host || '') === PREVIEW_HOST + ':' + PORT) {
+      res.writeHead(302, { Location: 'http://localhost:' + PORT + '/' });
+      return res.end();
+    }
     // The injected picker is fetched by the sandboxed preview frame, whose origin is
     // opaque — it carries no secrets and must stay reachable from there.
     if (url.pathname.startsWith('/api/') && url.pathname !== '/api/ping'
