@@ -1381,22 +1381,17 @@ const HTML = /* html */ `<!doctype html>
   .main{flex:1; min-width:0; padding:22px 24px 60px}
   .detail{max-width:1600px}
 
-  /* ---------- home: project tiles ---------- */
-  /* The panel treatment is the IDE glass panel: a 158deg white sheen over a 165deg navy
-     body, a cyan-tinted hairline, and the eight corner-bracket arms painted as background
-     layers on one pseudo-element rather than four extra nodes. */
-  .grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(min(290px,100%),1fr)); gap:18px}
-  .grid.off{display:none}
-  .tile{position:relative; isolation:isolate; padding:18px 18px 16px; cursor:pointer;
-    display:flex; flex-direction:column; gap:9px; min-height:132px;
+  /* ---------- the holo component layer ----------
+     Ported from dev/src/styles/holo.css so a card here is literally the same object as a
+     card there: .glass .edge .hoverable .clickable, a .holo-scan sweep, a .badge, a
+     .divider and the layout utilities. Values are copied, not approximated. */
+  .glass{position:relative; isolation:isolate; border-radius:0; border:1px solid var(--glass-brd);
     background:
       linear-gradient(158deg,rgba(255,255,255,.05) 0%,rgba(255,255,255,0) 42%),
       linear-gradient(165deg,rgba(18,36,66,.62) 0%,rgba(9,18,38,.78) 60%,rgba(5,11,24,.82) 100%);
-    border:1px solid var(--glass-brd);
-    box-shadow:0 0 44px rgba(2,8,16,.5), inset 0 0 34px rgba(40,120,180,.06);
-    transition:transform .18s ease, border-color .18s ease, box-shadow .18s ease;
-    animation:materialize .5s cubic-bezier(.2,.7,.3,1) backwards; animation-delay:var(--enter,0s)}
-  .tile::before{content:""; position:absolute; inset:-1px; pointer-events:none; z-index:1;
+    box-shadow:0 0 44px rgba(2,8,16,.5), inset 0 0 34px rgba(40,120,180,.06)}
+  /* four L-brackets and a lit top edge, all painted as backgrounds on one pseudo-element */
+  .glass::before{content:""; position:absolute; inset:-1px; pointer-events:none; z-index:1;
     background:
       linear-gradient(90deg,transparent,rgba(95,222,255,.55),transparent) 50% 0 / calc(100% - 44px) 1px no-repeat,
       linear-gradient(var(--cc),var(--cc)) 0 0 / var(--cb) var(--cw) no-repeat,
@@ -1407,39 +1402,83 @@ const HTML = /* html */ `<!doctype html>
       linear-gradient(var(--cc),var(--cc)) 0 100% / var(--cw) var(--cb) no-repeat,
       linear-gradient(var(--cc),var(--cc)) 100% 100% / var(--cb) var(--cw) no-repeat,
       linear-gradient(var(--cc),var(--cc)) 100% 100% / var(--cw) var(--cb) no-repeat;
-    filter:drop-shadow(0 0 4px rgba(95,222,255,.7)); opacity:.55; transition:opacity .18s ease}
-  .tile::after{content:""; position:absolute; z-index:-1; left:10%; right:10%; bottom:-13px; height:46%;
+    filter:drop-shadow(0 0 4px rgba(95,222,255,.7)); opacity:.9}
+  .glass.edge::before{opacity:1; filter:drop-shadow(0 0 6px rgba(95,222,255,.95))}
+  .glass::after{content:""; position:absolute; z-index:-1; left:10%; right:10%; bottom:-13px; height:46%;
     border-radius:50%; background:radial-gradient(72% 100% at 50% 100%,rgba(47,216,255,.22),transparent 72%);
-    filter:blur(18px); opacity:.45; pointer-events:none;
+    filter:blur(18px); opacity:.55; pointer-events:none;
     transition:opacity .25s ease, filter .25s ease, bottom .25s ease}
-  .tile:hover{transform:translateY(-2px); border-color:var(--glass-brd-strong);
+  .glass.hoverable:hover::after{opacity:.8; filter:blur(22px); bottom:-17px}
+  .hoverable{transition:transform .18s ease, border-color .18s ease, box-shadow .18s ease, background .18s ease}
+  .hoverable:hover{transform:translateY(-2px); border-color:var(--glass-brd-strong);
     box-shadow:var(--glow-soft), 0 0 0 1px rgba(47,216,255,.25), 0 0 30px rgba(47,216,255,.12)}
-  .tile:hover::before{opacity:1}
-  .tile:hover::after{opacity:.8; filter:blur(22px); bottom:-17px}
-  .tile:focus-visible{outline:2px solid var(--cyan); outline-offset:3px}
-  .t-top{display:flex; align-items:center; gap:9px; min-width:0}
-  .t-dot{width:3px; height:16px; flex-shrink:0}
-  .t-nm{font-family:var(--font-ui); font-size:15px; font-weight:650; letter-spacing:-.01em; color:#fff;
-    overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
-  .t-pa{font-family:var(--font-mono); font-size:11px; color:var(--ink-3); line-height:1.5; word-break:break-all;
+  .clickable{cursor:pointer}
+  .holo-scan{position:absolute; inset:0; border-radius:inherit; overflow:hidden; pointer-events:none; z-index:2}
+  .holo-scan::before{content:""; position:absolute; left:0; right:0; top:-40%; height:40%;
+    background:linear-gradient(180deg,transparent,rgba(120,235,255,.35),transparent);
+    animation:holo-scan-sweep .6s ease-out calc(var(--enter,0s) + .06s) 1}
+  @keyframes holo-scan-sweep{0%{transform:translateY(0); opacity:.9} 100%{transform:translateY(360%); opacity:0}}
+  /* hold ONLY opacity at the end: a lingering transform makes the element a backdrop root
+     and silently kills backdrop-filter on anything nested. Fill mode is backwards, not both. */
+  @keyframes materialize{0%{opacity:0; transform:translateY(10px) scale(.972)} 60%{opacity:1} 100%{opacity:1}}
+  .badge{display:inline-flex; align-items:center; gap:6px; height:22px; padding:0 9px; border-radius:0;
+    font-family:var(--font-mono); font-size:11px; font-weight:600; letter-spacing:.04em; text-transform:uppercase;
+    border:1px solid var(--glass-brd); background:rgba(255,255,255,.03); color:var(--ink-1); white-space:nowrap}
+  .badge .dot{width:7px; height:7px; border-radius:50%; background:currentColor; box-shadow:0 0 8px currentColor}
+  .badge-cyan{color:var(--cyan-soft); border-color:rgba(47,216,255,.35); background:rgba(47,216,255,.08)}
+  .badge-amber{color:#ffd08a; border-color:rgba(255,179,71,.4); background:rgba(255,179,71,.1)}
+  .badge-green{color:#8af2bd; border-color:rgba(52,240,166,.4); background:rgba(52,240,166,.1)}
+  .badge-danger{color:#ff90a3; border-color:rgba(255,92,122,.4); background:rgba(255,92,122,.1)}
+  .badge-ghost{color:var(--ink-2)}
+  .row{display:flex; align-items:center} .col{display:flex; flex-direction:column}
+  .between{display:flex; align-items:center; justify-content:space-between}
+  .gap-1{gap:4px} .gap-2{gap:8px} .gap-3{gap:12px} .gap-4{gap:16px}
+  .grow{flex:1; min-width:0; min-height:0}
+  .divider{height:1px; background:var(--glass-brd); width:100%}
+  .muted{color:var(--ink-2)} .dim{color:var(--ink-3)}
+  .text-xs{font-size:12px} .text-sm{font-size:13px}
+
+  /* ---------- home: the project card ---------- */
+  .grid{display:grid; gap:18px; grid-template-columns:repeat(auto-fill,minmax(min(290px,100%),1fr))}
+  .grid.off{display:none}
+  .grid > *{animation:materialize .5s cubic-bezier(.2,.7,.3,1) backwards; animation-delay:var(--enter,0s)}
+  .prj-card{display:flex; flex-direction:column; overflow:hidden; padding:0;
+    transition:border-color .16s ease, box-shadow .16s ease, transform .16s ease}
+  .prj-card:hover{border-color:rgba(47,216,255,.55);
+    box-shadow:0 0 0 1px rgba(47,216,255,.4), 0 0 28px rgba(47,216,255,.3), 0 18px 44px rgba(0,0,0,.45);
+    transform:translateY(-3px)}
+  .prj-strip{position:relative; min-height:98px; padding:16px 16px 14px; overflow:hidden;
+    display:flex; flex-direction:column; justify-content:flex-end;
+    border-bottom:1px solid var(--glass-brd);
+    background:linear-gradient(135deg,rgba(20,40,78,.5),rgba(9,18,38,.62))}
+  .prj-strip-status{position:absolute; top:12px; left:14px}
+  .prj-strip-name{font-family:var(--font-display); font-weight:700; font-size:21px; line-height:1.16;
+    color:#fff; letter-spacing:-.01em; word-break:break-word;
     display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden}
-  .t-chips{margin-top:auto; display:flex; gap:6px; flex-wrap:wrap; padding-top:6px}
-  /* badge formula from the IDE: text light, border .35-.4 alpha, fill .08-.1 of the same hue */
-  .chip{display:inline-flex; align-items:center; height:20px; padding:0 8px; font-family:var(--font-mono);
-    font-size:10.5px; font-weight:600; letter-spacing:.04em; text-transform:uppercase;
-    border:1px solid var(--glass-brd); background:rgba(255,255,255,.03); color:var(--ink-2); white-space:nowrap}
-  .chip.on{color:var(--cyan-soft); border-color:rgba(47,216,255,.35); background:rgba(47,216,255,.08)}
-  .chip.warn{color:#ffd08a; border-color:rgba(255,179,71,.4); background:rgba(255,179,71,.1)}
-  .tile.missing{opacity:.6}
-  .tile.dragover{border-color:var(--cyan)}
-  .grid-empty{grid-column:1/-1; padding:70px 24px; text-align:center; color:var(--ink-2); font-size:13.5px; line-height:1.7}
+  /* a 22px grid corner-masked into the strip, as the IDE does on its card covers */
+  .prj-gridfx{position:absolute; inset:0; pointer-events:none;
+    background-image:
+      linear-gradient(rgba(255,255,255,.10) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.10) 1px, transparent 1px);
+    background-size:22px 22px;
+    -webkit-mask-image:radial-gradient(120% 100% at 0% 0%,#000 30%,transparent 85%);
+    mask-image:radial-gradient(120% 100% at 0% 0%,#000 30%,transparent 85%)}
+  .prj-body{padding:14px 16px 16px}
+  .prj-desc{display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+    line-height:1.45; min-height:2.9em; word-break:break-word}
+  .prj-method{display:inline-flex; align-items:center; gap:6px; font-family:var(--font-mono);
+    font-size:12px; color:var(--ink-2)}
+  .prj-card.missing{opacity:.6}
+  .prj-card.dragover{border-color:var(--cyan)}
+  .grid-empty{grid-column:1/-1; padding:70px 24px; color:var(--ink-2); font-size:13.5px; line-height:1.7;
+    max-width:640px; margin:0 auto; animation:none}
   .grid-empty b{color:var(--cyan-soft); font-weight:600}
-  .grid-empty{max-width:640px; margin:0 auto; text-align:left}
-  .ge-h{font-family:var(--font-ui); font-size:19px; font-weight:650; letter-spacing:-.02em; color:#fff; margin-bottom:16px; text-align:center}
+  .ge-h{font-family:var(--font-display); font-size:21px; font-weight:700; letter-spacing:-.02em; color:#fff;
+    margin-bottom:16px; text-align:center}
   .ge-steps{margin:0; padding-left:20px; display:flex; flex-direction:column; gap:11px}
-  .ge-steps li{padding-left:4px}
   .ge-steps code{font-family:var(--font-mono); font-size:11.5px; color:var(--cyan-soft)}
-  .ge-note{margin-top:18px; padding-top:14px; border-top:1px solid var(--glass-brd); font-family:var(--font-mono); font-size:11px; letter-spacing:.06em; color:var(--ink-3); text-align:center}
+  .ge-note{margin-top:18px; padding-top:14px; border-top:1px solid var(--glass-brd); font-family:var(--font-mono);
+    font-size:11px; letter-spacing:.06em; color:var(--ink-3); text-align:center}
 
 
   /* ---------- rail ---------- */

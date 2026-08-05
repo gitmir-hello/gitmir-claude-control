@@ -156,6 +156,19 @@ async function load(keepSelection){
   else refreshDetailBits();
 }
 
+// Feather-shaped, but at the IDE stroke weight of 1.7 so they sit with everything else.
+const ICON = (function(){
+  const w = function(d, extra){
+    return '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+      + 'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"'
+      + (extra || '') + '>' + d + '</svg>';
+  };
+  return {
+    clock: w('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+    code:  w('<path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/>', ' style="color:var(--cyan)"'),
+  };
+})();
+
 // The home screen. Projects are the whole surface here rather than a column beside
 // something else, because until you have opened one there is nothing else to look at.
 function renderList(){
@@ -173,28 +186,43 @@ function renderList(){
   }
   list.forEach((p, i) => {
     const el = document.createElement('div');
-    el.className = 'tile' + (p.exists ? '' : ' missing');
+    // The same object the IDE renders: a glass plate with the lit rim, the entrance sweep,
+    // a header strip carrying the status badge and the name, then body / divider / footer.
+    el.className = 'glass edge hoverable clickable prj-card' + (p.exists ? '' : ' missing');
     el.draggable = true; el.dataset.path = p.path; el.tabIndex = 0;
     el.style.setProperty('--enter', Math.min(i * 70, 840) + 'ms');
-    const h = hue(displayName(p));
+
+    const q = p.queue || {};
+    const status = !p.exists ? ['badge-danger', 'Missing']
+      : q.pending ? ['badge-amber', q.pending + ' open']
+      : p.hasModel ? ['badge-cyan', 'Mapped']
+      : ['badge-ghost', 'Not mapped'];
+
     el.innerHTML =
-      '<div class="t-top"><span class="t-dot" style="background:hsl(' + h + ',55%,58%)"></span>' +
-        '<span class="t-nm"></span></div>' +
-      '<div class="t-pa"></div>' +
-      '<div class="t-chips"></div>';
-    el.querySelector('.t-nm').textContent = displayName(p);
-    el.querySelector('.t-pa').textContent = p.path;
-    const chips = el.querySelector('.t-chips');
-    if (!p.exists) chips.innerHTML = '<span class="chip warn">folder missing</span>';
-    else {
-      const bits = [];
-      bits.push(p.hasModel ? '<span class="chip on">model</span>' : '<span class="chip">no model</span>');
-      const q = p.queue || {};
-      if (q.pending) bits.push('<span class="chip warn">' + q.pending + ' open</span>');
-      else if (q.done) bits.push('<span class="chip on">queue clear</span>');
-      if (p.tasks) bits.push('<span class="chip">' + p.tasks + ' done</span>');
-      chips.innerHTML = bits.join('');
-    }
+      '<span class="holo-scan" aria-hidden="true"></span>' +
+      '<div class="prj-strip">' +
+        '<span class="prj-gridfx" aria-hidden="true"></span>' +
+        '<span class="prj-strip-status"><span class="badge ' + status[0] + '">'
+          + '<span class="dot"></span>' + esc(status[1]) + '</span></span>' +
+        '<span class="prj-strip-name"></span>' +
+      '</div>' +
+      '<div class="col gap-3 grow prj-body">' +
+        '<div class="prj-desc muted text-sm"></div>' +
+        '<div class="divider" style="margin:auto 0 0"></div>' +
+        '<div class="between gap-2">' +
+          '<span class="row gap-2 dim text-xs">' + ICON.clock + '<span class="pj-log"></span></span>' +
+          '<span class="prj-method">' + ICON.code + '<span class="pj-model"></span></span>' +
+        '</div>' +
+      '</div>';
+    el.querySelector('.prj-strip-name').textContent = displayName(p);
+    // The description is what a person wrote about this project; the path is the fallback,
+    // because a card with an empty paragraph looks broken rather than empty.
+    el.querySelector('.prj-desc').textContent = p.description || p.path;
+    el.querySelector('.pj-log').textContent = p.tasks ? p.tasks + ' done' : 'nothing logged';
+    el.querySelector('.pj-model').textContent = p.hasModel ? 'Modelled' : 'No model';
+    el.querySelector('.prj-strip').style.background =
+      'linear-gradient(135deg, hsla(' + hue(displayName(p)) + ',55%,42%,.34), rgba(9,18,38,.62))';
+
     const open = () => { if(selected!==p.path){ modelSrc=null; logicEntityId=null; } selected = p.path; renderDetail(); };
     el.addEventListener('click', open);
     el.addEventListener('keydown', e => { if(e.key==='Enter' || e.key===' '){ e.preventDefault(); open(); } });
