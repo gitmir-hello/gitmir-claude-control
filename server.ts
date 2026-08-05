@@ -837,8 +837,9 @@ const server = http.createServer(async (req, res) => {
         return {
           name: p.name || '', path: p.path, description: p.description || '', exists,
           hasModel, tasks,
-          // Unproven work is still open work — the same rule the Queue badge uses.
-          queue: { pending: todo + verify, done },
+          // todo is what is waiting to be picked up; verify is built but unproven. The rail
+          // badge counts todo, because that is the number that says there is work to start.
+          queue: { todo, verify, pending: todo + verify, done },
         };
       });
       return sendJSON(res, 200, { projects: list });
@@ -1627,27 +1628,44 @@ const HTML = /* html */ `<!doctype html>
     color:var(--cyan-soft); white-space:nowrap}
   .hud-rule{flex:1; height:1px; background:linear-gradient(90deg,rgba(47,216,255,.5),transparent)}
   .sk-hint{color:var(--ink-3); font-size:12.5px; line-height:1.5; margin-bottom:12px; max-width:760px}
-  .sk-grid{display:grid; gap:10px; grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr))}
-  .sk-tile{position:relative; display:flex; align-items:flex-start; gap:12px; text-align:left;
-    padding:14px 14px 14px 13px; cursor:pointer; font-family:inherit;
-    background:rgba(255,255,255,.02); border:1px solid var(--glass-brd); border-radius:0;
-    transition:border-color .16s ease, background .16s ease, transform .16s ease, box-shadow .16s ease}
-  .sk-tile:hover{border-color:rgba(47,216,255,.45); background:rgba(47,216,255,.04); transform:translateY(-2px);
-    box-shadow:0 0 0 1px rgba(47,216,255,.2), 0 0 22px rgba(47,216,255,.14)}
+  .sk-grid{display:grid; gap:14px; grid-template-columns:repeat(auto-fill,minmax(min(268px,100%),1fr))}
+  .sk-tile{position:relative; display:flex; flex-direction:column; text-align:left; padding:0; overflow:hidden;
+    cursor:pointer; font-family:inherit; background:var(--l2-card); border:1px solid var(--glass-brd); border-radius:0;
+    transition:border-color .16s ease, transform .16s ease, box-shadow .16s ease}
+  .sk-tile:hover{border-color:color-mix(in srgb, var(--tone) 55%, transparent); transform:translateY(-3px);
+    box-shadow:0 0 0 1px color-mix(in srgb, var(--tone) 35%, transparent),
+                0 0 26px color-mix(in srgb, var(--tone) 26%, transparent), 0 16px 40px rgba(0,0,0,.45)}
   .sk-tile:focus-visible{outline:2px solid var(--cyan); outline-offset:2px}
-  .sk-ic{flex:none; width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center;
-    border:1px solid rgba(47,216,255,.3); background:rgba(47,216,255,.06); color:var(--cyan-soft);
-    box-shadow:inset 0 0 10px rgba(47,216,255,.12); transition:color .16s ease, box-shadow .16s ease}
-  .sk-tile:hover .sk-ic{color:var(--cyan); box-shadow:inset 0 0 14px rgba(47,216,255,.2), 0 0 12px rgba(47,216,255,.25)}
-  .sk-body{display:flex; flex-direction:column; gap:5px; min-width:0; flex:1}
-  .sk-name{font-family:var(--font-mono); font-size:12.5px; font-weight:600; letter-spacing:.02em; color:var(--ink-0)}
+  /* The cover carries the picture: a big glyph on a tinted plate with the 22px grid, the
+     same device the project cards use. One image per skill, saying what it does. */
+  .sk-cover{position:relative; min-height:104px; display:flex; align-items:center; justify-content:center;
+    border-bottom:1px solid var(--glass-brd); overflow:hidden;
+    background:
+      radial-gradient(72% 88% at 50% 56%, color-mix(in srgb, var(--tone) 24%, transparent), transparent 72%),
+      linear-gradient(135deg, rgba(22,44,84,.55), rgba(9,18,38,.8))}
+  .sk-tile:hover .sk-cover{background:
+      radial-gradient(72% 88% at 50% 56%, color-mix(in srgb, var(--tone) 34%, transparent), transparent 72%),
+      linear-gradient(135deg, rgba(22,44,84,.55), rgba(9,18,38,.8))}
+  .sk-gridfx{position:absolute; inset:0; pointer-events:none;
+    background-image:
+      linear-gradient(rgba(255,255,255,.10) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.10) 1px, transparent 1px);
+    background-size:22px 22px;
+    -webkit-mask-image:radial-gradient(120% 100% at 0% 0%,#000 30%,transparent 85%);
+    mask-image:radial-gradient(120% 100% at 0% 0%,#000 30%,transparent 85%)}
+  .sk-art{position:relative; color:var(--tone); display:inline-flex;
+    filter:drop-shadow(0 0 14px color-mix(in srgb, var(--tone) 55%, transparent));
+    transition:transform .18s ease, filter .18s ease}
+  .sk-tile:hover .sk-art{transform:scale(1.06);
+    filter:drop-shadow(0 0 20px color-mix(in srgb, var(--tone) 75%, transparent))}
+  .sk-go{position:absolute; top:10px; right:10px; color:var(--ink-3); transition:color .16s ease}
+  .sk-tile:hover .sk-go{color:var(--tone)}
+  .sk-body{display:flex; flex-direction:column; gap:6px; padding:13px 15px 15px; min-width:0}
+  .sk-name{font-family:var(--font-mono); font-size:13px; font-weight:600; letter-spacing:.02em; color:#fff}
   .sk-desc{font-size:12.5px; line-height:1.5; color:var(--ink-2);
     display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden}
-  .sk-go{flex:none; color:var(--ink-3); transition:color .16s ease, transform .16s ease}
-  .sk-tile:hover .sk-go{color:var(--cyan-soft); transform:translateY(-1px)}
-  /* the confirmation is the tile itself — no toast needed to know it worked */
-  .sk-tile.done{border-color:rgba(52,240,166,.55); background:rgba(52,240,166,.06)}
-  .sk-tile.done .sk-ic{color:var(--c-ok); border-color:rgba(52,240,166,.5); background:rgba(52,240,166,.08)}
+  .sk-tile.done{border-color:rgba(52,240,166,.55)}
+  .sk-tile.done .sk-art{color:var(--c-ok); filter:drop-shadow(0 0 18px rgba(52,240,166,.7))}
   .sk-tile.done .sk-go{color:var(--c-ok)}
   .skills-empty{color:var(--ink-3); font-size:13px}
 

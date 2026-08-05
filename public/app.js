@@ -263,7 +263,7 @@ function setShell(open){
 
 const RAIL = [
   { tab:'settings', ic:'settings', l:'Setup' },
-  { tab:'tasks',    ic:'tasks',    l:'Tasks',   badge:'taskBadge' },
+  { tab:'tasks',    ic:'tasks',    l:'Tasks' },
   { tab:'model',    ic:'schema',   l:'Model',   badge:'modelBadge' },
   { tab:'queue',    ic:'columns',  l:'Queue',   badge:'queueBadge' },
   { tab:'team',     ic:'user',     l:'Team',    badge:'teamBadge' },
@@ -368,6 +368,10 @@ function renderDetail(){
     '</div>';
   setShell(true);
   renderRail();
+  // Fill it from the project list we already have, so the count is there on arrival
+  // instead of appearing only once someone opens the Queue tab.
+  const qb=document.getElementById('queueBadge');
+  if(qb && p.queue && p.queue.todo) qb.textContent = String(p.queue.todo);
   topProjEl.innerHTML =
     '<button class="tp-back" title="All projects">←</button>' +
     '<span class="tp-nm"></span><span class="tp-pa"></span>';
@@ -415,16 +419,16 @@ async function loadSkillsList(){
 // Skills grouped by WHEN you reach for them, not alphabetically. Eleven flat buttons is a
 // list to read; four small groups is a decision you can make at a glance.
 const SKILL_GROUPS = [
-  { title:'Understand what exists',
+  { title:'Understand what exists', tone:'api',
     hint:'Build a model of the product from the real code, then read it instead of the repo.',
     items:{ 'gitmir-model':'schema', 'model-ingest':'layers', 'model-navigate':'compass' } },
-  { title:'Decide what to build',
+  { title:'Decide what to build', tone:'event',
     hint:'Turn raw input into something precise enough to build from, before any code.',
     items:{ 'product-docs-spec':'table', 'context-distillation':'filter' } },
-  { title:'Build and prove it',
+  { title:'Build and prove it', tone:'module',
     hint:'Plan with checks, run the queue, audit the result, keep the record.',
     items:{ 'task-planner':'list', 'task-runner':'play', 'app-audit':'shield', 'task-log':'check' } },
-  { title:'Work on code you inherited',
+  { title:'Work on code you inherited', tone:'server',
     hint:'Change an old system without breaking it, or move it to a new stack at parity.',
     items:{ 'legacy-maintenance':'branch', 'stack-port':'external' } },
 ];
@@ -439,13 +443,13 @@ function renderSkillButtons(){
   for(const s of SKILLS) byName[s.name] = s;
   const placed = {};
   const groups = SKILL_GROUPS.map(g => ({
-    title: g.title, hint: g.hint,
+    title: g.title, hint: g.hint, tone: g.tone,
     list: Object.keys(g.items).filter(n => byName[n]).map(n => { placed[n]=1; return [byName[n], g.items[n]]; }),
   })).filter(g => g.list.length);
   // A skill added to skills.json that this file has never heard of still shows up, rather
   // than silently vanishing because it is not in a group.
   const rest = SKILLS.filter(s => !placed[s.name]).map(s => [s, 'spark']);
-  if(rest.length) groups.push({ title:'Other', hint:'', list:rest });
+  if(rest.length) groups.push({ title:'Other', hint:'', tone:'api', list:rest });
 
   for(const g of groups){
     const sec = document.createElement('div');
@@ -459,13 +463,17 @@ function renderSkillButtons(){
       const it = document.createElement('button');
       it.className = 'sk-tile'; it.type = 'button';
       it.title = 'Copy ' + (s.title || s.name) + ' — paste into Claude';
+      it.style.setProperty('--tone', 'var(--c-' + (g.tone || 'api') + ')');
       it.innerHTML =
-        '<span class="sk-ic">' + svgIcon(icon, 18) + '</span>' +
+        '<span class="sk-cover">' +
+          '<span class="sk-gridfx" aria-hidden="true"></span>' +
+          '<span class="sk-art">' + svgIcon(icon, 46) + '</span>' +
+          '<span class="sk-go">' + svgIcon('copy', 15) + '</span>' +
+        '</span>' +
         '<span class="sk-body">' +
           '<span class="sk-name">' + esc(s.title || s.name) + '</span>' +
           (s.desc ? '<span class="sk-desc">' + esc(s.desc) + '</span>' : '') +
-        '</span>' +
-        '<span class="sk-go">' + svgIcon('copy', 15) + '</span>';
+        '</span>';
       it.addEventListener('click', async () => {
         it.classList.add('done');
         setTimeout(() => it.classList.remove('done'), 1400);
@@ -1104,9 +1112,10 @@ async function loadQueue(pathStr){
   if(selected!==pathStr) return;
   renderAudit(q);   // before the no-tasks return: an audit can outlive its tasks
   const total=(q.todo||[]).length+(q.inprogress||[]).length+(q.verify||[]).length+(q.done||[]).length;
-  // Unverified work is still open work, so the badge counts todo + verify.
-  const pending=(q.todo||[]).length+(q.verify||[]).length;
-  const badge=document.getElementById('queueBadge'); if(badge) badge.textContent = pending ? String(pending) : '';
+  // The badge counts todo: what is waiting to be picked up. Verify is built but unproven —
+  // it is shown in its own column, and it is not a number that says "start something".
+  const badge=document.getElementById('queueBadge');
+  if(badge) badge.textContent = (q.todo||[]).length ? String((q.todo||[]).length) : '';
   if(!total){ view.innerHTML='<div class="model-empty">No tasks yet.<br>Open <b>Model</b>, click any element in a diagram → <b>＋ Create task</b> (or copy the <b>task-planner</b> skill). Then run <b>📋 task-runner</b> in Claude — it executes them one by one, moving each file todo → inprogress → verify → done — a task is only done once its checks actually pass.</div>'; return; }
   const cols=[['todo','To do','#8aa0ff'],['inprogress','In progress','#ffb86b'],['verify','Verify','#c084fc'],['done','Done','#34f0a6']];
   let html='<div class="q-cols">';
@@ -1586,7 +1595,6 @@ async function refreshTasks(pathStr){
   if (selected !== pathStr) return;               // switched to another project
   const cont = document.getElementById('taskList'); if(!cont) return;
   const tasks = d.tasks || [];
-  const cEl = document.getElementById('taskBadge'); if(cEl) cEl.textContent = tasks.length ? String(tasks.length) : '';
   const uEl = document.getElementById('taskUpd'); if(uEl) uEl.textContent = d.updated ? ('updated '+fmtTime(d.updated)) : '';
   if(!tasks.length){
     cont.innerHTML = '<div class="tasks-empty">No entries yet.<br>1) <b>▶ Run Claude</b> · 2) in Settings click <b>📋 task-log</b> · 3) paste into claude (⌘V) and Enter — it will start logging what it does here.</div>';
