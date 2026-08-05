@@ -220,8 +220,6 @@ function renderList(){
     el.querySelector('.prj-desc').textContent = p.description || p.path;
     el.querySelector('.pj-log').textContent = p.tasks ? p.tasks + ' done' : 'nothing logged';
     el.querySelector('.pj-model').textContent = p.hasModel ? 'Modelled' : 'No model';
-    el.querySelector('.prj-strip').style.background =
-      'linear-gradient(135deg, hsla(' + hue(displayName(p)) + ',55%,42%,.34), rgba(9,18,38,.62))';
 
     const open = () => { if(selected!==p.path){ modelSrc=null; logicEntityId=null; } selected = p.path; renderDetail(); };
     el.addEventListener('click', open);

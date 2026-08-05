@@ -1355,27 +1355,41 @@ const HTML = /* html */ `<!doctype html>
 
   /* ---------- shell: topbar, rail, grid ---------- */
   .topbar,.shell{position:relative; z-index:1}
-  .topbar{position:sticky; top:0; z-index:40; height:var(--topbar-h); display:flex; align-items:center; gap:14px;
-    padding:0 18px; border-bottom:1px solid var(--line); background:rgba(4,8,16,.86); backdrop-filter:blur(14px)}
+  .topbar{position:sticky; top:0; z-index:40; height:var(--topbar-h); display:flex; align-items:center; gap:16px;
+    padding:0 22px; border-bottom:1px solid var(--glass-brd);
+    background:linear-gradient(180deg,rgba(16,31,60,.97),rgba(11,21,44,.97))}
   .brand-link{display:flex; align-items:center; flex-shrink:0}
-  .brand-logo{height:19px; display:block}
-  .brand-sub{font-family:var(--font-mono); font-size:11px; letter-spacing:.2em; text-transform:uppercase; color:var(--ink-3);
-    padding-left:14px; border-left:1px solid var(--line); white-space:nowrap}
-  .topbar .c{font-family:var(--font-mono); font-size:11px; color:var(--ink-3)}
+  .brand-logo{height:27px; display:block}
+  .brand-sub{font-family:var(--font-mono); font-size:12px; letter-spacing:.18em; text-transform:uppercase; color:var(--ink-2);
+    padding-left:16px; border-left:1px solid var(--glass-brd); white-space:nowrap}
+  .topbar .c{font-family:var(--font-mono); font-size:12px; color:var(--ink-3)}
   .top-tools{margin-left:auto; display:flex; gap:10px; align-items:center}
-  .top-tools .search{width:230px; height:32px; padding:0 11px; background:var(--panel2); border:1px solid var(--line);
-    color:var(--ink-0); font-family:var(--font-ui); font-size:13px; outline:none; transition:border-color .16s}
-  .top-tools .search:focus{border-color:var(--line2)}
-  .top-tools .add{height:32px; padding:0 14px; background:var(--cyan); border:none; color:#05070c; cursor:pointer;
-    font-family:var(--font-mono); font-size:11px; letter-spacing:.12em; text-transform:uppercase; font-weight:600; white-space:nowrap}
-  .top-tools .add:hover{background:var(--cyan-soft)}
+  .top-tools .search{width:250px}
+  /* .btn-primary from holo.css: an ink-white plate that flips to luminous cyan on hover,
+     not a cyan plate at rest. The white is what makes it the one obvious action on the page. */
+  .top-tools .add{display:inline-flex; align-items:center; gap:9px; height:40px; padding:0 20px;
+    border:1px solid transparent; border-radius:0; cursor:pointer;
+    background:var(--ink-0); color:#05070c; font-family:var(--font-ui); font-size:14px; font-weight:700;
+    letter-spacing:.01em; white-space:nowrap; box-shadow:0 0 22px rgba(47,216,255,.12);
+    transition:background .22s ease, box-shadow .3s ease, transform .16s ease, color .22s ease}
+  .top-tools .add:hover{background:var(--cyan); color:#05070c; box-shadow:0 0 30px rgba(47,216,255,.5)}
+  .top-tools .add:active{transform:translateY(1px)}
+  /* the search field gets the IDE input treatment, magnifier included */
+  .top-tools .search{height:40px; padding:0 13px 0 38px; background:rgba(8,16,36,.5);
+    border:1px solid var(--glass-brd); color:var(--ink-0); font-family:var(--font-ui); font-size:14px;
+    outline:none; transition:border-color .16s ease, box-shadow .16s ease, background-color .16s ease;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%237e93b3' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20 20l-3.5-3.5'/%3E%3C/svg%3E");
+    background-repeat:no-repeat; background-position:left 13px center; background-size:16px 16px}
+  .top-tools .search::placeholder{color:var(--ink-3)}
+  .top-tools .search:focus{border-color:rgba(47,216,255,.55); box-shadow:0 0 0 3px rgba(47,216,255,.12);
+    background-color:rgba(8,16,36,.78)}
   .top-proj{display:none; align-items:center; gap:12px; min-width:0}
   .top-proj.on{display:flex}
-  .tp-back{width:28px; height:28px; flex-shrink:0; background:none; border:1px solid var(--line); color:var(--ink-2);
+  .tp-back{width:32px; height:32px; flex-shrink:0; background:none; border:1px solid var(--line); color:var(--ink-2);
     cursor:pointer; font-size:14px; line-height:1}
   .tp-back:hover{border-color:var(--line2); color:var(--cyan)}
-  .tp-nm{font-size:14px; font-weight:650; color:var(--ink-0); white-space:nowrap}
-  .tp-pa{font-family:var(--font-mono); font-size:11px; color:var(--ink-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .tp-nm{font-family:var(--font-display); font-size:16px; font-weight:700; letter-spacing:-.01em; color:#fff; white-space:nowrap}
+  .tp-pa{font-family:var(--font-mono); font-size:12px; color:var(--ink-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 
   .shell{display:flex; align-items:stretch; min-height:calc(100vh - var(--topbar-h))}
   .main{flex:1; min-width:0; padding:22px 24px 60px}
@@ -1392,6 +1406,9 @@ const HTML = /* html */ `<!doctype html>
     box-shadow:0 0 44px rgba(2,8,16,.5), inset 0 0 34px rgba(40,120,180,.06)}
   /* four L-brackets and a lit top edge, all painted as backgrounds on one pseudo-element */
   .glass::before{content:""; position:absolute; inset:-1px; pointer-events:none; z-index:1;
+    --cb:13px;              /* corner bracket arm length */
+    --cw:2px;               /* corner stroke width */
+    --cc:var(--cyan);
     background:
       linear-gradient(90deg,transparent,rgba(95,222,255,.55),transparent) 50% 0 / calc(100% - 44px) 1px no-repeat,
       linear-gradient(var(--cc),var(--cc)) 0 0 / var(--cb) var(--cw) no-repeat,
@@ -1466,8 +1483,11 @@ const HTML = /* html */ `<!doctype html>
   .prj-body{padding:14px 16px 16px}
   .prj-desc{display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
     line-height:1.45; min-height:2.9em; word-break:break-word}
-  .prj-method{display:inline-flex; align-items:center; gap:6px; font-family:var(--font-mono);
-    font-size:12px; color:var(--ink-2)}
+  /* a bordered pill, not bare text — it is a stated fact about the project, and the
+     border is what separates it from the date on the other side of the footer. */
+  .prj-method{display:inline-flex; align-items:center; gap:6px; padding:4px 9px;
+    border:1px solid var(--glass-brd); background:rgba(255,255,255,.03);
+    font-size:12px; color:var(--ink-1); white-space:nowrap}
   .prj-card.missing{opacity:.6}
   .prj-card.dragover{border-color:var(--cyan)}
   .grid-empty{grid-column:1/-1; padding:70px 24px; color:var(--ink-2); font-size:13.5px; line-height:1.7;
@@ -2023,7 +2043,7 @@ const HTML = /* html */ `<!doctype html>
     <div class="top-proj" id="topProj"></div>
     <div class="top-tools" id="topTools">
       <input class="search" id="search" placeholder="Search projects…" autocomplete="off">
-      <button class="add" id="addBtn">＋ Add project</button>
+      <button class="add" id="addBtn">+ New project</button>
     </div>
   </header>
 
