@@ -15,6 +15,23 @@ description: >-
 
 # GitMir object-information model
 
+## Language
+
+**Write everything you produce in English.** File names and their contents,
+object names and descriptions, task titles, `## Context` and `## Verify` steps,
+log entries, notes, findings, briefs, docs — all of it, always, no matter what
+language the request arrived in.
+
+This is not a style preference. These artefacts are read by people who did not
+write them: a teammate on a shared model, a client opening a shared link, a
+reviewer on a public repository, and the next session of Claude, which orients
+from what is on disk. A model whose descriptions are half in one language and
+half in another cannot be read straight through by any of them.
+
+If a value is a proper noun — a table name, a route path, a status key, an
+identifier from the code — keep it exactly as the code spells it. Translate the
+prose around it, never the thing itself.
+
 ## What you are building
 
 A **living blueprint of what this product actually is** — not the code, the
@@ -351,6 +368,11 @@ units, events, business processes, status flows, reactions), cross-linked by id.
   the affected `.gitmir/model/*.json` in the SAME session before finishing, keeping
   ids stable and integrity intact, and refresh `index.json`. Never leave the model
   stale after a code change.
+- **Write the model in English.** Names, descriptions, notes, step text — every
+  word of it, whatever language the request came in. Identifiers that come from
+  the code (table names, route paths, status keys) stay exactly as the code
+  spells them. The model is read by teammates, clients and later sessions; one
+  written in two languages cannot be read straight through by any of them.
 - Rebuild/update the model with the `gitmir-model` skill.
 ```
 

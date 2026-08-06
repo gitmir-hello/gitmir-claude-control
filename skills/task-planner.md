@@ -10,6 +10,23 @@ is finished when it has been **proven**:
 Your job is to make that provable: every task you write must carry the steps that
 show it actually works.
 
+## Language
+
+**Write everything you produce in English.** File names and their contents,
+object names and descriptions, task titles, `## Context` and `## Verify` steps,
+log entries, notes, findings, briefs, docs — all of it, always, no matter what
+language the request arrived in.
+
+This is not a style preference. These artefacts are read by people who did not
+write them: a teammate on a shared model, a client opening a shared link, a
+reviewer on a public repository, and the next session of Claude, which orients
+from what is on disk. A model whose descriptions are half in one language and
+half in another cannot be read straight through by any of them.
+
+If a value is a proper noun — a table name, a route path, a status key, an
+identifier from the code — keep it exactly as the code spells it. Translate the
+prose around it, never the thing itself.
+
 ## Task types
 
 Give each task a `Type:` line. Three types come from you; the fourth is created by

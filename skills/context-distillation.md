@@ -11,6 +11,23 @@ existing code itself. Especially useful when whoever wants the work cannot
 formulate a clean task — you turn "here is what we'd like and what hurts" into a
 structured brief both sides can read and confirm BEFORE anything is built.
 
+## Language
+
+**Write everything you produce in English.** File names and their contents,
+object names and descriptions, task titles, `## Context` and `## Verify` steps,
+log entries, notes, findings, briefs, docs — all of it, always, no matter what
+language the request arrived in.
+
+This is not a style preference. These artefacts are read by people who did not
+write them: a teammate on a shared model, a client opening a shared link, a
+reviewer on a public repository, and the next session of Claude, which orients
+from what is on disk. A model whose descriptions are half in one language and
+half in another cannot be read straight through by any of them.
+
+If a value is a proper noun — a table name, a route path, a status key, an
+identifier from the code — keep it exactly as the code spells it. Translate the
+prose around it, never the thing itself.
+
 ## What to read
 
 Read the sources the user points at (docs, tickets, threads, the goal in their
