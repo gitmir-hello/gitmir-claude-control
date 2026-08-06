@@ -1910,6 +1910,7 @@ const HTML = /* html */ `<!doctype html>
   .imp-chip.rm .x{color:var(--ink-3); margin-left:3px}
   .imp-chip.rm:hover .x{color:var(--c-danger)}
   .imp-none{font-size:12px; color:var(--ink-3)}
+  .imp-graph{margin-top:4px}
   /* impact figures on a queue card */
   .q-imp{display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-top:7px}
   .q-ok{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.06em; color:var(--c-ok)}

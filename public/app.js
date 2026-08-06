@@ -2359,7 +2359,7 @@ function blastRadius(seedIds, m, hops){
   for(const k of Object.keys(byKind)) byKind[k].sort((a,b)=>a.d-b.d || a.id.localeCompare(b.id));
   const modules=new Set();
   for(const id of dist.keys()){ const md=moduleOf(id,m); if(md) modules.add(md); }
-  return { seed, dist, byKind, modules:[...modules], hops };
+  return { seed, dist, byKind, modules:[...modules], hops, adj };
 }
 
 // A journey is a process a person walks through. `audience` says so when the model
@@ -2535,6 +2535,8 @@ function drawImpactDetail(row, m){
     (d!=null&&d>0&&d<n?'<div class="imp-d">'+d+' directly</div>':'')+'</div>';
   h+='</div>';
 
+  h+='<div class="imp-sec">What it reaches, drawn</div><div class="imp-graph" id="impGraph"></div>';
+
   h+='<div class="imp-risk '+risk.level+'"><div class="imp-risk-h"><span class="imp-risk-l">Business risk</span>'+
      '<span class="imp-risk-v">'+esc(risk.level)+'</span>'+
      '<span class="imp-risk-s">reaches '+Math.round(risk.share*100)+'% of the product · '+risk.score+' of '+risk.max+' points</span></div>';
@@ -2570,6 +2572,7 @@ function drawImpactDetail(row, m){
      '<button class="ghost imp-open">Open task file</button></div>'+
      (t.approved?'':'<div class="imp-appr-h">Approving writes an <code>Approved:</code> line into the task file. It travels with the task and whoever runs it can see it — including Claude.</div>');
   box.innerHTML=h;
+  drawImpactGraph(document.getElementById('impGraph'), named, m);
   box.querySelectorAll('.imp-chip[data-id]').forEach(b=>b.addEventListener('click',()=>{
     const id=b.dataset.id, k=kindOf(id);
     // In a what-if the chip is the selection, so clicking removes it; elsewhere it opens.
@@ -2931,4 +2934,109 @@ function wireAdhocSearch(m){
   };
   inp.addEventListener('input', draw);
   draw();
+}
+
+/* ---------------- The radius, drawn ----------------
+   A node per reached object is never readable: on real tasks one hop already reaches
+   up to 150 objects. It is also the wrong question. What someone deciding whether to
+   run a task needs is: what does it change, whose part of the product does that touch,
+   and which journeys can it break. Three columns, each small enough to read. */
+const IMP_MAX_SEEDS = 14;
+
+function kindWord(k, n){
+  const w={entity:'object', function:'function', route:'endpoint', frontend:'screen',
+    event:'event', statusFlow:'lifecycle', reaction:'rule', serverUnit:'unit', field:'field'}[k]||k;
+  return n+' '+w+(n===1?'':'s');
+}
+
+function graphImpact(named, m, hops){
+  const H = hops==null ? 2 : hops;
+  const full = blastRadius(named, m, H);
+  const nodes=[], edges=[];
+  const seedIds=[...full.dist.entries()].filter(([,d])=>d===0).map(([id])=>id);
+  // What each named object reaches on its own — that is what makes the arrows honest
+  // rather than "everything connects to everything".
+  const reachOf=new Map();
+  for(const id of seedIds) reachOf.set(id, blastRadius([id], m, H).dist);
+
+  const shownSeeds = seedIds.slice(0, IMP_MAX_SEEDS);
+  const seedRest = seedIds.length - shownSeeds.length;
+  for(const id of shownSeeds){
+    const mod=moduleOf(id,m), label=labelOf(id,m);
+    const sub=(kindOf(id)||'')+(mod?' · '+labelOf(mod,m):'');
+    const W=Math.max(180, Math.min(268, label.length*7.4+50));
+    const L=wrapPx(sub, W-15-11, CW_MONO);
+    nodes.push({id:'s_'+mSafe(id), w:Math.round(W), h:L.length?subH(L.length):44,
+      meta:{kind:kindOf(id)==='statusFlow'?'status':kindOf(id), label, sub, subLines:L,
+            heat:1, ref:{k:kindOf(id), id}}});
+  }
+  if(seedRest>0) nodes.push({id:'s_more', w:190, h:44,
+    meta:{kind:'entity', label:'+'+seedRest+' more', sub:'also changed directly', subLines:['also changed directly'], heat:1, ref:null}});
+
+  // Areas the change lands in, each saying what of it is in reach.
+  const byArea=new Map();
+  for(const [id,d] of full.dist){
+    if(d===0) continue;
+    const mod=moduleOf(id,m); if(!mod) continue;
+    if(!byArea.has(mod)) byArea.set(mod, {});
+    const k=kindOf(id); byArea.get(mod)[k]=(byArea.get(mod)[k]||0)+1;
+  }
+  const areaOrder=[...byArea.entries()].sort((a,b)=>
+    Object.values(b[1]).reduce((s,n)=>s+n,0)-Object.values(a[1]).reduce((s,n)=>s+n,0));
+  for(const [mod,counts] of areaOrder){
+    const parts=['entity','function','route','frontend','event','statusFlow']
+      .filter(k=>counts[k]).map(k=>kindWord(k,counts[k]));
+    const label=labelOf(mod,m), sub=parts.join(' · ');
+    const W=Math.max(200, Math.min(290, Math.max(label.length*7.4+50, sub.length*6.2+30)));
+    const L=wrapPx(sub, W-15-11, CW_MONO);
+    nodes.push({id:'a_'+mSafe(mod), w:Math.round(W), h:L.length?subH(L.length):44,
+      meta:{kind:'module', label, sub, subLines:L, heat:0.5, ref:{k:'module', id:mod}}});
+    for(const sid of shownSeeds){
+      const r=reachOf.get(sid); if(!r) continue;
+      let touches=false;
+      for(const [id,d] of r){ if(d>0 && moduleOf(id,m)===mod){ touches=true; break; } }
+      if(touches) edges.push({from:'s_'+mSafe(sid), to:'a_'+mSafe(mod), kind:'spine'});
+    }
+  }
+
+  // The journeys a person walks through — the answer to "what will users notice".
+  const procs=(full.byKind.process||[]).map(x=>objById(x.id,m)).filter(Boolean);
+  const journeys=procs.filter(isJourney), internal=procs.length-journeys.length;
+  for(const j of journeys){
+    const label=j.name||j.id, sub=(j.steps||[]).length+' steps · '+(j.audience||j.triggerKind||'journey');
+    const W=Math.max(190, Math.min(280, label.length*7.4+50));
+    const L=wrapPx(sub, W-15-11, CW_MONO);
+    nodes.push({id:'j_'+mSafe(j.id), w:Math.round(W), h:L.length?subH(L.length):44,
+      meta:{kind:'process', label, sub, subLines:L, heat:0.7, ref:{k:'process', id:j.id}}});
+    const hit=new Set();
+    for(const st of (j.steps||[])){ const mod=st.refId&&full.dist.has(st.refId)?moduleOf(st.refId,m):null; if(mod&&byArea.has(mod)) hit.add(mod); }
+    for(const mod of hit) edges.push({from:'a_'+mSafe(mod), to:'j_'+mSafe(j.id), kind:'effect'});
+  }
+  if(internal>0){
+    nodes.push({id:'j_internal', w:210, h:44,
+      meta:{kind:'process', label:internal+' internal flow'+(internal===1?'':'s'),
+            sub:'machinery, nobody walks through it', subLines:['machinery, nobody walks through it'], heat:0.25, ref:null}});
+    // Without edges it lands in the first column and reads as something the task changes.
+    const hit=new Set();
+    for(const pr of procs){ if(isJourney(pr)) continue;
+      for(const st of (pr.steps||[])){ const mod=st.refId&&full.dist.has(st.refId)?moduleOf(st.refId,m):null; if(mod&&byArea.has(mod)) hit.add(mod); } }
+    for(const mod of hit) edges.push({from:'a_'+mSafe(mod), to:'j_internal', kind:'effect'});
+  }
+
+  return { direction:'RIGHT', nodes, edges, seedRest, areas:areaOrder.length, journeys:journeys.length };
+}
+
+async function drawImpactGraph(box, named, m, seq){
+  if(!box) return;
+  const spec=graphImpact(named, m);
+  if(!spec.nodes.length){ box.innerHTML='<div class="model-empty">Nothing to draw — this task names no object that is in the model.</div>'; return; }
+  const note=document.createElement('div'); note.className='map-cap';
+  note.innerHTML='Read it left to right: <b>what the task changes</b> → <b>the areas that reaches</b>, each saying how much of it is in reach → '+
+    '<b>the journeys that run through those areas</b>. Click any node for its own context.'+
+    '<span class="map-cap2">Areas and journeys are grouped on purpose: one hop out already reaches over a hundred objects on a real task, '+
+    'and a node for each of them is a picture nobody can read. The exact counts are in the cards above.</span>';
+  box.innerHTML=''; box.appendChild(note);
+  const d=document.createElement('div'); box.appendChild(d);
+  await renderElk(d, spec);
+  if(seq!=null && !viewAlive(seq)) box.innerHTML='';
 }
