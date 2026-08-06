@@ -243,7 +243,14 @@ function renderList(){
     el.querySelector('.pj-log').textContent = p.tasks ? p.tasks + ' done' : 'nothing logged';
     el.querySelector('.pj-model').textContent = p.hasModel ? 'Modelled' : 'No model';
 
-    const open = () => { if(selected!==p.path){ modelSrc=null; logicEntityId=null; } selected = p.path; renderDetail(); };
+    const open = () => {
+      // Everything below belongs to the project being left: a hand-picked what-if, a
+      // selected task, a layer showing that task. Carrying them into another project
+      // would show one product's answer on another product's map.
+      if(selected!==p.path){ modelSrc=null; logicEntityId=null;
+        changesData=null; changesFor=null; impactPick=null; adhocIds=[]; mapLayer='none'; }
+      selected = p.path; renderDetail();
+    };
     el.addEventListener('click', open);
     el.addEventListener('keydown', e => { if(e.key==='Enter' || e.key===' '){ e.preventDefault(); open(); } });
     wireDrag(el);
@@ -495,7 +502,13 @@ async function copySkill(name, title){
 
 /* ---------- model (.gitmir) visualization ---------- */
 let modelData = null;
+let modelFor=null;   // which project modelData belongs to
 let modelView = 'logic';
+// Every view switch bumps this. Laying a diagram out is async, so without it a slow
+// view keeps appending into the pane after someone has already moved to another one —
+// which reads as "the new view is broken" when it was overwritten a second later.
+let modelViewSeq = 0;
+const viewAlive = (s) => s === modelViewSeq;
 let logicEntityId = null;
 let modelSrc = null;   // null = this project's own model; otherwise a teammate's name
 let mermaidReady = null;
@@ -733,7 +746,7 @@ async function loadModel(pathStr){
   // A teammate's snapshot can disappear (project rebound, folder cleaned) — fall
   // back to our own model rather than showing an empty pane for a missing source.
   if(modelSrc && !(d.shared||[]).some(s=>s.name===modelSrc)){ modelSrc=null; return loadModel(pathStr); }
-  modelData=d;
+  modelData=d; modelFor=pathStr;
   renderModelSrc(d);
   renderModelStale(d);
   renderIngest(d);   // after stale: a running ingest owns the tab badge
@@ -939,14 +952,15 @@ function renderModelNav(){
 
 async function renderModelView(){
   const view=document.getElementById('modelView'); if(!view||!modelData) return;
+  const seq=++modelViewSeq;
   const m=modelData.model;
-  if(modelView==='logic') return renderLogic(view, m);
-  if(modelView==='overview') return renderOverview(view, modelData);
-  if(modelView==='journeys') return renderProcesses(view, m);
-  if(modelView==='impact') return renderImpact(view, m);
-  if(modelView==='timeline') return renderTimeline(view, m);
-  if(modelView==='decisions') return renderDecisions(view, m);
-  if(modelView==='events') return renderEvents(view, m);
+  if(modelView==='logic') return renderLogic(view, m, seq);
+  if(modelView==='overview') return renderOverview(view, modelData, seq);
+  if(modelView==='journeys') return renderProcesses(view, m, seq);
+  if(modelView==='impact') return renderImpact(view, m, seq);
+  if(modelView==='timeline') return renderTimeline(view, m, seq);
+  if(modelView==='decisions') return renderDecisions(view, m, seq);
+  if(modelView==='events') return renderEvents(view, m, seq);
   view.innerHTML='';
   const box=document.createElement('div'); view.appendChild(box);
   if(modelView==='map'){
@@ -1085,6 +1099,7 @@ function openContextPopup(kind,id){
         (SHARE ? '' : (modelSrc
           ? '<button class="run ctx-send">➤ Send to team</button><button class="ghost ctx-create">＋ Queue here</button>'
           : '<button class="run ctx-create">＋ Create task</button>'))+
+        (SHARE ? '' : '<button class="ghost ctx-radius">◎ Radius on map</button>')+
         '<button class="ghost ctx-copy">📋 Copy context</button>'+
         (SHARE ? '' : '<button class="ghost ctx-copyt">📋 Copy context + task</button>')+
         '<button class="del ctx-close">Close</button>'+
@@ -1096,6 +1111,12 @@ function openContextPopup(kind,id){
     const k=b.dataset.k, box=ov.querySelector('.of-exp[data-k="'+k+'"]');
     const on=b.classList.toggle('on'); if(box) box.classList.toggle('on', on);
   }));
+  // From any object to the same picture the queue gets: its reach, lit on the map.
+  const rb=ov.querySelector('.ctx-radius');
+  if(rb) rb.addEventListener('click',()=>{
+    impactPick='__adhoc'; adhocIds=[id]; mapLayer='change'; modelView='map';
+    close(); renderModelNav(); renderModelView();
+  });
   ov.querySelectorAll('.of-dep').forEach(b=>b.addEventListener('click',()=>{
     const nid=b.dataset.id, nk=kindOf(nid);
     if(['entity','function','route','event','frontend','module','process'].includes(nk)){ close(); openContextPopup(nk,nid); }
@@ -1150,17 +1171,51 @@ async function loadQueue(pathStr){
   // it is shown in its own column, and it is not a number that says "start something".
   const badge=document.getElementById('queueBadge');
   if(badge) badge.textContent = (q.todo||[]).length ? String((q.todo||[]).length) : '';
+  // The queue is where someone decides what to run next, so the impact figures have to be
+  // here without a detour through the Model tab. Both loads are cheap and local; if the
+  // model has not been read yet, read it and draw the queue again once it lands.
+  await loadChanges(true);
+  if(!modelData || modelFor!==pathStr){ loadModel(pathStr).then(()=>{ if(selected===pathStr && activeTab==='queue') loadQueue(pathStr); }); }
   if(!total){ view.innerHTML='<div class="model-empty">No tasks yet.<br>Open <b>Model</b>, click any element in a diagram → <b>＋ Create task</b> (or copy the <b>task-planner</b> skill). Then run <b>📋 task-runner</b> in Claude — it executes them one by one, moving each file todo → inprogress → verify → done — a task is only done once its checks actually pass.</div>'; return; }
   const cols=[['todo','To do','#8aa0ff'],['inprogress','In progress','#ffb86b'],['verify','Verify','#c084fc'],['done','Done','#34f0a6']];
   let html='<div class="q-cols">';
   for(const [k,label,acc] of cols){ const items=q[k]||[];
     html+='<div class="q-col"><div class="q-col-h" style="color:'+acc+'">'+label+' <span class="q-n">'+items.length+'</span></div><div class="q-list">';
     if(!items.length) html+='<div class="q-empty">—</div>';
-    for(const it of items) html+='<div class="q-card q-clk" data-col="'+esc(k)+'" data-file="'+esc(it.file)+'" title="Open full task" style="border-left-color:'+acc+'"><div class="q-t">'+esc(it.title)+'</div><div class="q-f">'+esc(it.file)+'</div></div>';
+    for(const it of items){
+      // What the impact view already knows about this exact file: which model objects it
+      // names, how far that reaches, and whether anyone approved it. Showing it here is
+      // the point — the queue is where someone decides what to run next.
+      const ci = queueImpact(it.file);
+      html+='<div class="q-card q-clk" data-col="'+esc(k)+'" data-file="'+esc(it.file)+'" title="Open full task" style="border-left-color:'+acc+'">'+
+        '<div class="q-t">'+esc(it.title)+'</div><div class="q-f">'+esc(it.file)+'</div>'+
+        (ci ? '<div class="q-imp">'+
+                (ci.approved?'<span class="q-ok" title="Approved '+esc(ci.approved)+'">✓ approved</span>':'')+
+                '<button class="q-risk '+ci.level+'" data-imp="'+esc(it.file)+'" title="Open this in Impact">'+
+                  esc(ci.level)+' · '+ci.n+' object'+(ci.n===1?'':'s')+'</button>'+
+              '</div>' : '')+
+        '</div>';
+    }
     html+='</div></div>';
   }
   view.innerHTML=html+'</div>';
   view.querySelectorAll('.q-clk').forEach(c=> c.addEventListener('click', ()=> openTaskPopup(pathStr, c.dataset.col, c.dataset.file)));
+  // The risk pill is a jump, not a label: it opens the Model tab on Impact with this
+  // task already selected.
+  view.querySelectorAll('.q-risk').forEach(b=> b.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    impactPick=b.dataset.imp; modelView='impact'; setTab('model');
+  }));
+}
+
+// Risk and object count for one task file, computed only when both the model and the
+// change ledger are already in hand. The queue never waits on either.
+function queueImpact(file){
+  if(!modelData || !modelData.model || modelFor!==selected || !changesData || changesFor!==selected) return null;
+  const t=(changesData.tasks||[]).find(x=>x.file===file);
+  if(!t || !t.ids.length) return null;
+  const r=riskOf(blastRadius(t.ids, modelData.model), modelData.model);
+  return { level:r.level, n:t.ids.length, approved:t.approved };
 }
 
 let auSel = null;   // which page cell is expanded
@@ -1299,7 +1354,7 @@ async function openTaskPopup(pathStr, col, file){
 }
 
 // ----- overview -----
-function renderOverview(view, d){
+function renderOverview(view, d, seq){
   const m=d.model;
   const dims=[['modules','Modules'],['entities','Entities'],['serverUnits','Server units'],
     ['serverFunctions','Functions'],['apiRoutes','API routes'],['frontendUnits','Frontend'],
@@ -1440,7 +1495,7 @@ function graphFlow(m){
 // to a reader: one is a path a person walks, the other is machinery. Journeys come
 // first, and every step says what it actually runs — the endpoint, the data it moves,
 // the events it raises — because "step 4 of checkout" is only useful with that under it.
-async function renderProcesses(view, m){
+async function renderProcesses(view, m, seq){
   const procs=m.processes||[];
   if(!procs.length){ view.innerHTML='<div class="model-empty">No business processes in the model.</div>'; return; }
   view.innerHTML='';
@@ -1455,7 +1510,7 @@ async function renderProcesses(view, m){
     head.innerHTML='<div class="jr-group-t">'+esc(group)+'</div><div class="jr-group-h">'+esc(hint)+'</div>';
     view.appendChild(head);
     for(const p of list){
-      if(mine!==modelReq || !view.isConnected) return;
+      if(mine!==modelReq || !viewAlive(seq) || !view.isConnected) return;
       const block=document.createElement('div'); block.className='proc-block';
       block.innerHTML='<div class="proc-title">'+esc(p.name||p.id)+
           '<span class="jr-trig">'+esc(p.triggerKind||'')+(p.audience?' · '+esc(p.audience):'')+'</span></div>'+
@@ -1509,7 +1564,7 @@ function effLabel(ef, m){
 function entName(id, m){ const x=(m.entities||[]).find(y=>y.id===id); return x?x.name:id; }
 function fieldOwner(m){ const map=new Map(); for(const e of (m.entities||[])) for(const f of (e.fields||[])) map.set(f.id, e.id); return map; }
 
-async function renderLogic(view, m){
+async function renderLogic(view, m, seq){
   const ents=m.entities||[];
   if(!ents.length){ view.innerHTML='<div class="model-empty">No entities in the model.</div>'; return; }
   const hasFlow=id=>(m.statusFlows||[]).some(f=>f.entityId===id);
@@ -2265,7 +2320,21 @@ function reachIndex(m){
 function blastRadius(seedIds, m, hops){
   hops = hops==null ? 2 : hops;
   const adj = reachIndex(m);
-  const seed = seedIds.filter(id=>objById(id,m));
+  // Naming an area means touching what is inside it. Modules are not nodes in the reach
+  // graph — nothing points out of them — so a module seed has to be opened into its own
+  // contents, or the answer comes back "nothing downstream", which is false for every
+  // area that contains anything.
+  const seed=[];
+  for(const id of seedIds){
+    if(!objById(id,m)) continue;
+    if(kindOf(id)==='module'){
+      for(const k of ['entities','serverFunctions','apiRoutes','frontendUnits','events','statusFlows','processes'])
+        for(const o of (m[k]||[])) if(o && o.id && moduleOf(o.id,m)===id && !seed.includes(o.id)) seed.push(o.id);
+      if(!seed.includes(id)) seed.push(id);
+      continue;
+    }
+    if(!seed.includes(id)) seed.push(id);
+  }
   const dist = new Map(seed.map(id=>[id,0]));
   let front = seed.slice();
   for(let h=1; h<=hops && front.length; h++){
@@ -2353,7 +2422,7 @@ async function loadChanges(force){
 
 const COL_LABEL = { todo:'todo', inprogress:'running', verify:'verify', done:'done' };
 
-async function renderImpact(view, m){
+async function renderImpact(view, m, seq){
   // A shared model is a snapshot of someone else's product; their task queue does not
   // travel with it, so there is nothing to compute a radius over.
   if(modelSrc){ view.innerHTML='<div class="model-empty">Impact is computed from this project’s own task queue. Switch the source back to your model to see it.</div>'; return; }
@@ -2365,6 +2434,7 @@ async function renderImpact(view, m){
   }
   view.innerHTML='<div class="model-empty">Reading the queue…</div>';
   const ch = await loadChanges(true);
+  if(!viewAlive(seq)) return;
   if(!ch || !ch.tasks || !ch.tasks.length){
     view.innerHTML='<div class="model-empty">No tasks in <code>tasks/</code> yet. Plan some with the <b>task-planner</b> skill and this fills in.</div>';
     return;
@@ -2437,9 +2507,14 @@ function drawImpactDetail(row, m){
   if(t.adhoc) h+='<div class="imp-sec">Objects</div>'+
     '<input class="imp-search" id="impSearch" placeholder="Type a name — entity, function, endpoint, screen, event…" autocomplete="off">'+
     '<div class="imp-sugg" id="impSugg"></div>';
+  // What was named, not what naming it expanded into: picking one area walks its whole
+  // contents, and showing forty chips for one choice would be unreadable — and, in the
+  // what-if, unclickable, since removing a chip removes what was picked.
+  const named=(t.ids||[]).filter(id=>objById(id,m));
   h+='<div class="imp-sec">Changes directly</div><div class="imp-chips">';
-  if(!br.seed.length) h+='<span class="imp-none">Nothing picked yet.</span>';
-  for(const id of br.seed) h+='<button class="imp-chip'+(t.adhoc?' rm':'')+'" data-id="'+esc(id)+'"><span class="k">'+esc(kindOf(id)||'')+'</span>'+esc(labelOf(id,m))+(t.adhoc?'<span class="x">✕</span>':'')+'</button>';
+  if(!named.length) h+='<span class="imp-none">Nothing picked yet.</span>';
+  for(const id of named) h+='<button class="imp-chip'+(t.adhoc?' rm':'')+'" data-id="'+esc(id)+'"><span class="k">'+esc(kindOf(id)||'')+'</span>'+esc(labelOf(id,m))+
+    (kindOf(id)==='module'?'<span class="k">area — everything in it</span>':'')+(t.adhoc?'<span class="x">✕</span>':'')+'</button>';
   h+='</div>';
 
   h+='<div class="imp-sec">Impact analysis <span class="imp-note">everything within '+br.hops+' hops of that, counted from the model’s own links</span></div>';
@@ -2514,7 +2589,7 @@ function impactText(row, m){
   L.push('task: tasks/'+t.col+'/'+t.file+(t.declared?' (Touches: declared)':' (inferred from mentions)'));
   L.push('');
   L.push('## Changes directly');
-  for(const id of br.seed) L.push('- '+labelOf(id,m)+'  ('+kindOf(id)+', '+id+')');
+  for(const id of (t.ids||[]).filter(x=>objById(x,m))) L.push('- '+labelOf(id,m)+'  ('+kindOf(id)+', '+id+')');
   const grp=[['entity','Business objects'],['function','Methods'],['event','Events'],
     ['route','API endpoints'],['frontend','Screens'],['statusFlow','Lifecycles'],['process','Flows']];
   L.push(''); L.push('## Within '+br.hops+' hops');
@@ -2526,10 +2601,11 @@ function impactText(row, m){
 }
 
 /* ---------------- Timeline — the product changing, in the order it changed ---------------- */
-async function renderTimeline(view, m){
+async function renderTimeline(view, m, seq){
   if(modelSrc){ view.innerHTML='<div class="model-empty">The timeline is built from this project’s own queue and task log.</div>'; return; }
   view.innerHTML='<div class="model-empty">Reading the record…</div>';
   const ch=await loadChanges(true);
+  if(!viewAlive(seq)) return;
   if(!ch){ view.innerHTML='<div class="model-empty">Could not read the task record.</div>'; return; }
   // Two records exist and they answer different questions: the queue is the plan
   // (ordered by task number), the log is what actually happened (stamped with a time).
@@ -2542,11 +2618,11 @@ async function renderTimeline(view, m){
   const rest=items.filter(i=>!(i.kind==='log'||i.col==='done'));
   done.sort((a,b)=> String(a.at).localeCompare(String(b.at)) || (a.n||0)-(b.n||0));
   rest.sort((a,b)=> (a.n||0)-(b.n||0));
-  const seq=done.concat(rest);
+  const ordered=done.concat(rest);
 
   let h='<div class="tl-head">Every task that named part of the model, oldest first. '+
     'The bar under each one is what it touched — click a chip to open that object.</div><div class="tl">';
-  for(const it of seq){
+  for(const it of ordered){
     const when = it.at ? esc(String(it.at).slice(0,10)) : (it.n?('#'+String(it.n).padStart(3,'0')):'—');
     const state = it.kind==='log' ? (it.status||'log') : (COL_LABEL[it.col]||it.col);
     h+='<div class="tl-row'+(it.kind==='log'?' log':'')+'">'+
@@ -2598,7 +2674,7 @@ function graphEvents(m){
   return {direction:'RIGHT', nodes, edges};
 }
 
-async function renderEvents(view, m){
+async function renderEvents(view, m, seq){
   const evs=m.events||[];
   if(!evs.length){ view.innerHTML='<div class="model-empty">No domain events in the model.</div>'; return; }
   const fns=(m.serverFunctions||[]).concat(m.frontendUnits||[]);
@@ -2647,7 +2723,7 @@ function graphDecisions(fl, m){
   return {direction:'DOWN', nodes, edges};
 }
 
-async function renderDecisions(view, m){
+async function renderDecisions(view, m, seq){
   const flows=(m.statusFlows||[]).filter(fl=>(fl.transitions||[]).some(t=>(t.condition||'').trim()));
   const rx=(m.reactions||[]).filter(r=>r.trigger&&(r.trigger.change||r.trigger.fieldName));
   if(!flows.length && !rx.length){
@@ -2661,7 +2737,7 @@ async function renderDecisions(view, m){
   view.appendChild(cap);
   const mine=modelReq;
   for(const fl of flows){
-    if(mine!==modelReq || !view.isConnected) return;
+    if(mine!==modelReq || !viewAlive(seq) || !view.isConnected) return;
     const ent=objById(fl.entityId,m);
     const block=document.createElement('div'); block.className='proc-block';
     block.innerHTML='<div class="proc-title">'+esc(fl.name||fl.id)+
@@ -2705,13 +2781,15 @@ async function mapLayerData(m){
   if(mapLayer==='change'){
     const ch=await loadChanges(false);
     const task=((ch&&ch.tasks)||[]).find(x=>x.file===impactPick);
-    if(!task) return { kind:'change', per:new Map(), legend:'Pick a task on the Impact view first — this layer lights up where that one lands.' };
-    const br=blastRadius(task.ids, m);
+    const ids = task ? task.ids : (impactPick==='__adhoc' ? adhocIds : []);
+    const what = task ? '“'+task.title+'”' : (ids.length===1 ? '“'+labelOf(ids[0],m)+'”' : 'The objects picked in Impact');
+    if(!ids.length) return { kind:'change', per:new Map(), legend:'Pick a task on the Impact view first — this layer lights up where that one lands.' };
+    const br=blastRadius(ids, m);
     const per=new Map();
     for(const id of br.seed){ const md=moduleOf(id,m); if(md) per.set(md,{n:2}); }
     for(const id of br.dist.keys()){ const md=moduleOf(id,m); if(md && !per.has(md)) per.set(md,{n:1}); }
     for(const [k,v] of per) per.set(k,{text: v.n===2?'changed here':'downstream', t: v.n===2?1:0.42});
-    return { kind:'change', per, legend:'“'+task.title+'” — solid where it changes something, faint where the change arrives on its own.' };
+    return { kind:'change', per, legend: what+' — solid where it changes something, faint where the change arrives on its own.' };
   }
   if(mapLayer==='owner'){
     const out=new Map();
