@@ -503,7 +503,7 @@ async function copySkill(name, title){
 /* ---------- model (.gitmir) visualization ---------- */
 let modelData = null;
 let modelFor=null;   // which project modelData belongs to
-let modelView = 'logic';
+let modelView = 'map';
 // Every view switch bumps this. Laying a diagram out is async, so without it a slow
 // view keeps appending into the pane after someone has already moved to another one —
 // which reads as "the new view is broken" when it was overwritten a second later.
@@ -552,10 +552,10 @@ function ensureElk(){
 }
 
 // holo style (as in your IDE): accent color per node type, glyphs, dark-navy bg + grid
-const ACCENTS={ state:'#ffb86b', status:'#ffb86b', trigger:'#7e8cff', effect:'#34f0a6', start:'#9b8aff',
+const ACCENTS={ state:'#ffb86b', status:'#ffb86b', trigger:'#7e8cff', decision:'#ffd34c', effect:'#34f0a6', start:'#9b8aff',
   entity:'#34f0a6', field:'#2fd8ff', event:'#9b8aff', function:'#2fd8ff', route:'#2fd8ff',
   frontend:'#8aa0ff', module:'#7e8cff', process:'#8aa0ff', reaction:'#7e8cff' };
-const GLYPHS={ state:'◷', status:'◷', trigger:'⚡', effect:'✦', start:'●',
+const GLYPHS={ state:'◷', status:'◷', trigger:'⚡', decision:'◆', effect:'✦', start:'●',
   entity:'◆', field:'ƒ', event:'✦', function:'❯', route:'↗', frontend:'▢', module:'▣', process:'❯', reaction:'⚙' };
 function trunc(s,n){ s=String(s==null?'':s); return s.length>n ? s.slice(0,n-1)+'…' : s; }
 
@@ -619,12 +619,20 @@ function nodeSvg(n){
   const PAD=11;                      // right-hand breathing room inside the card
   const nameAvail = w - 14 - PAD - 13;   // 13px for the leading glyph + its space
   const subAvail  = w - 15 - PAD;
-  let inner='<rect x="0" y="0" width="'+w+'" height="'+h+'" rx="8" class="hcard" stroke="'+acc+'"/>';
+  // A condition is not a state, and on a decision diagram that difference has to be
+  // visible at a glance. A true rhombus cannot hold a line of SQL-ish text without
+  // becoming unreadable, so the card keeps its width and gets angled ends — the shape
+  // a flowchart uses for a branch when the text is long.
+  const cut = md.kind==='decision' ? Math.min(22, h/2) : 0;
+  const shape = cut
+    ? '<path d="M'+cut+' 0 H'+(w-cut)+' L'+w+' '+(h/2)+' L'+(w-cut)+' '+h+' H'+cut+' L0 '+(h/2)+' Z" class="hcard" stroke="'+acc+'"/>'
+    : '<rect x="0" y="0" width="'+w+'" height="'+h+'" rx="8" class="hcard" stroke="'+acc+'"/>';
+  let inner=shape;
   // A layer's intensity is painted as a wash across the card, so the reading is the
   // picture rather than a number someone has to compare by eye.
   if(typeof md.heat==='number' && md.heat>0)
     inner+='<rect x="0" y="0" width="'+w+'" height="'+h+'" rx="8" fill="'+acc+'" opacity="'+(0.06+md.heat*0.3).toFixed(3)+'"/>';
-  inner+='<rect x="0" y="0" width="3" height="'+h+'" rx="1.5" fill="'+acc+'"/>';
+  if(!cut) inner+='<rect x="0" y="0" width="3" height="'+h+'" rx="1.5" fill="'+acc+'"/>';
   // Full text stays reachable on hover, so clipping never loses information.
   const full=[md.label, md.sub].filter(Boolean).join(' — ');
   if(full) inner+='<title>'+esc(full)+'</title>';
@@ -1501,14 +1509,18 @@ async function renderProcesses(view, m, seq){
   view.innerHTML='';
   const journeys=procs.filter(isJourney), internal=procs.filter(p=>!isJourney(p));
   const mine=modelReq;
-  for(const [group,list,hint] of [
-    ['User journeys', journeys, 'A person moves through these. If one breaks, they see it.'],
-    ['Internal flows', internal, 'Machinery — triggered by an event, a schedule or another service.'],
+  for(const [group,list,hint,empty] of [
+    ['User journeys', journeys, 'A person moves through these. If one breaks, they see it.',
+      'None — no process in this model starts from a screen or is marked as customer- or staff-facing.'],
+    ['Internal flows', internal, 'Machinery — triggered by an event, a schedule or another service.',
+      'None — every flow in this model starts from a screen, so they are all journeys.'],
   ]){
-    if(!list.length) continue;
+    // Both headings always show. A section that quietly disappears reads as something
+    // that failed to load; a section that says why it is empty is an answer.
     const head=document.createElement('div'); head.className='jr-group';
-    head.innerHTML='<div class="jr-group-t">'+esc(group)+'</div><div class="jr-group-h">'+esc(hint)+'</div>';
+    head.innerHTML='<div class="jr-group-t">'+esc(group)+'</div><div class="jr-group-h">'+esc(list.length?hint:empty)+'</div>';
     view.appendChild(head);
+    if(!list.length) continue;
     for(const p of list){
       if(mine!==modelReq || !viewAlive(seq) || !view.isConnected) return;
       const block=document.createElement('div'); block.className='proc-block';
@@ -2538,6 +2550,7 @@ function drawImpactDetail(row, m){
     h+='<div class="imp-sec">Areas affected</div><div class="imp-chips">';
     for(const md of mods) h+='<span class="imp-chip mod">'+esc(md.name||md.id)+(md.owner?'<span class="own">'+esc(md.owner)+'</span>':'')+'</span>';
     h+='</div>';
+    if(!mods.some(md=>md.owner)) h+='<div class="imp-appr-h">No owner is recorded for any of these areas. Ownership is a field in the model — <code>owner</code> on a module — and it stays blank until something in the repo says who it is.</div>';
   }
   const procs=got('process').map(x=>objById(x.id,m)).filter(Boolean);
   if(procs.length){
@@ -2712,8 +2725,8 @@ function graphDecisions(fl, m){
       const head=t.label||'decide';
       const W=Math.max(170,Math.min(280, cond.length*6.6+40));
       const L=wrapPx(cond, W-15-11, CW_MONO);
-      nodes.push({id:did, w:Math.round(W), h:subH(L.length),
-        meta:{kind:'trigger', label:head, sub:cond, subLines:L, ref:{k:'entity',id:fl.entityId}}});
+      nodes.push({id:did, w:Math.round(W)+30, h:subH(L.length),
+        meta:{kind:'decision', label:head, sub:cond, subLines:L, ref:{k:'entity',id:fl.entityId}}});
       edges.push({from:sid(t.from), to:did, kind:'spine'});
       edges.push({from:did, to:sid(t.to), kind:'branch', label:'holds'});
     } else {
@@ -2732,7 +2745,7 @@ async function renderDecisions(view, m, seq){
   }
   view.innerHTML='';
   const cap=document.createElement('div'); cap.className='map-cap';
-  cap.innerHTML='Every place the product decides something. A diamond is the condition, the arrow out of it is what happens when it holds.'+
+  cap.innerHTML='Every place the product decides something. The angle-ended node is the condition — a rhombus cannot hold a line of code without becoming unreadable — and the arrow out of it is what happens when it holds.'+
     '<span class="map-cap2">Read these with whoever owns the rules: a wrong condition here is a wrong rule in production.</span>';
   view.appendChild(cap);
   const mine=modelReq;
