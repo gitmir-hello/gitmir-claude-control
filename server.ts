@@ -1571,7 +1571,10 @@ const HTML = /* html */ `<!doctype html>
   /* The preview frame asks for the height left over on screen. That only works if every
      box between it and the shell passes the height down, so each one grows into the spare
      space and none of them shrinks below its own content. */
-  .detail{max-width:1600px; display:flex; flex-direction:column; flex:1 0 auto; min-height:0}
+  /* No overall cap: the diagrams are the product, and on a wide screen the layout
+     engine turns extra width into fewer wrapped layers rather than empty space.
+     Prose keeps its own measure below — a 2000px line is not a readable line. */
+  .detail{display:flex; flex-direction:column; flex:1 0 auto; min-height:0}
 
   /* ---------- the holo component layer ----------
      Ported from dev/src/styles/holo.css so a card here is literally the same object as a
@@ -1855,10 +1858,10 @@ const HTML = /* html */ `<!doctype html>
   .imp-detail{min-width:0}
   .imp-head{margin-bottom:18px}
   .imp-title{font-size:18px; font-weight:600; color:#fff; line-height:1.3}
-  .imp-sub{font-size:12px; color:var(--ink-3); margin-top:5px}
+  .imp-sub{font-size:12px; color:var(--ink-3); margin-top:5px; max-width:90ch}
   .imp-sec{font-family:var(--font-mono); font-size:10px; letter-spacing:.16em; text-transform:uppercase;
     color:var(--ink-3); margin:20px 0 10px; display:flex; align-items:baseline; gap:10px}
-  .imp-note{font-family:var(--font-body); font-size:11.5px; letter-spacing:0; text-transform:none; color:var(--ink-3)}
+  .imp-note{font-family:var(--font-body); font-size:11.5px; letter-spacing:0; text-transform:none; color:var(--ink-3); max-width:80ch}
   .imp-chips{display:flex; flex-wrap:wrap; gap:7px}
   .imp-chip{display:inline-flex; align-items:center; gap:6px; font-family:var(--font-mono); font-size:11px;
     padding:5px 9px; background:rgba(47,216,255,.08); border:1px solid rgba(47,216,255,.28); color:#dff4ff;
@@ -1879,7 +1882,7 @@ const HTML = /* html */ `<!doctype html>
   .imp-risk-v{font-size:17px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--c-ok)}
   .imp-risk.medium .imp-risk-v{color:var(--c-warn)} .imp-risk.high .imp-risk-v{color:var(--c-danger)}
   .imp-risk-s{font-family:var(--font-mono); font-size:11px; color:var(--ink-3)}
-  .imp-risk-t{width:100%; border-collapse:collapse; margin-top:11px; font-size:12px}
+  .imp-risk-t{width:100%; border-collapse:collapse; margin-top:11px; font-size:12px; max-width:118ch}
   .imp-risk-t td{padding:5px 10px 5px 0; border-top:1px solid rgba(120,210,255,.08); vertical-align:top}
   .imp-risk-t td.n{font-family:var(--font-mono); color:#fff; white-space:nowrap}
   .imp-risk-t td.l{color:var(--ink-1)}
@@ -1942,10 +1945,10 @@ const HTML = /* html */ `<!doctype html>
   .jr-group{margin:26px 0 14px}
   .jr-group:first-child{margin-top:0}
   .jr-group-t{font-family:var(--font-mono); font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--cyan)}
-  .jr-group-h{font-size:12.5px; color:var(--ink-3); margin-top:5px}
+  .jr-group-h{font-size:12.5px; color:var(--ink-3); margin-top:5px; max-width:80ch}
   .jr-trig{font-family:var(--font-mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase;
     color:var(--ink-3); margin-left:10px}
-  .jr-steps{width:100%; border-collapse:collapse; margin:10px 0 14px; font-size:12px}
+  .jr-steps{width:100%; border-collapse:collapse; margin:10px 0 14px; font-size:12px; max-width:118ch}
   .jr-steps th{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.1em; text-transform:uppercase;
     color:var(--ink-3); text-align:left; padding:0 10px 6px 0; font-weight:400}
   .jr-steps td{padding:6px 10px 6px 0; border-top:1px solid rgba(120,210,255,.09); vertical-align:top; color:var(--ink-2)}
@@ -1961,7 +1964,7 @@ const HTML = /* html */ `<!doctype html>
   .of-row{display:grid; grid-template-columns:96px 1fr; gap:12px; padding:9px 12px; background:var(--l2-card-2)}
   .of-k{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.12em; text-transform:uppercase;
     color:var(--ink-3); padding-top:2px}
-  .of-v{font-size:12.5px; color:var(--ink-1); line-height:1.5}
+  .of-v{font-size:12.5px; color:var(--ink-1); line-height:1.5; max-width:100ch}
   .of-v i{color:var(--ink-3); font-style:normal}
   .of-v.sens{color:var(--c-warn)}
   .of-r{display:inline-block; font-family:var(--font-mono); font-size:11px; color:var(--ink-2); margin:0 8px 4px 0;
@@ -2017,7 +2020,7 @@ const HTML = /* html */ `<!doctype html>
   .mrefresh{background:var(--panel2); border:1px solid var(--line2); color:var(--dim); width:32px; height:32px; border-radius:8px; cursor:pointer; font-size:15px}
   .mshare{width:auto; padding:0 12px; white-space:nowrap; letter-spacing:.06em}
   .mrefresh:hover{color:var(--txt)}
-  .model-empty{color:var(--dim2); font-size:13px; line-height:1.65; padding:20px 0}
+  .model-empty{color:var(--dim2); font-size:13px; line-height:1.65; padding:20px 0; max-width:80ch}
   .model-empty code{background:var(--panel2); padding:1px 6px; border-radius:5px; font-size:12px}
   .mermaid-wrap{overflow:auto; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px}
   .mermaid-wrap svg{max-width:none; height:auto}
@@ -2046,7 +2049,7 @@ const HTML = /* html */ `<!doctype html>
   .ov-mods{display:flex; flex-direction:column; gap:6px}
   .ov-mod{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; font-size:14px}
   .ov-mod span{display:block; color:var(--dim); font-size:12px; margin-top:2px}
-  .ov-brief{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px; color:var(--dim); font-size:13px; line-height:1.55}
+  .ov-brief{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px; color:var(--dim); font-size:13px; line-height:1.55; max-width:80ch}
   .proc-block{margin-bottom:24px}
   .proc-title{font-weight:640; font-size:15px; margin-bottom:4px}
   .proc-desc{color:var(--dim); font-size:13px; margin-bottom:10px}
@@ -2128,7 +2131,7 @@ const HTML = /* html */ `<!doctype html>
 
   .map-cap{margin-bottom:14px; color:var(--dim); font-size:13px; line-height:1.65; max-width:1000px}
   .map-cap b{color:var(--cyan-soft); font-weight:500; font-family:var(--font-mono); font-size:12px}
-  .map-cap2{display:block; margin-top:8px; color:var(--dim2); font-size:12.5px}
+  .map-cap2{display:block; margin-top:8px; color:var(--dim2); font-size:12.5px; max-width:78ch}
 
   .model-stale{display:none; margin-bottom:14px; padding:13px 15px; border:1px solid rgba(255,184,107,.45); background:rgba(255,184,107,.07)}
   .stale-hd{font-size:13.5px; font-weight:650; color:#ffb86b}
