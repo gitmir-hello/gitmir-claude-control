@@ -2628,7 +2628,14 @@ async function renderTimeline(view, m, seq){
   // Show them as one column, log entries carrying their date.
   const items=[];
   for(const h of (ch.history||[])) items.push({ kind:'log', at:h.ts||'', title:h.title, ids:h.touched||[], files:h.files||[], status:h.status });
-  for(const t of (ch.tasks||[])) items.push({ kind:'task', at:'', n:t.n, col:t.col, title:t.title, ids:t.ids, file:t.file });
+  for(const t of (ch.tasks||[])){
+    // A finished task file has no timestamp inside it, but the runner writes its
+    // `## Outcome` just before moving it to done/ — so the file's own mtime is when
+    // the work landed. Without it every done task sorts as "no date" and the column
+    // reads as if nothing happened in any particular order.
+    const at = (t.col==='done' && t.mtime) ? new Date(t.mtime).toISOString() : '';
+    items.push({ kind:'task', at, n:t.n, col:t.col, title:t.title, ids:t.ids, file:t.file });
+  }
   if(!items.length){ view.innerHTML='<div class="model-empty">Nothing recorded yet — no tasks in <code>tasks/</code> and no <code>.claude/tasks.json</code>.</div>'; return; }
   const done=items.filter(i=>i.kind==='log'||i.col==='done');
   const rest=items.filter(i=>!(i.kind==='log'||i.col==='done'));
@@ -2639,6 +2646,7 @@ async function renderTimeline(view, m, seq){
   let h='<div class="tl-head">Every task that named part of the model, oldest first. '+
     'The bar under each one is what it touched — click a chip to open that object.</div><div class="tl">';
   for(const it of ordered){
+    // Done work is placed in time; work still ahead is placed in the order it will run.
     const when = it.at ? esc(String(it.at).slice(0,10)) : (it.n?('#'+String(it.n).padStart(3,'0')):'—');
     const state = it.kind==='log' ? (it.status||'log') : (COL_LABEL[it.col]||it.col);
     h+='<div class="tl-row'+(it.kind==='log'?' log':'')+'">'+
