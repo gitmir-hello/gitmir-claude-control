@@ -1,0 +1,55 @@
+[
+ {
+  "id": "sfw-order-status",
+  "name": "Order lifecycle",
+  "entityId": "ent-order",
+  "fieldName": "status",
+  "moduleId": "mod-orders",
+  "description": "How an order moves.",
+  "states": [
+   {
+    "key": "paid",
+    "name": "Paid",
+    "description": "Money taken."
+   },
+   {
+    "key": "delivered",
+    "name": "Delivered",
+    "description": "Customer has it."
+   },
+   {
+    "key": "refunded",
+    "name": "Refunded",
+    "description": "Money returned."
+   }
+  ],
+  "transitions": [
+   {
+    "from": "paid",
+    "to": "delivered",
+    "label": "Deliver",
+    "byRole": "courier",
+    "effects": []
+   },
+   {
+    "from": "delivered",
+    "to": "refunded",
+    "label": "Refund",
+    "byRole": "support",
+    "condition": "order.deliveredAt > now() - 14 days",
+    "effects": [
+     {
+      "kind": "update",
+      "entityId": "ent-payment",
+      "description": "Reverse the charge"
+     },
+     {
+      "kind": "notify",
+      "entityId": "ent-order",
+      "description": "Email the customer"
+     }
+    ]
+   }
+  ]
+ }
+]

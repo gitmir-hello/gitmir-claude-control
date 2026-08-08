@@ -1,0 +1,25 @@
+[
+ {
+  "id": "rt-order-refund",
+  "method": "POST",
+  "path": "/api/orders/:id/refund",
+  "name": "Refund order",
+  "description": "Refunds an order.",
+  "serverUnitId": "su-orders",
+  "moduleId": "mod-orders",
+  "auth": true,
+  "roles": [
+   "support"
+  ]
+ },
+ {
+  "id": "rt-products",
+  "method": "GET",
+  "path": "/api/products",
+  "name": "List products",
+  "description": "Catalog listing.",
+  "serverUnitId": "su-cat",
+  "moduleId": "mod-catalog",
+  "auth": false
+ }
+]

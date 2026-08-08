@@ -1,0 +1,40 @@
+[
+ {
+  "id": "fe-order-page",
+  "name": "OrderPage",
+  "kind": "page",
+  "description": "One order.",
+  "consumesRouteIds": [
+   "rt-order-refund"
+  ],
+  "dependsOn": [],
+  "moduleId": "mod-orders",
+  "paths": [
+   "src/pages/Order.tsx"
+  ]
+ },
+ {
+  "id": "fe-refund-dialog",
+  "name": "RefundDialog",
+  "kind": "component",
+  "description": "Confirms a refund.",
+  "consumesRouteIds": [
+   "rt-order-refund"
+  ],
+  "dependsOn": [
+   "fe-order-page"
+  ],
+  "moduleId": "mod-orders"
+ },
+ {
+  "id": "fe-catalog-page",
+  "name": "CatalogPage",
+  "kind": "page",
+  "description": "Product list.",
+  "consumesRouteIds": [
+   "rt-products"
+  ],
+  "dependsOn": [],
+  "moduleId": "mod-catalog"
+ }
+]

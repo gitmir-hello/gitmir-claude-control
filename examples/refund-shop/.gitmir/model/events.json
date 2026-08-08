@@ -1,0 +1,8 @@
+[
+ {
+  "id": "ev-order-refunded",
+  "name": "OrderRefunded",
+  "description": "An order was refunded.",
+  "moduleId": "mod-orders"
+ }
+]

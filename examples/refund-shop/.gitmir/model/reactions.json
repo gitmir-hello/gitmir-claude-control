@@ -1,0 +1,20 @@
+[
+ {
+  "id": "rx-recalc-total",
+  "name": "Recalculate order total",
+  "moduleId": "mod-orders",
+  "trigger": {
+   "entityId": "ent-order",
+   "fieldName": "total",
+   "change": "changes"
+  },
+  "effects": [
+   {
+    "kind": "recalculate",
+    "entityId": "ent-order",
+    "fieldName": "total",
+    "description": "Sum the items"
+   }
+  ]
+ }
+]

@@ -1,0 +1,84 @@
+[
+ {
+  "id": "ent-order",
+  "name": "Order",
+  "tableName": "orders",
+  "storage": "table",
+  "serverUnitId": "su-orders",
+  "moduleId": "mod-orders",
+  "description": "A customer order.",
+  "sensitivity": "high",
+  "paths": [
+   "src/orders/order.ts"
+  ],
+  "fields": [
+   {
+    "id": "f-order-id",
+    "name": "id",
+    "type": "uuid",
+    "isPrimary": true
+   },
+   {
+    "id": "f-order-status",
+    "name": "status",
+    "type": "enum"
+   },
+   {
+    "id": "f-order-total",
+    "name": "total",
+    "type": "decimal"
+   }
+  ]
+ },
+ {
+  "id": "ent-payment",
+  "name": "Payment",
+  "tableName": "payments",
+  "storage": "table",
+  "serverUnitId": "su-pay",
+  "moduleId": "mod-payments",
+  "description": "A charge against an order.",
+  "sensitivity": "high",
+  "fields": [
+   {
+    "id": "f-pay-id",
+    "name": "id",
+    "type": "uuid",
+    "isPrimary": true
+   },
+   {
+    "id": "f-pay-order",
+    "name": "orderId",
+    "type": "ref",
+    "refEntityId": "ent-order"
+   },
+   {
+    "id": "f-pay-amount",
+    "name": "amount",
+    "type": "decimal"
+   }
+  ]
+ },
+ {
+  "id": "ent-product",
+  "name": "Product",
+  "tableName": "products",
+  "storage": "table",
+  "serverUnitId": "su-cat",
+  "moduleId": "mod-catalog",
+  "description": "Something for sale.",
+  "fields": [
+   {
+    "id": "f-prod-id",
+    "name": "id",
+    "type": "uuid",
+    "isPrimary": true
+   },
+   {
+    "id": "f-prod-price",
+    "name": "price",
+    "type": "decimal"
+   }
+  ]
+ }
+]

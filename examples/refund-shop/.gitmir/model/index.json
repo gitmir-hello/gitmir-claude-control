@@ -1,0 +1,16 @@
+{
+ "project": "Fixture Shop",
+ "at": "2026-08-08T09:00:00Z",
+ "dimensions": {
+  "modules": 3,
+  "entities": 3,
+  "serverUnits": 3,
+  "serverFunctions": 4,
+  "apiRoutes": 2,
+  "frontendUnits": 3,
+  "events": 1,
+  "processes": 2,
+  "statusFlows": 1,
+  "reactions": 1
+ }
+}

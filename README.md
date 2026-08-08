@@ -35,6 +35,10 @@ node server.ts
 **`gitmir-model`** skill. Claude reads the repo, writes `.gitmir/model/`, and the
 dashboard comes alive. No account, no build step, zero runtime dependencies.
 
+Want to see it before pointing it at your own code? Add
+[`examples/refund-shop`](examples/refund-shop) — an invented shop with a model
+and two planned tasks, so every view has something to show.
+
 ---
 
 ## Impact — what a task will change, before it runs

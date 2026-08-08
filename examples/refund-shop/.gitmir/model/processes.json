@@ -1,0 +1,56 @@
+[
+ {
+  "id": "proc-refund",
+  "name": "Refund an order",
+  "description": "Support refunds a delivered order.",
+  "triggerKind": "ui",
+  "audience": "staff",
+  "moduleId": "mod-orders",
+  "triggerRefId": "fe-refund-dialog",
+  "steps": [
+   {
+    "refKind": "frontend",
+    "refId": "fe-refund-dialog"
+   },
+   {
+    "refKind": "route",
+    "refId": "rt-order-refund"
+   },
+   {
+    "refKind": "function",
+    "refId": "sf-refund-order"
+   },
+   {
+    "refKind": "event",
+    "refId": "ev-order-refunded"
+   },
+   {
+    "refKind": "function",
+    "refId": "sf-notify-refund"
+   }
+  ]
+ },
+ {
+  "id": "proc-browse",
+  "name": "Browse the catalog",
+  "description": "A customer looks for something.",
+  "triggerKind": "ui",
+  "audience": "customer",
+  "moduleId": "mod-catalog",
+  "triggerRefId": "fe-catalog-page",
+  "steps": [
+   {
+    "refKind": "frontend",
+    "refId": "fe-catalog-page"
+   },
+   {
+    "refKind": "route",
+    "refId": "rt-products"
+   },
+   {
+    "refKind": "function",
+    "refId": "sf-list-products"
+   }
+  ]
+ }
+]

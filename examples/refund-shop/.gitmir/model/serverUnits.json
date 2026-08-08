@@ -1,0 +1,37 @@
+[
+ {
+  "id": "su-orders",
+  "name": "OrdersService",
+  "kind": "service",
+  "description": "Order operations.",
+  "entityIds": [
+   "ent-order"
+  ],
+  "dependsOn": [
+   "su-pay"
+  ],
+  "moduleId": "mod-orders"
+ },
+ {
+  "id": "su-pay",
+  "name": "PaymentsService",
+  "kind": "service",
+  "description": "Charging.",
+  "entityIds": [
+   "ent-payment"
+  ],
+  "dependsOn": [],
+  "moduleId": "mod-payments"
+ },
+ {
+  "id": "su-cat",
+  "name": "CatalogService",
+  "kind": "service",
+  "description": "Catalog.",
+  "entityIds": [
+   "ent-product"
+  ],
+  "dependsOn": [],
+  "moduleId": "mod-catalog"
+ }
+]

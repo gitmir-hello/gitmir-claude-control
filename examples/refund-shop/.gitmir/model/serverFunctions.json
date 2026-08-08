@@ -1,0 +1,80 @@
+[
+ {
+  "id": "sf-refund-order",
+  "name": "refundOrder",
+  "serverUnitId": "su-orders",
+  "operation": "business_action",
+  "moduleId": "mod-orders",
+  "description": "Refunds a delivered order.",
+  "routeId": "rt-order-refund",
+  "roles": [
+   "support"
+  ],
+  "readsFieldIds": [
+   "f-order-status"
+  ],
+  "writesFieldIds": [
+   "f-order-status",
+   "f-order-total"
+  ],
+  "callsFunctionIds": [
+   "sf-capture-refund"
+  ],
+  "emitsEventIds": [
+   "ev-order-refunded"
+  ],
+  "subscribesEventIds": [],
+  "paths": [
+   "src/orders/refund.ts"
+  ]
+ },
+ {
+  "id": "sf-capture-refund",
+  "name": "captureRefund",
+  "serverUnitId": "su-pay",
+  "operation": "business_action",
+  "moduleId": "mod-payments",
+  "description": "Sends the refund to the processor.",
+  "routeId": null,
+  "readsFieldIds": [
+   "f-pay-amount"
+  ],
+  "writesFieldIds": [
+   "f-pay-amount"
+  ],
+  "callsFunctionIds": [],
+  "emitsEventIds": [],
+  "subscribesEventIds": []
+ },
+ {
+  "id": "sf-notify-refund",
+  "name": "notifyRefund",
+  "serverUnitId": "su-orders",
+  "operation": "subscriber",
+  "moduleId": "mod-orders",
+  "description": "Emails the customer.",
+  "readsFieldIds": [],
+  "writesFieldIds": [],
+  "callsFunctionIds": [],
+  "emitsEventIds": [],
+  "subscribesEventIds": [
+   "ev-order-refunded"
+  ]
+ },
+ {
+  "id": "sf-list-products",
+  "name": "listProducts",
+  "serverUnitId": "su-cat",
+  "operation": "list",
+  "moduleId": "mod-catalog",
+  "description": "Lists products.",
+  "routeId": "rt-products",
+  "readsFieldIds": [
+   "f-prod-price"
+  ],
+  "writesFieldIds": [],
+  "callsFunctionIds": [],
+  "emitsEventIds": [],
+  "subscribesEventIds": []
+ }
+]

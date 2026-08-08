@@ -1,0 +1,18 @@
+[
+ {
+  "id": "mod-orders",
+  "name": "Orders",
+  "description": "Placing and fulfilling orders.",
+  "owner": "Fulfilment team"
+ },
+ {
+  "id": "mod-payments",
+  "name": "Payments",
+  "description": "Charging and refunding."
+ },
+ {
+  "id": "mod-catalog",
+  "name": "Catalog",
+  "description": "Products and search."
+ }
+]

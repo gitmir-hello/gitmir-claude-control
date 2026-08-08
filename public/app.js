@@ -508,7 +508,10 @@ let modelView = 'map';
 // view keeps appending into the pane after someone has already moved to another one —
 // which reads as "the new view is broken" when it was overwritten a second later.
 let modelViewSeq = 0;
-const viewAlive = (s) => s === modelViewSeq;
+// A render started by the view dispatcher carries its generation and is cancelled when
+// the view moves on. A render triggered by an action inside the view — approving a task,
+// removing a what-if chip — carries none, and must not be mistaken for a stale one.
+const viewAlive = (s) => s == null || s === modelViewSeq;
 let logicEntityId = null;
 let modelSrc = null;   // null = this project's own model; otherwise a teammate's name
 let mermaidReady = null;
