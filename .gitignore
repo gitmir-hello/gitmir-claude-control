@@ -18,3 +18,8 @@ node_modules/
 # OS
 .DS_Store
 Thumbs.db
+
+# ...except the example project's own log — it is fixture data, not someone's
+# local history, and without it the example has no timeline to show.
+!examples/*/.claude/
+!examples/*/.claude/tasks.json
