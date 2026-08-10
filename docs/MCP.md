@@ -54,6 +54,8 @@ reason: Node runs the TypeScript directly, so there is nothing to build.
 | `gitmir_navigate` | What is this one thing, and what breaks if it changes? Walks the id links both ways — inbound is the direction that gets forgotten. |
 | `gitmir_impact` | What would this change reach, and how risky is it? Takes `ids`, or a `task` file name from the queue. Returns the downstream objects, the areas, the user journeys, and the risk with its arithmetic. |
 | `gitmir_queue` | What work is planned, what does each task touch, what is approved? |
+| `gitmir_create_task` | Turn a finding into queued work. Refuses to write a task with no `verify` steps — a requirement you cannot check is a wish, not a task — and shows the impact of what it just wrote. |
+| `gitmir_approve` | Record that a task is approved to run, or withdraw it. Writes the `Approved:` line that travels with the task. |
 
 Every answer opens with how fresh the model is. If the code has moved since the model
 was built, the answer says **STALE** and names the file that moved most recently — the
@@ -74,11 +76,22 @@ To see it working before pointing it at your own code, use
 [`examples/refund-shop`](../examples/refund-shop) — an invented shop with a model and
 two planned tasks.
 
+## The skills, without copy-paste
+
+The server also serves all eleven skills as MCP **prompts** — most clients surface
+those as slash commands. So `gitmir-model` is one command away in the same session
+that just told you there is no model, instead of a trip to the dashboard to copy text.
+
+Each prompt takes an optional `note` for the run ("focus on `src/`", "the spreadsheet
+is the source"), and the project path is filled in for you.
+
+Prompts are user-controlled by design, which is the right shape here: nobody wants an
+agent deciding on its own to re-model the repository.
+
 ## What it does not do
 
-- **No writes yet.** Creating and approving tasks happens in the dashboard. Those are
-  the next tools.
 - **No repository reading.** It answers from the model. If the model is wrong, the
   answer is wrong — which is why freshness is in every response.
-- **No skills yet.** MCP has a prompts primitive; carrying the skills through it, so
-  `gitmir-model` can be run without copy-paste, is the step after writes.
+- **No tool annotations.** The spec has optional hints for whether a tool is read-only
+  or destructive; the field names were not in the pages consulted, so rather than guess
+  them the server omits them. Your client will still ask before a write if it asks at all.

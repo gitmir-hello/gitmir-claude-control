@@ -24,6 +24,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { readModel, modelStaleness, modelIdSet, readTasks } from './lib/read.js';
+import { createTask, setApproval, COLUMNS } from './lib/write.js';
 import { blastRadius, riskOf, kindOf, labelOf, moduleOf, objById, isJourney } from './lib/impact.js';
 
 const PROTOCOL = '2025-06-18';           // the version this server implements
@@ -366,7 +367,176 @@ const TOOLS: Tool[] = [
       return { text: L.join('\n') };
     },
   },
+
+  {
+    name: 'gitmir_create_task',
+    title: 'Queue a task',
+    description:
+      'Write a task into this project\'s queue (tasks/todo/) so it can be run and checked ' +
+      'later. Call this when the user asks to note something down, plan work, or turn a ' +
+      'finding into work rather than doing it now. A task must carry the checks that prove ' +
+      'it worked — write them as numbered steps a person could follow. Naming the model ids ' +
+      'it will change is what lets its impact and risk be scored before it runs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...PROJECT_ARG,
+        title: { type: 'string', description: 'One line naming the task.' },
+        task: { type: 'string', description: 'What to do — precise enough to finish in one pass.' },
+        verify: {
+          type: 'array', items: { type: 'string' },
+          description: 'Numbered steps that prove it works. A task with no way to check it is not ready to run.',
+        },
+        touches: {
+          type: 'array', items: { type: 'string' },
+          description: 'Model object ids this task will CHANGE (not the ones it reads), e.g. ["ent-order","sf-refund-order"].',
+        },
+        context: { type: 'string', description: 'Optional: the slice of the product the runner needs.' },
+      },
+      required: ['title', 'task', 'verify'],
+    },
+    run(args, project) {
+      const title = String(args.title || '').trim();
+      const task = String(args.task || '').trim();
+      const verify = Array.isArray(args.verify) ? args.verify.map((x) => String(x).trim()).filter(Boolean) : [];
+      if (!title || !task) return { text: 'Both `title` and `task` are required.', isError: true };
+      // A task nobody can check is a wish. The dashboard enforces this by convention;
+      // here it is enforced by refusing to write the file.
+      if (!verify.length) {
+        return {
+          text: 'Refusing to write a task with no `verify` steps. A requirement you cannot check is a wish, ' +
+                'not a task — give the numbered steps that would prove it works, and mark any that only a person can judge.',
+          isError: true,
+        };
+      }
+
+      const l = load(project);
+      const touches = Array.isArray(args.touches) ? args.touches.map((x) => String(x).trim()).filter(Boolean) : [];
+      let warn = '';
+      if (l.ok && touches.length) {
+        const unknown = touches.filter((id) => !objById(id, l.model));
+        if (unknown.length) warn = `\n\nNote: these ids are not in the model and were still written down — check them: ${unknown.join(', ')}`;
+      }
+
+      const body = [
+        `# ${title}`, '', 'Type: build',
+        ...(touches.length ? [`Touches: ${touches.join(', ')}`] : []),
+        '',
+        ...(typeof args.context === 'string' && args.context.trim() ? ['## Context', '', args.context.trim(), ''] : []),
+        '## Task', '', task, '',
+        '## Verify', '', ...verify.map((s, i) => `${i + 1}. ${s}`), '',
+      ].join('\n');
+
+      const file = createTask(project, title, body);
+      const L = [`Wrote tasks/todo/${file}`];
+      if (l.ok && touches.length) {
+        L.push('');
+        L.push(impactText(touches, l.model, 'What it would touch, before anyone runs it:'));
+      } else if (l.ok) {
+        L.push('', 'No `touches` given, so its impact cannot be scored until someone adds a Touches: line.');
+      }
+      return { text: L.join('\n') + warn };
+    },
+  },
+
+  {
+    name: 'gitmir_approve',
+    title: 'Approve or withdraw approval',
+    description:
+      'Record that a queued task has been approved to run — or withdraw that approval. Call ' +
+      'this only when the user explicitly says to approve something; it writes an "Approved:" ' +
+      'line into the task file that travels with the task and is read by whoever runs it. ' +
+      'Show the task\'s impact and risk first if they have not seen it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...PROJECT_ARG,
+        file: { type: 'string', description: 'The task file name, e.g. 010-partial-refund.md.' },
+        column: { type: 'string', enum: ['todo', 'inprogress', 'verify', 'done'], description: 'Which queue folder it is in. Defaults to searching for it.' },
+        by: { type: 'string', description: 'Who approved it — recorded in the line.' },
+        withdraw: { type: 'boolean', description: 'Remove the approval instead of adding one.' },
+      },
+      required: ['file'],
+    },
+    run(args, project) {
+      const want = path.basename(String(args.file || '').trim());
+      if (!want) return { text: '`file` is required.', isError: true };
+      const known = modelIdSet(path.join(project, '.gitmir', 'model'));
+      const tasks = readTasks(project, known);
+      const col = typeof args.column === 'string' && COLUMNS.includes(args.column)
+        ? args.column
+        : (tasks.find((x) => x.file === want) || {}).col;
+      if (!col) {
+        return {
+          text: `No task file named ${want}. Tasks in this project:\n` +
+            (tasks.map((x) => `  ${x.col}/${x.file}  ${x.title}`).join('\n') || '  (none)'),
+          isError: true,
+        };
+      }
+      try {
+        const approved = setApproval(project, col, want, {
+          by: String(args.by || '').trim().slice(0, 60), undo: !!args.withdraw,
+        });
+        return {
+          text: approved
+            ? `Approved ${col}/${want} — wrote "Approved: ${approved}" into the task file. It travels with the task and whoever runs it will see it.`
+            : `Withdrew approval on ${col}/${want} — the Approved: line is gone and the file is as it was.`,
+        };
+      } catch (e) {
+        return { text: `Could not write to ${col}/${want}: ${e instanceof Error ? e.message : String(e)}`, isError: true };
+      }
+    },
+  },
 ];
+
+
+// ---------- prompts: the skills, without copy-paste ----------
+//
+// The tools answer from a model. Building that model is a skill — instructions an
+// agent follows — and until now the only way to get one into a session was to copy
+// text out of the dashboard. MCP prompts remove that step: the same server that
+// answers questions also carries the skill that makes answering possible, so a
+// project with no model is one command away from having one instead of being a
+// dead end.
+//
+// Prompts are user-controlled by design — clients usually surface them as slash
+// commands — which is the right shape for these: nobody wants an agent deciding on
+// its own to re-model the repository.
+
+type SkillDef = { name: string; title: string; description: string; file: string };
+
+function skillDefs(): SkillDef[] {
+  const dir = path.join(import.meta.dirname, 'skills');
+  let files: string[] = [];
+  try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.md')).sort(); } catch { return []; }
+  const out: SkillDef[] = [];
+  for (const f of files) {
+    const name = f.replace(/\.md$/, '');
+    let head = '';
+    try { head = fs.readFileSync(path.join(dir, f), 'utf8').slice(0, 4000); } catch { continue; }
+    // The description is what a client shows in its command list, so take the skill's
+    // own words: the frontmatter description where there is one, else the opening line.
+    let desc = '';
+    const fm = /^---\n([\s\S]*?)\n---/.exec(head);
+    if (fm) {
+      const d = /^description:\s*(?:>-?\s*\n([\s\S]*?)(?=\n\S|$)|(.*))/m.exec(fm[1]);
+      if (d) desc = (d[1] || d[2] || '').split('\n').map((s) => s.trim()).join(' ').trim();
+    }
+    if (!desc) {
+      const body = fm ? head.slice(fm[0].length) : head;
+      desc = body.split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 2).join(' ');
+    }
+    out.push({
+      name, file: f, title: name,
+      description: desc.replace(/\s+/g, ' ').slice(0, 300),
+    });
+  }
+  return out;
+}
+
+function skillText(def: SkillDef): string {
+  return fs.readFileSync(path.join(import.meta.dirname, 'skills', def.file), 'utf8');
+}
 
 // ---------- JSON-RPC over stdio ----------
 
@@ -394,7 +564,7 @@ function handle(msg: any): void {
       const agreed = SUPPORTED.has(asked) ? asked : PROTOCOL;
       return result(id, {
         protocolVersion: agreed,
-        capabilities: { tools: {} },
+        capabilities: { tools: {}, prompts: {} },
         serverInfo: { name: NAME, title: 'GITMIR Claude Control', version: VERSION },
         instructions:
           'This project may carry a GitMir model — a map of what the product does, built from ' +
@@ -409,6 +579,29 @@ function handle(msg: any): void {
       return;
     case 'ping':
       return isRequest ? result(id, {}) : undefined;
+    case 'prompts/list':
+      return result(id, {
+        prompts: skillDefs().map((s) => ({
+          name: s.name, title: s.title, description: s.description,
+          arguments: [{ name: 'note', description: 'Anything to add for this run — a target folder, a constraint, what to focus on.', required: false }],
+        })),
+      });
+    case 'prompts/get': {
+      const want = params && params.name;
+      const def = skillDefs().find((s) => s.name === want);
+      if (!def) return fail(id, -32602, `Unknown prompt: ${want}`);
+      let body: string;
+      try { body = skillText(def); } catch (e) {
+        return fail(id, -32603, `Could not read skill ${def.file}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      const note = params && params.arguments && typeof params.arguments.note === 'string' ? params.arguments.note.trim() : '';
+      const text = `Follow these instructions for the project at ${DEFAULT_PROJECT}.\n\n` +
+        body + (note ? `\n\n---\n\nFor this run specifically: ${note}\n` : '');
+      return result(id, {
+        description: def.description,
+        messages: [{ role: 'user', content: { type: 'text', text } }],
+      });
+    }
     case 'tools/list':
       return result(id, {
         tools: TOOLS.map((t) => ({

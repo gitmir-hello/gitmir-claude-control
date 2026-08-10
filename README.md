@@ -109,7 +109,9 @@ reaches `done` only when they actually pass.
 
 `mcp.ts` serves the model over [MCP](https://modelcontextprotocol.io) — so Claude Code,
 Cursor, or anything else that speaks it can ask *what is this*, *what breaks if I change
-it*, *what would this task touch and how risky is it*, without leaving the editor.
+it*, *what would this task touch and how risky is it*, queue a task, and approve one —
+without leaving the editor. The skills ride along as prompts, so building the model is a
+slash command rather than a copy-paste.
 
 ```json
 { "mcpServers": { "gitmir": {

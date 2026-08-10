@@ -88,6 +88,7 @@ function impactForBrowser(): string {
 }
 
 import { MODEL_ID, idList, parseTouches, modelIdSet } from './lib/read.js';
+import { createTask, setApproval, COLUMNS } from './lib/write.js';
 
 // ---------- model ids carried by tasks ----------
 
@@ -883,13 +884,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/task') {
       const { path: p, title, content } = await readBody(req);
       if (!p || !content) return sendJSON(res, 400, { error: 'no path/content' });
-      const dir = path.join(p, 'tasks', 'todo');
-      fs.mkdirSync(dir, { recursive: true });
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const slug = String(title || 'task').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'task';
-      const file = path.join(dir, stamp + '-' + slug + '.md');
-      fs.writeFileSync(file, content);
-      return sendJSON(res, 200, { ok: true, file: path.basename(file) });
+      return sendJSON(res, 200, { ok: true, file: createTask(p, title, content) });
     }
     if (req.method === 'GET' && url.pathname === '/api/queue') {
       const p = url.searchParams.get('path') || '';
@@ -1066,36 +1061,17 @@ const server = http.createServer(async (req, res) => {
       const p = String(body.path || '');
       const col = String(body.col || '');
       const file = path.basename(String(body.file || ''));
-      const by = String(body.by || '').trim().slice(0, 60);
-      const undo = !!body.undo;
-      if (!p || !['todo', 'inprogress', 'verify', 'done'].includes(col) || !file.endsWith('.md')) {
+      if (!p || !COLUMNS.includes(col) || !file.endsWith('.md')) {
         return sendJSON(res, 400, { error: 'bad request' });
       }
-      const full = path.join(p, 'tasks', col, file);
-      let text: string;
-      try { text = fs.readFileSync(full, 'utf8'); } catch { return sendJSON(res, 404, { error: 'not found' }); }
-      const lines = text.split('\n');
-      const at = lines.findIndex((l) => /^\s*approved\s*:/i.test(l));
-      if (undo) {
-        if (at === -1) return sendJSON(res, 200, { ok: true, approved: null });
-        lines.splice(at, 1);
-        fs.writeFileSync(full, lines.join('\n'));
-        return sendJSON(res, 200, { ok: true, approved: null });
+      try {
+        const approved = setApproval(p, col, file, {
+          by: String(body.by || '').trim().slice(0, 60), undo: !!body.undo,
+        });
+        return sendJSON(res, 200, { ok: true, approved });
+      } catch {
+        return sendJSON(res, 404, { error: 'not found' });
       }
-      const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
-      const line = 'Approved: ' + stamp + (by ? ' by ' + by : '');
-      if (at !== -1) lines[at] = line;
-      else {
-        // Under the last header line (Type:/Touches:) if there is one, otherwise under
-        // the title — so the file still reads top-down.
-        let ins = lines.findIndex((l) => l.trim().startsWith('#'));
-        ins = ins === -1 ? 0 : ins + 1;
-        while (ins < lines.length && !lines[ins].trim()) ins++;              // past the blank line
-        while (ins < lines.length && /^\s*[A-Za-z][A-Za-z ]*:/.test(lines[ins])) ins++;
-        lines.splice(ins, 0, line);
-      }
-      fs.writeFileSync(full, lines.join('\n'));
-      return sendJSON(res, 200, { ok: true, approved: line.slice('Approved: '.length) });
     }
     if (req.method === 'GET' && url.pathname === '/api/model') {
       const p = url.searchParams.get('path') || '';
