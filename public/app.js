@@ -676,6 +676,41 @@ function svgFromElk(g){
     HOLO_DEFS+eL.join('')+nL.join('')+'</svg>';
 }
 
+// ---- the HUD renderer, mounted into the same frame the other diagrams use ----
+// Only one lives at a time: the canvas runs an animation loop, and a superseded
+// view that keeps drawing is both a leak and a liar.
+let hudLive=null;
+function hudDrop(){ if(hudLive){ try{hudLive.destroy();}catch(e){} hudLive=null; window.__HUD_API__=null; } }
+function renderHud(container, scene, seq){
+  hudDrop();
+  if(!scene || !scene.nodes || !scene.nodes.length){
+    container.innerHTML='<div class="model-empty">Nothing to draw here yet.</div>'; return; }
+  container.innerHTML=
+    '<div class="dgm">'+
+      '<div class="dgm-bar">'+
+        '<button class="dgm-b" data-a="fit" title="Fit to view">Fit</button>'+
+        '<button class="dgm-b" data-a="back" title="One level up (Esc)">Back</button>'+
+        '<button class="dgm-b" data-a="labels" title="Edge labels (L)">Labels</button>'+
+        '<button class="dgm-b" data-a="bloom" title="Glow (B)">Glow</button>'+
+        '<span class="dgm-hint">click a node to open it · Esc goes back · drag to pan · wheel to zoom</span>'+
+      '</div>'+
+      '<div class="dgm-canvas hud-canvas"><canvas></canvas></div>'+
+    '</div>';
+  const cv=container.querySelector('canvas');
+  try{ hudLive=window.HUD_MOUNT(cv, scene, { onDestroy:()=>{ window.__HUD_API__=null; hudLive=null; } }); }
+  catch(e){ container.innerHTML='<div class="model-empty">Renderer failed: '+esc(e.message||e)+'</div>'; return; }
+  window.__HUD_API__=hudLive;
+  container.querySelector('.dgm-bar').addEventListener('click',(ev)=>{
+    const b=ev.target.closest('.dgm-b'); if(!b||!hudLive) return;
+    const a=b.dataset.a;
+    if(a==='fit') hudLive.fit();
+    else if(a==='back') hudLive.back();
+    else if(a==='labels') hudLive.flags.labels=!hudLive.flags.labels;
+    else if(a==='bloom') hudLive.flags.bloom=!hudLive.flags.bloom;
+  });
+  if(seq!=null && !viewAlive(seq)) hudDrop();
+}
+
 async function renderElk(container, spec){
   if(!spec || !spec.nodes || !spec.nodes.length){ container.innerHTML='<div class="model-empty">No data for this diagram.</div>'; return; }
   container.innerHTML='<div class="model-empty">ELK layout…</div>';
@@ -964,6 +999,7 @@ function renderModelNav(){
 async function renderModelView(){
   const view=document.getElementById('modelView'); if(!view||!modelData) return;
   const seq=++modelViewSeq;
+  hudDrop();          // the canvas runs a loop; leaving a view must stop it
   const m=modelData.model;
   if(modelView==='logic') return renderLogic(view, m, seq);
   if(modelView==='overview') return renderOverview(view, modelData, seq);
@@ -983,7 +1019,8 @@ async function renderModelView(){
     const structure='Each block is an area of the product — what it owns (◆) and how much of it there is. '+
       'A line means one area touches another: <b>writes X</b> — it changes data owned by that area · '+
       '<b>uses</b> — its screens call that area · <b>calls</b> — it triggers logic over there · '+
-      'a named signal is an event one area raises and another reacts to.';
+      'a named signal is an event one area raises and another reacts to. '+
+      '<b>Click an area to open it</b> and see the objects, screens and endpoints inside — Esc goes back.';
     // With a layer on, the layer is what the picture now means. Leaving the structure
     // paragraph in the prominent slot and demoting the layer to a grey line in the
     // toolbar inverts that — readers looked at the big text, saw it describe the plain
@@ -998,6 +1035,12 @@ async function renderModelView(){
     }
     box.appendChild(cap);
     const d=document.createElement('div'); box.appendChild(d);
+    // Areas are containers now, not summaries: "2 screens · 2 actions" is a thing
+    // you can open rather than a claim you have to take on trust.
+    const scene=window.hudSceneProductMap
+      ? hudSceneProductMap(m, layerData, { onSelect:(id)=>{ if(id) openContextPopup(kindOf(id), id); } })
+      : null;
+    if(scene) return renderHud(d, scene, seq);
     return renderElk(d, graphProductMap(m, layerData));
   }
   if(modelView==='er') return renderElk(box, graphER(m));
@@ -2429,7 +2472,7 @@ function drawImpactDetail(row, m){
      '<button class="ghost imp-open">Open task file</button></div>'+
      (t.approved?'':'<div class="imp-appr-h">Approving writes an <code>Approved:</code> line into the task file. It travels with the task and whoever runs it can see it — including Claude.</div>');
   box.innerHTML=h;
-  drawImpactGraph(document.getElementById('impGraph'), named, m);
+  drawImpactGraph(document.getElementById('impGraph'), named, m, null, t);
   box.querySelectorAll('.imp-chip[data-id]').forEach(b=>b.addEventListener('click',()=>{
     const id=b.dataset.id, k=kindOf(id);
     // In a what-if the chip is the selection, so clicking removes it; elsewhere it opens.
@@ -2904,7 +2947,7 @@ function graphImpact(named, m, hops){
   return { direction:'RIGHT', nodes, edges, seedRest, areas:areaOrder.length, journeys:journeys.length };
 }
 
-async function drawImpactGraph(box, named, m, seq){
+async function drawImpactGraph(box, named, m, seq, task){
   if(!box) return;
   const spec=graphImpact(named, m);
   if(!spec.nodes.length){ box.innerHTML='<div class="model-empty">Nothing to draw — this task names no object that is in the model.</div>'; return; }
@@ -2915,6 +2958,12 @@ async function drawImpactGraph(box, named, m, seq){
     'and a node for each of them is a picture nobody can read. The exact counts are in the cards above.</span>';
   box.innerHTML=''; box.appendChild(note);
   const d=document.createElement('div'); box.appendChild(d);
-  await renderElk(d, spec);
+  // The HUD draws the same three columns, except an area now opens into exactly
+  // which of its objects are in reach — the thing the flat picture could not say.
+  const scene=window.hudSceneImpact
+    ? hudSceneImpact(task, m, blastRadius(named, m, 2),
+        { onSelect:(id)=>{ if(id) openContextPopup(kindOf(id), id); } })
+    : null;
+  if(scene) renderHud(d, scene, seq); else await renderElk(d, spec);
   if(seq!=null && !viewAlive(seq)) box.innerHTML='';
 }

@@ -649,6 +649,13 @@ const server = http.createServer(async (req, res) => {
     // the rest of the line into a comment and killed the whole UI. As an ordinary file a
     // backslash means what it says. no-store because a stale copy after an update is a
     // broken dashboard, and 110 KB over loopback costs nothing.
+    if (req.method === 'GET' && url.pathname === '/hud.js' || req.method === 'GET' && url.pathname === '/hud-scenes.js') {
+      try {
+        const body = fs.readFileSync(path.join(import.meta.dirname, 'public', url.pathname.slice(1)), 'utf8');
+        res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'no-store' });
+        return res.end(body);
+      } catch { res.writeHead(404); return res.end('not found'); }
+    }
     if (req.method === 'GET' && url.pathname === '/impact.js') {
       try {
         res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -1979,6 +1986,10 @@ const HTML = /* html */ `<!doctype html>
   .dgm-b:hover{border-color:var(--cyan); color:var(--cyan)}
   .dgm-hint{flex:1; color:var(--ink-3); font-family:var(--font-mono); font-size:11px; letter-spacing:.02em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:0 6px}
   .dgm-full{min-width:34px}
+  /* The HUD renderer paints its own grid and background, so the frame gets out of
+     its way — otherwise two grids at different scales moire against each other. */
+  .dgm-canvas.hud-canvas{background-image:none; background-color:#02060b; cursor:crosshair}
+  .dgm-canvas.hud-canvas canvas{display:block; width:100%; height:100%}
   .dgm-canvas{position:relative; height:60vh; overflow:hidden; cursor:grab; touch-action:none;
     background-color:#061021;
     background-image:linear-gradient(rgba(120,210,255,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(120,210,255,.05) 1px, transparent 1px);
@@ -2388,6 +2399,8 @@ const HTML = /* html */ `<!doctype html>
   <div class="toast" id="toast"></div>
 
 <script src="/impact.js"></script>
+<script src="/hud.js"></script>
+<script src="/hud-scenes.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>`;
