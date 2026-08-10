@@ -105,6 +105,27 @@ reaches `done` only when they actually pass.
 
 ---
 
+## The same model, inside your editor
+
+`mcp.ts` serves the model over [MCP](https://modelcontextprotocol.io) — so Claude Code,
+Cursor, or anything else that speaks it can ask *what is this*, *what breaks if I change
+it*, *what would this task touch and how risky is it*, without leaving the editor.
+
+```json
+{ "mcpServers": { "gitmir": {
+    "command": "node",
+    "args": ["/path/to/gitmir-claude-control/mcp.ts", "--project", "/path/to/your/project"] } } }
+```
+
+Your editor starts it as a subprocess and talks to it over stdin/stdout. **No port, no
+network, and the dashboard does not need to be running** — they are two programs reading
+the same files, sharing the same arithmetic, so they cannot disagree. Every answer says
+how fresh the model is, because there is no amber banner in someone else's editor.
+
+**→ [The MCP server](docs/MCP.md)**
+
+---
+
 ## The rules
 
 **Your code never leaves your machine.** Claude runs locally, the model is built

@@ -22,9 +22,14 @@
     // codebase it fires mostly on regex captures and array indexing, and the honest ways
     // to satisfy it are a real refactor or a spray of `!` assertions that would put the
     // types back where they started. Left as a next step rather than faked.
+    // lib/*.js is shared with the browser, so it cannot carry type annotations. allowJs
+    // lets the checker read those files and infer from them; checkJs stays off, because
+    // the browser copy is not the place to enforce strictness.
+    "allowJs": true,
+
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["server.ts", "relay.ts"],
+  "include": ["server.ts", "relay.ts", "mcp.ts", "lib/*.js"],
   "exclude": ["public", "vendor", "node_modules"]
 }

@@ -78,61 +78,19 @@ function stripFrontmatter(text: string): string {
   return text;
 }
 
-// ---------- model ids carried by tasks ----------
-// Model ids are prefixed per collection (ent-, sf-, ev-, …) — see the gitmir-model
-// skill. Matching on those prefixes is what lets a task name real objects in plain
-// text without a second file format to keep in sync.
-const MODEL_ID = /\b(?:mod|ent|f|su|sf|rt|fe|ev|proc|sfw|rx)-[a-z0-9][a-z0-9-]{0,60}\b/g;
-function idList(v: unknown): string[] {
-  if (!Array.isArray(v)) return [];
-  const out: string[] = [];
-  for (const x of v.slice(0, 400)) {
-    const s = String(x == null ? '' : x).trim().slice(0, 80);
-    if (s && !out.includes(s)) out.push(s);
-  }
-  return out;
-}
-// Read the ids a task declares it will touch. Two spellings are accepted because
-// both read naturally in a task file: a `Touches:` line next to `Type:`, and a
-// `## Touches` section listing one id per bullet. Ids are only taken from those
-// places — the `## Context` section legitimately names ids the task merely reads,
-// and counting those as changes would inflate every blast radius.
-function parseTouches(text: string): string[] {
-  const lines = text.split('\n');
-  let picked = '';
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const inline = /^\s*touches\s*:\s*(.*)$/i.exec(line);
-    if (inline) {
-      picked += ' ' + inline[1];
-      for (let j = i + 1; j < lines.length && /^\s+\S/.test(lines[j]); j++) picked += ' ' + lines[j];
-      continue;
-    }
-    if (/^\s*#{1,6}\s*touches\b/i.test(line)) {
-      for (let j = i + 1; j < lines.length && !/^\s*#{1,6}\s/.test(lines[j]); j++) picked += ' ' + lines[j];
-    }
-  }
-  return idList(picked.match(MODEL_ID) || []);
+// The impact engine is one file, imported by Node and served to the browser. The
+// browser loads it as a classic script (app.js is not a module), so the single
+// `export` line is dropped on the way out — the functions become globals, which is
+// exactly how app.js already expects to find them.
+function impactForBrowser(): string {
+  const src = fs.readFileSync(path.join(import.meta.dirname, 'lib', 'impact.js'), 'utf8');
+  return src.replace(/^export \{[^}]*\};?\s*$/m, '');
 }
 
-// Every id the model actually defines, fields included. Used to throw away ids a
-// task mentions that the model does not know.
-function modelIdSet(dir: string): Set<string> {
-  const out = new Set<string>();
-  let files: string[] = [];
-  try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.json') && f !== 'index.json'); } catch { return out; }
-  for (const f of files) {
-    let arr: unknown;
-    try { arr = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch { continue; }
-    if (!Array.isArray(arr)) continue;
-    for (const o of arr as any[]) {
-      if (!o || typeof o !== 'object') continue;
-      if (typeof o.id === 'string') out.add(o.id);
-      if (Array.isArray(o.fields)) for (const fl of o.fields) if (fl && typeof fl.id === 'string') out.add(fl.id);
-    }
-  }
-  return out;
-}
+import { MODEL_ID, idList, parseTouches, modelIdSet } from './lib/read.js';
+
+// ---------- model ids carried by tasks ----------
+
 
 // ---------- osascript helpers ----------
 function osascript(script: string, args: string[] = []): Promise<string> {
@@ -651,6 +609,7 @@ function buildShareBundle(projectPath: string, displayName: string): { html: str
 <script id="gitmir-share" type="application/json">${json}</script>
 <script>window.__GITMIR_SHARE__ = JSON.parse(document.getElementById('gitmir-share').textContent);</script>
 <script>${elk}</script>
+<script>${impactForBrowser()}</script>
 <script>${app}</script>
 </body></html>`;
 
@@ -689,6 +648,15 @@ const server = http.createServer(async (req, res) => {
     // the rest of the line into a comment and killed the whole UI. As an ordinary file a
     // backslash means what it says. no-store because a stale copy after an update is a
     // broken dashboard, and 110 KB over loopback costs nothing.
+    if (req.method === 'GET' && url.pathname === '/impact.js') {
+      try {
+        res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'no-store' });
+        return res.end(impactForBrowser());
+      } catch {
+        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+        return res.end('lib/impact.js is missing — reach and risk cannot be computed.');
+      }
+    }
     if (req.method === 'GET' && url.pathname === '/app.js') {
       try {
         const body = fs.readFileSync(path.join(import.meta.dirname, 'public', 'app.js'));
@@ -1989,8 +1957,6 @@ const HTML = /* html */ `<!doctype html>
   .of-p:first-child{margin-top:0}
 
 
-
-
   /* ---------- task log ---------- */
   .tasks-head{display:flex; align-items:center; gap:9px; margin-bottom:14px}
   .tasks-head .t{font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:var(--dim)}
@@ -2445,6 +2411,7 @@ const HTML = /* html */ `<!doctype html>
 
   <div class="toast" id="toast"></div>
 
+<script src="/impact.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>`;
