@@ -628,6 +628,7 @@ function renderHud(container, scene, seq){
   catch(e){ container.innerHTML='<div class="model-empty">Renderer failed: '+esc(e.message||e)+'</div>'; return; }
   hudLive.push(h);
   window.__HUD_API__=h;                 // the most recent one, for probing
+  window.__HUD_ALL__=hudLive;           // all of them: a view may hold several
   container.querySelector('.dgm-bar').addEventListener('click',(ev)=>{
     const b=ev.target.closest('.dgm-b'); if(!b||!h) return;
     const a=b.dataset.a;
@@ -1606,7 +1607,10 @@ function graphLifecycle(fl, m){
       const en='ef'+i+'_'+j, head=effHead(ef,m), desc=ef.description?String(ef.description):'';
       const W=Math.max(160,Math.min(272, Math.max(head.length*7+40, desc.length*6.6/2+40)));
       const L = desc ? wrapPx(desc, W-15-11, CW_MONO) : [];
-      nodes.push({id:en, w:Math.round(W), h: L.length?subH(L.length):40, meta:{kind:'effect', label:head, sub:desc, subLines:L, ref: ef.entityId?{k:'entity',id:ef.entityId}:{k:'entity',id:fl.entityId}}});
+      // An effect belongs to its transition and leads nowhere else, so the canvas
+      // renderer folds it inside — the picture stays "state → transition → state"
+      // and what fires is one click in.
+      nodes.push({id:en, w:Math.round(W), h: L.length?subH(L.length):40, meta:{kind:'effect', ownedBy:tn, label:head, sub:desc, subLines:L, ref: ef.entityId?{k:'entity',id:ef.entityId}:{k:'entity',id:fl.entityId}}});
       edges.push({from:tn, to:en, kind:'effect'});
     });
   });

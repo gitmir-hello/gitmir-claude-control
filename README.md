@@ -58,14 +58,14 @@ breaking one is visible to them).
 
 ### 3. Where does it land?
 
-<img src="docs/img/impact-graph.png" alt="Changes, the areas they reach, and the user journeys running through those areas" width="900">
+<img src="docs/img/impact-graph.jpg" alt="Changes, the areas they reach, and the user journeys running through those areas" width="900">
 
 Left to right: **what the task changes** → **the areas that reaches**, each stating how
-much of it is in reach → **the journeys that run through those areas**. Click any node for
-its own context.
+much of it is in reach → **the journeys that run through those areas**.
 
-Grouped on purpose: on a real task, one hop out reaches over a hundred objects, and a node
-per object is a picture nobody reads.
+On a real task, one hop out reaches over a hundred objects, so an area is a container
+rather than a claim: **click it and it opens in place**, showing exactly which of its
+objects are in reach. Esc goes back.
 
 **Approve this change** writes an `Approved:` line into the task file. It travels with the
 task, and whoever runs it sees it — including Claude, which is told never to edit that line
@@ -160,7 +160,20 @@ node mcp-check.ts examples/refund-shop impact 010-partial-refund.md
 | **Timeline** | the product changing, in the order it changed |
 | **Preview** | open any URL, click an element, get a prompt naming it and the files it probably lives in |
 
-<img src="docs/img/map.png" alt="Product map with layer switcher" width="920">
+Every diagram opens. An area holds its objects, a transition holds what it fires — so the
+top level stays a size you can take in, and the detail is one click inside it rather than a
+wall of nodes you have to read past.
+
+<img src="docs/img/map-open.jpg" alt="The Orders area opened in place, showing the objects, screens and endpoints inside it" width="920">
+
+A lifecycle reads as the chain it is — `created → paid → delivered → refunded` — with each
+transition carrying the effects that fire on it, folded inside until you ask:
+
+<img src="docs/img/lifecycle.jpg" alt="An order lifecycle: states, the transitions between them, and a transition holding two effects" width="920">
+
+They are drawn on a canvas by a renderer written for this. That is why there is no layout
+library in `vendor/` any more, and why a map exported to a single file is 714 KB rather
+than 2.3 MB.
 
 ---
 

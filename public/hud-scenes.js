@@ -15,7 +15,10 @@
 const HUD_STATIC = {
   groupRows: () => [],
   leaf: {
-    init: () => null,
+    // A node with something to say opens into a card. Returning null here — as
+    // this did at first — leaves a leaf selectable but not openable, so only
+    // containers responded to a click and the rest looked broken.
+    init: (src) => ((src && (src.detailText || src.modelId)) ? { src } : null),
     rows: () => [],
     step: () => {},
     stats: () => ({}),
@@ -287,7 +290,20 @@ const HUD_SPEC_KIND = {
 
 function hudSceneFromSpec(spec, m, hooks, head) {
   if (!spec || !spec.nodes || !spec.nodes.length) return null;
-  const nodes = spec.nodes.map((n) => {
+  // A builder can mark a node as belonging to another one. On a lifecycle the
+  // effects of a transition are exactly that: they hang off one transition and
+  // lead nowhere, so as peers they tripled the node count and buried the thing
+  // the diagram is actually about — which state follows which.
+  const owned = new Map();
+  for (const n of spec.nodes) {
+    const by = n.meta && n.meta.ownedBy;
+    if (!by) continue;
+    if (!owned.has(by)) owned.set(by, []);
+    owned.get(by).push(n.id);
+  }
+  const isOwned = new Set([].concat(...owned.values()));
+  const specById = new Map(spec.nodes.map((n) => [n.id, n]));
+  const nodes = spec.nodes.filter((n) => !isOwned.has(n.id)).map((n) => {
     const md = n.meta || {};
     const rows = [];
     // `sub` is prose about the node; `fields` are the lines the builder chose to
@@ -299,14 +315,27 @@ function hudSceneFromSpec(spec, m, hooks, head) {
       const cut = s.lastIndexOf('  ');
       rows.push(cut > 0 ? [s.slice(0, cut).trim(), s.slice(cut).trim()] : [s, '']);
     }
+    const kids = (owned.get(n.id) || []).map((cid) => {
+      const c = specById.get(cid), cm = (c && c.meta) || {};
+      return {
+        id: cid, modelId: (cm.ref && cm.ref.id) || null,
+        kind: HUD_SPEC_KIND[cm.kind] || 'sub',
+        title: hudTitle(cm.label || cid),
+        tag: String(cm.kind || '').slice(0, 14),
+        rows: (cm.subLines || []).slice(0, 4).map((l) => [String(l), '']),
+        detailText: cm.sub || '',
+      };
+    });
     return {
       id: n.id,
       modelId: (md.ref && md.ref.id) || null,
       kind: HUD_SPEC_KIND[md.kind] || 'sub',
       title: hudTitle(md.label || n.id),
       tag: String((md.ref && md.ref.id) || md.kind || '').slice(0, 14),
-      rows: rows.slice(0, 5),
+      rows: kids.length ? [[kids.length === 1 ? 'EFFECT' : 'EFFECTS', String(kids.length)]].concat(rows.slice(0, 4))
+                        : rows.slice(0, 5),
       detailText: md.sub || '',
+      children: kids.length ? { nodes: kids, edges: [] } : null,
     };
   });
   const have = new Set(nodes.map((n) => n.id));
