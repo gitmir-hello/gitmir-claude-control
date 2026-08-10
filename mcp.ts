@@ -162,7 +162,29 @@ type Tool = {
   title: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  annotations: ToolAnnotations;
   run: (args: Record<string, unknown>, project: string) => { text: string; isError?: boolean };
+};
+
+// The spec's optional behaviour hints. Clients are told to treat annotations from an
+// untrusted server as untrusted, which is exactly why the ones here are literal: a
+// hint that shades the truth is worse than no hint, because a client may skip its
+// confirmation prompt on the strength of it.
+//
+// Defaults, per the schema: readOnlyHint false, destructiveHint true, idempotentHint
+// false, openWorldHint true. Every field below is stated rather than left to default,
+// since the defaults are wrong for most of these tools.
+type ToolAnnotations = {
+  readOnlyHint: boolean;
+  destructiveHint: boolean;
+  idempotentHint: boolean;
+  openWorldHint: boolean;
+};
+
+// Reading the model: no writes, and the world is closed — the only thing touched is
+// this machine's own .gitmir/ folder. Repeating a read changes nothing.
+const READS: ToolAnnotations = {
+  readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false,
 };
 
 const PROJECT_ARG = {
@@ -172,6 +194,7 @@ const PROJECT_ARG = {
 const TOOLS: Tool[] = [
   {
     name: 'gitmir_model',
+    annotations: READS,
     title: 'Product model',
     description:
       'Read the product model of a codebase: its areas, business objects, server functions, ' +
@@ -233,6 +256,7 @@ const TOOLS: Tool[] = [
 
   {
     name: 'gitmir_impact',
+    annotations: READS,
     title: 'What a change would touch',
     description:
       'Given the model objects a change would modify, report what it reaches and score the risk. ' +
@@ -292,6 +316,7 @@ const TOOLS: Tool[] = [
 
   {
     name: 'gitmir_navigate',
+    annotations: READS,
     title: 'What breaks if this changes',
     description:
       'Explain one object in the product model and what depends on it. Call this when the user ' +
@@ -332,6 +357,7 @@ const TOOLS: Tool[] = [
 
   {
     name: 'gitmir_queue',
+    annotations: READS,
     title: 'Planned work and its risk',
     description:
       'List the work planned for this project — the task files under tasks/ — with the model ' +
@@ -370,6 +396,9 @@ const TOOLS: Tool[] = [
 
   {
     name: 'gitmir_create_task',
+    // Writes, but only ever adds: a new file under tasks/todo/, never a replacement.
+    // Not idempotent — calling it twice queues the work twice.
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     title: 'Queue a task',
     description:
       'Write a task into this project\'s queue (tasks/todo/) so it can be run and checked ' +
@@ -441,6 +470,10 @@ const TOOLS: Tool[] = [
 
   {
     name: 'gitmir_approve',
+    // Edits a file that already exists, and with `withdraw` removes a line from it —
+    // so destructive is the honest answer even though the common path only adds one.
+    // Not idempotent either: approving an approved task rewrites the timestamp.
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     title: 'Approve or withdraw approval',
     description:
       'Record that a queued task has been approved to run — or withdraw that approval. Call ' +
@@ -550,8 +583,6 @@ function log(...a: unknown[]): void { process.stderr.write(a.map(String).join(' 
 function result(id: unknown, res: unknown) { write({ jsonrpc: '2.0', id, result: res }); }
 function fail(id: unknown, code: number, message: string) { write({ jsonrpc: '2.0', id, error: { code, message } }); }
 
-let initialized = false;
-
 function handle(msg: any): void {
   const { id, method, params } = msg || {};
   const isRequest = id !== undefined && id !== null;
@@ -575,8 +606,7 @@ function handle(msg: any): void {
       });
     }
     case 'notifications/initialized':
-      initialized = true;
-      return;
+      return;                                   // nothing to gate on it — every method here is stateless
     case 'ping':
       return isRequest ? result(id, {}) : undefined;
     case 'prompts/list':
@@ -605,7 +635,8 @@ function handle(msg: any): void {
     case 'tools/list':
       return result(id, {
         tools: TOOLS.map((t) => ({
-          name: t.name, title: t.title, description: t.description, inputSchema: t.inputSchema,
+          name: t.name, title: t.title, description: t.description,
+          inputSchema: t.inputSchema, annotations: t.annotations,
         })),
       });
     case 'tools/call': {

@@ -88,10 +88,30 @@ is the source"), and the project path is filled in for you.
 Prompts are user-controlled by design, which is the right shape here: nobody wants an
 agent deciding on its own to re-model the repository.
 
+## What each tool admits about itself
+
+Every tool carries the spec's behaviour hints, and they are literal — a client may skip
+its confirmation prompt on the strength of one, so a hint that shades the truth is worse
+than no hint at all.
+
+| Tool | read-only | destructive | idempotent | open world |
+|---|---|---|---|---|
+| `gitmir_model` · `gitmir_navigate` · `gitmir_impact` · `gitmir_queue` | yes | no | yes | no |
+| `gitmir_create_task` | no | no | **no** | no |
+| `gitmir_approve` | no | **yes** | no | no |
+
+`gitmir_create_task` is not idempotent because calling it twice queues the work twice.
+`gitmir_approve` is marked destructive because `withdraw` removes a line from a file
+that exists — even though the common path only adds one. Nothing here is open-world:
+the only thing any tool touches is this machine's own `.gitmir/` and `tasks/` folders.
+
 ## What it does not do
 
 - **No repository reading.** It answers from the model. If the model is wrong, the
   answer is wrong — which is why freshness is in every response.
-- **No tool annotations.** The spec has optional hints for whether a tool is read-only
-  or destructive; the field names were not in the pages consulted, so rather than guess
-  them the server omits them. Your client will still ask before a write if it asks at all.
+- **No structured content.** The spec allows a machine-readable object alongside the
+  text. The consumer here is a model reading prose, and the arithmetic it needs is in
+  the prose already; a second serialization would double the payload to serve client
+  code that does not exist yet.
+- **No pagination cursors.** Six tools and eleven prompts fit in one response. A
+  `cursor` is accepted and ignored rather than rejected, so a paginating client works.
