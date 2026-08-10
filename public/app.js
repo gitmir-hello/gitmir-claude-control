@@ -980,11 +980,22 @@ async function renderModelView(){
     box.appendChild(mapLayerBar(layerData));
     const cap=document.createElement('div'); cap.className='map-cap';
     // No apostrophes in here on purpose: this string is emitted from a template literal.
-    cap.innerHTML='Each block is an area of the product — what it owns (◆) and how much of it there is. '+
+    const structure='Each block is an area of the product — what it owns (◆) and how much of it there is. '+
       'A line means one area touches another: <b>writes X</b> — it changes data owned by that area · '+
       '<b>uses</b> — its screens call that area · <b>calls</b> — it triggers logic over there · '+
-      'a named signal is an event one area raises and another reacts to.'+
-      '<span class="map-cap2">Read it together with whoever asked for the product: if a line is missing or points the wrong way, the understanding is wrong — and that is far cheaper to find now than after it is built.</span>';
+      'a named signal is an event one area raises and another reacts to.';
+    // With a layer on, the layer is what the picture now means. Leaving the structure
+    // paragraph in the prominent slot and demoting the layer to a grey line in the
+    // toolbar inverts that — readers looked at the big text, saw it describe the plain
+    // map, and reported the layer as having no explanation at all.
+    if(layerData){
+      const name=(MAP_LAYERS.find(l=>l.key===mapLayer)||{}).label||mapLayer;
+      cap.innerHTML='<b>'+esc(name)+'</b> — '+esc(layerData.legend)+
+        '<span class="map-cap2">The blocks and lines are unchanged: '+structure+'</span>';
+    } else {
+      cap.innerHTML=structure+
+        '<span class="map-cap2">Read it together with whoever asked for the product: if a line is missing or points the wrong way, the understanding is wrong — and that is far cheaper to find now than after it is built.</span>';
+    }
     box.appendChild(cap);
     const d=document.createElement('div'); box.appendChild(d);
     return renderElk(d, graphProductMap(m, layerData));
@@ -2514,9 +2525,12 @@ function drawImpactDetail(row, m){
   let h='<div class="imp-head"><div class="imp-title">'+esc(t.title)+'</div>'+
     '<div class="imp-sub">'+(t.adhoc
       ? 'Pick the objects a change would touch and read the same analysis a queued task gets.'
-      : '<code>tasks/'+esc(t.col)+'/'+esc(t.file)+'</code> · '+(t.declared
-          ? 'declared by the task on its <code>Touches:</code> line'
-          : 'inferred from every model id the task mentions — add a <code>Touches:</code> line for a deliberate one'))+
+      // Where the numbers come from decides how much to trust them, so it is a label
+      // rather than a clause in a grey sentence someone has to find.
+      : '<span class="imp-src '+(t.declared?'yes':'no')+'">'+(t.declared?'declared':'inferred')+'</span>'+
+        '<code>tasks/'+esc(t.col)+'/'+esc(t.file)+'</code> · '+(t.declared
+          ? 'the task named these on its <code>Touches:</code> line'
+          : 'taken from every model id the task mentions — add a <code>Touches:</code> line for a deliberate one'))+
     '</div></div>';
 
   if(t.adhoc) h+='<div class="imp-sec">Objects</div>'+
@@ -2640,8 +2654,15 @@ async function renderTimeline(view, m, seq){
     items.push({ kind:'task', at, n:t.n, col:t.col, title:t.title, ids:t.ids, file:t.file });
   }
   if(!items.length){ view.innerHTML='<div class="model-empty">Nothing recorded yet — no tasks in <code>tasks/</code> and no <code>.claude/tasks.json</code>.</div>'; return; }
-  const done=items.filter(i=>i.kind==='log'||i.col==='done');
-  const rest=items.filter(i=>!(i.kind==='log'||i.col==='done'));
+  // The same finished task is often in both records: a file in done/ and an entry in
+  // the log. Two rows for one piece of work reads as a bug in the history. Keep the
+  // task file — it carries the ids and the outcome — and drop the log twin, matching on
+  // the title, which is the only thing both records are guaranteed to share.
+  const norm=s=>String(s||'').toLowerCase().replace(/[^a-zа-яёіїєґ0-9]+/gi,' ').trim();
+  const fromQueue=new Set(items.filter(i=>i.kind==='task'&&i.col==='done').map(i=>norm(i.title)));
+  const merged=items.filter(i=>!(i.kind==='log' && fromQueue.has(norm(i.title))));
+  const done=merged.filter(i=>i.kind==='log'||i.col==='done');
+  const rest=merged.filter(i=>!(i.kind==='log'||i.col==='done'));
   done.sort((a,b)=> String(a.at).localeCompare(String(b.at)) || (a.n||0)-(b.n||0));
   rest.sort((a,b)=> (a.n||0)-(b.n||0));
   const ordered=done.concat(rest);
@@ -2791,10 +2812,10 @@ function mapLayerBar(data){
   const bar=document.createElement('div'); bar.className='lay-bar';
   // The legend is written by whatever computed the layer, so it can say what it
   // actually found — "no task has named an object yet" rather than a generic sentence.
-  const hint = (data && data.legend) || (MAP_LAYERS.find(l=>l.key===mapLayer)||MAP_LAYERS[0]).hint;
+  // The explanation lives in the caption below, where it is read. Repeating it here in
+  // grey next to the buttons is where it went to be ignored.
   bar.innerHTML='<span class="lay-l">Layer</span>'+
-    MAP_LAYERS.map(l=>'<button class="lay'+(mapLayer===l.key?' on':'')+'" data-k="'+l.key+'">'+esc(l.label)+'</button>').join('')+
-    '<span class="lay-h">'+esc(hint)+'</span>';
+    MAP_LAYERS.map(l=>'<button class="lay'+(mapLayer===l.key?' on':'')+'" data-k="'+l.key+'">'+esc(l.label)+'</button>').join('');
   bar.addEventListener('click',(e)=>{
     const k=e.target&&e.target.dataset&&e.target.dataset.k; if(!k||k===mapLayer) return;
     mapLayer=k; renderModelView();

@@ -1858,7 +1858,11 @@ const HTML = /* html */ `<!doctype html>
   .imp-detail{min-width:0}
   .imp-head{margin-bottom:18px}
   .imp-title{font-size:18px; font-weight:600; color:#fff; line-height:1.3}
-  .imp-sub{font-size:12px; color:var(--ink-3); margin-top:5px; max-width:90ch}
+  .imp-sub{font-size:12px; color:var(--ink-3); margin-top:7px; max-width:90ch; display:flex;
+    align-items:baseline; gap:8px; flex-wrap:wrap}
+  .imp-src{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.1em; text-transform:uppercase;
+    padding:2px 7px; border:1px solid currentColor; flex:none}
+  .imp-src.yes{color:var(--c-ok)} .imp-src.no{color:var(--c-warn)}
   .imp-sec{font-family:var(--font-mono); font-size:10px; letter-spacing:.16em; text-transform:uppercase;
     color:var(--ink-3); margin:20px 0 10px; display:flex; align-items:baseline; gap:10px}
   .imp-note{font-family:var(--font-body); font-size:11.5px; letter-spacing:0; text-transform:none; color:var(--ink-3); max-width:80ch}
