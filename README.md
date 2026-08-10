@@ -177,8 +177,8 @@ builder, viewers free** — sharing a read-only map is free on any plan.
 
 **Requirements.** [Node.js](https://nodejs.org) 22.18+ (it runs the TypeScript directly —
 `node server.ts` is the whole build system), the `claude` CLI on your `PATH`, macOS ·
-Windows · Linux. `dependencies` is empty and staying that way: ELK and the fonts are
-vendored, so it works offline. Port 4599, or `GITMIR_PORT=4600 node server.ts`. Desktop
+Windows · Linux. `dependencies` is empty and staying that way: the diagrams are drawn by a
+renderer written for this, and the fonts are vendored, so it works offline. Port 4599, or `GITMIR_PORT=4600 node server.ts`. Desktop
 shortcut: `bash install-shortcut.command` (macOS) · `install-shortcut.cmd` (Windows).
 
 **License.** Dual: **[AGPL-3.0](LICENSE)** — free, fork it, use it for paid work; distribute

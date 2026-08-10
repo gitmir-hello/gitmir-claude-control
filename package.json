@@ -21,7 +21,7 @@
     "typescript": "^5.8.0"
   },
   "comments": {
-    "dependencies": "Empty, and staying that way. ELK and the fonts are vendored under vendor/ so the tool has no supply chain to trust and works offline.",
+    "dependencies": "Empty, and staying that way. The diagram renderer is written for this project and the fonts are vendored under vendor/, so the tool has no supply chain to trust and works offline.",
     "devDependencies": "typescript is for `npm run typecheck` only. Nothing is installed to RUN this — Node executes the .ts files directly, so `git clone && node server.ts` still needs nothing.",
     "engines": "Node strips TypeScript types natively from 22.18. Node 18 and 20 are both past end of life."
   }

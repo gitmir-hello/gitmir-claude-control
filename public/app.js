@@ -539,31 +539,10 @@ const MAP_LAYERS = [
 let mapLayer='none';
 const EFF_RU={create:'create',update:'update',recalculate:'recalculate',sync:'sync',notify:'notify',link:'link',delete:'delete'};
 
-let elkReady=null;
-function ensureElk(){
-  if(elkReady) return elkReady;
-  // In a self-contained shared view the layout engine is already inlined above this
-  // script, and there is no server to fetch it from — use what is already here.
-  if(window.ELK){ elkReady=Promise.resolve(new (window.ELK.default||window.ELK)()); return elkReady; }
-  elkReady=new Promise((resolve,reject)=>{
-    const s=document.createElement('script'); s.src='/vendor/elk.bundled.js';
-    s.onload=()=>{ try{ const C=window.ELK&&(window.ELK.default||window.ELK); resolve(new C()); }catch(e){ reject(e); } };
-    s.onerror=()=>reject(new Error('failed to load elk'));
-    document.head.appendChild(s);
-  });
-  return elkReady;
-}
 
 // holo style (as in your IDE): accent color per node type, glyphs, dark-navy bg + grid
-const ACCENTS={ state:'#ffb86b', status:'#ffb86b', trigger:'#7e8cff', decision:'#ffd34c', effect:'#34f0a6', start:'#9b8aff',
-  entity:'#34f0a6', field:'#2fd8ff', event:'#9b8aff', function:'#2fd8ff', route:'#2fd8ff',
-  frontend:'#8aa0ff', module:'#7e8cff', process:'#8aa0ff', reaction:'#7e8cff' };
-const GLYPHS={ state:'◷', status:'◷', trigger:'⚡', decision:'◆', effect:'✦', start:'●',
-  entity:'◆', field:'ƒ', event:'✦', function:'❯', route:'↗', frontend:'▢', module:'▣', process:'❯', reaction:'⚙' };
 function trunc(s,n){ s=String(s==null?'':s); return s.length>n ? s.slice(0,n-1)+'…' : s; }
 
-const HOLO_DEFS='<defs>'+
-  '<marker id="ha" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="rgba(138,236,255,.7)"/></marker>'+
   '<pattern id="hgrid" width="28" height="28" patternUnits="userSpaceOnUse"><path d="M28 0 H0 V28" fill="none" stroke="rgba(120,210,255,.06)" stroke-width="1"/></pattern>'+
   '</defs>'+
   '<style>'+
@@ -616,73 +595,19 @@ function wrapPx(s, px, cw){
 }
 // Card height for a node that shows a title plus N description lines.
 const subH = (n) => 50 + Math.max(0, n - 1) * SUB_LH;
-function nodeSvg(n){
-  const x=n.x||0,y=n.y||0,w=n.width,h=n.height,md=n.meta||{};
-  const acc=ACCENTS[md.kind]||ACCENTS.entity, gl=GLYPHS[md.kind]||'•';
-  const PAD=11;                      // right-hand breathing room inside the card
-  const nameAvail = w - 14 - PAD - 13;   // 13px for the leading glyph + its space
-  const subAvail  = w - 15 - PAD;
-  // A condition is not a state, and on a decision diagram that difference has to be
-  // visible at a glance. A true rhombus cannot hold a line of SQL-ish text without
-  // becoming unreadable, so the card keeps its width and gets angled ends — the shape
-  // a flowchart uses for a branch when the text is long.
-  const cut = md.kind==='decision' ? Math.min(22, h/2) : 0;
-  const shape = cut
-    ? '<path d="M'+cut+' 0 H'+(w-cut)+' L'+w+' '+(h/2)+' L'+(w-cut)+' '+h+' H'+cut+' L0 '+(h/2)+' Z" class="hcard" stroke="'+acc+'"/>'
-    : '<rect x="0" y="0" width="'+w+'" height="'+h+'" rx="8" class="hcard" stroke="'+acc+'"/>';
-  let inner=shape;
-  // A layer's intensity is painted as a wash across the card, so the reading is the
-  // picture rather than a number someone has to compare by eye.
-  if(typeof md.heat==='number' && md.heat>0)
-    inner+='<rect x="0" y="0" width="'+w+'" height="'+h+'" rx="8" fill="'+acc+'" opacity="'+(0.06+md.heat*0.3).toFixed(3)+'"/>';
-  if(!cut) inner+='<rect x="0" y="0" width="3" height="'+h+'" rx="1.5" fill="'+acc+'"/>';
-  // Full text stays reachable on hover, so clipping never loses information.
-  const full=[md.label, md.sub].filter(Boolean).join(' — ');
-  if(full) inner+='<title>'+esc(full)+'</title>';
-  // The description is shown in FULL, wrapped over as many lines as it needs; the
-  // builder sized the card from the same line count.
-  const lines = md.subLines && md.subLines.length ? md.subLines
-              : (md.sub ? wrapPx(md.sub, subAvail, CW_MONO) : []);
-  const subText = (startY) => lines.map((l,i)=>'<text x="15" y="'+(startY+i*SUB_LH)+'" class="hsub">'+esc(l)+'</text>').join('');
-  if(md.fields && md.fields.length){
-    inner+='<text x="14" y="22" class="hname"><tspan fill="'+acc+'">'+gl+'</tspan> '+esc(fitPx(md.label,nameAvail,CW_NAME))+'</text>';
-    let fy=42;
-    if(lines.length){ inner+=subText(38); fy = 38 + lines.length*SUB_LH + 5; }
-    for(const f of md.fields){ inner+='<text x="15" y="'+fy+'" class="hfield">'+esc(fitPx(f,subAvail,CW_MONO))+'</text>'; fy+=18; }
-  } else {
-    const ny = lines.length ? 21 : Math.round(h/2+4);
-    inner+='<text x="14" y="'+ny+'" class="hname"><tspan fill="'+acc+'">'+gl+'</tspan> '+esc(fitPx(md.label,nameAvail,CW_NAME))+'</text>';
-    if(lines.length) inner+=subText(ny+17);
-  }
-  const ref = md.ref && md.ref.id ? ' data-ck="'+esc(md.ref.k)+'" data-cid="'+esc(md.ref.id)+'"' : '';
-  return '<g class="hnode'+(ref?' hclk':'')+'"'+ref+' transform="translate('+x+','+y+')">'+inner+'</g>';
-}
 
-function svgFromElk(g){
-  const W=Math.ceil(g.width||800)+2, H=Math.ceil(g.height||600)+2;
-  const eL=[], nL=[];
-  for(const e of (g.edges||[])){
-    const sec=e.sections&&e.sections[0]; if(!sec) continue;
-    const pts=[sec.startPoint,...(sec.bendPoints||[]),sec.endPoint];
-    let d='M '+pts[0].x+' '+pts[0].y; for(let i=1;i<pts.length;i++) d+=' L '+pts[i].x+' '+pts[i].y;
-    eL.push('<path d="'+d+'" class="he he-'+(e.ekind||'spine')+'" marker-end="url(#ha)"/>');
-    const lab=e.labels&&e.labels[0];
-    if(lab&&lab.text){ const lx=lab.x||0,ly=lab.y||0,lw=lab.width||40,lh=lab.height||20;
-      eL.push('<g class="hchip"><rect x="'+lx+'" y="'+ly+'" width="'+lw+'" height="'+lh+'" rx="10"/><text x="'+(lx+lw/2)+'" y="'+(ly+lh/2+4)+'" text-anchor="middle">'+esc(trunc(lab.text,30))+'</text></g>');
-    }
-  }
-  for(const n of (g.children||[])) nL.push(nodeSvg(n));
-  return '<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" class="holo-svg">'+
-    HOLO_DEFS+eL.join('')+nL.join('')+'</svg>';
-}
 
 // ---- the HUD renderer, mounted into the same frame the other diagrams use ----
 // Only one lives at a time: the canvas runs an animation loop, and a superseded
 // view that keeps drawing is both a leak and a liar.
-let hudLive=null;
-function hudDrop(){ if(hudLive){ try{hudLive.destroy();}catch(e){} hudLive=null; window.__HUD_API__=null; } }
+// A view may hold several diagrams at once — Journeys lists one per process — so
+// this is a list, not a single handle. Keeping one killed every diagram but the last.
+let hudLive=[];
+function hudDrop(){ for(const h of hudLive.splice(0)){ try{h.destroy();}catch(e){} } window.__HUD_API__=null; }
 function renderHud(container, scene, seq){
-  hudDrop();
+  // Deliberately does NOT drop the others: a view may mount several. Switching
+  // views calls hudDrop(), and a canvas replaced inside its own container is
+  // detached, which the engine notices and shuts itself down for.
   if(!scene || !scene.nodes || !scene.nodes.length){
     container.innerHTML='<div class="model-empty">Nothing to draw here yet.</div>'; return; }
   container.innerHTML=
@@ -693,90 +618,37 @@ function renderHud(container, scene, seq){
         '<button class="dgm-b" data-a="labels" title="Edge labels (L)">Labels</button>'+
         '<button class="dgm-b" data-a="bloom" title="Glow (B)">Glow</button>'+
         '<span class="dgm-hint">click a node to open it · Esc goes back · drag to pan · wheel to zoom</span>'+
+        '<button class="dgm-b dgm-full" data-a="full" title="Fullscreen">⛶</button>'+
       '</div>'+
       '<div class="dgm-canvas hud-canvas"><canvas></canvas></div>'+
     '</div>';
   const cv=container.querySelector('canvas');
-  try{ hudLive=window.HUD_MOUNT(cv, scene, { onDestroy:()=>{ window.__HUD_API__=null; hudLive=null; } }); }
+  let h;
+  try{ h=window.HUD_MOUNT(cv, scene, { onDestroy:()=>{ hudLive=hudLive.filter(x=>x!==h); } }); }
   catch(e){ container.innerHTML='<div class="model-empty">Renderer failed: '+esc(e.message||e)+'</div>'; return; }
-  window.__HUD_API__=hudLive;
+  hudLive.push(h);
+  window.__HUD_API__=h;                 // the most recent one, for probing
   container.querySelector('.dgm-bar').addEventListener('click',(ev)=>{
-    const b=ev.target.closest('.dgm-b'); if(!b||!hudLive) return;
+    const b=ev.target.closest('.dgm-b'); if(!b||!h) return;
     const a=b.dataset.a;
-    if(a==='fit') hudLive.fit();
-    else if(a==='back') hudLive.back();
-    else if(a==='labels') hudLive.flags.labels=!hudLive.flags.labels;
-    else if(a==='bloom') hudLive.flags.bloom=!hudLive.flags.bloom;
+    if(a==='fit') h.fit();
+    else if(a==='back') h.back();
+    else if(a==='labels') h.flags.labels=!h.flags.labels;
+    else if(a==='bloom') h.flags.bloom=!h.flags.bloom;
+    // Native fullscreen rather than an overlay: the canvas is one element, and the
+    // ResizeObserver already redraws it at whatever box it is given.
+    else if(a==='full'){
+      const frame=container.querySelector('.dgm');
+      if(document.fullscreenElement) document.exitFullscreen();
+      else if(frame && frame.requestFullscreen) frame.requestFullscreen();
+    }
   });
   if(seq!=null && !viewAlive(seq)) hudDrop();
 }
 
-async function renderElk(container, spec){
-  if(!spec || !spec.nodes || !spec.nodes.length){ container.innerHTML='<div class="model-empty">No data for this diagram.</div>'; return; }
-  container.innerHTML='<div class="model-empty">ELK layout…</div>';
-  let elk; try{ elk=await ensureElk(); }catch(e){ container.innerHTML='<div class="model-empty">ELK failed to load: '+esc(e.message||e)+'</div>'; return; }
-  const dir=spec.direction||'DOWN';
-  const graph={ id:'root', layoutOptions:{
-      'elk.algorithm':'layered', 'elk.direction':dir,
-      'elk.spacing.nodeNode':'44',
-      'elk.layered.spacing.nodeNodeBetweenLayers': dir==='RIGHT'?'96':'62',
-      'elk.layered.spacing.edgeNodeBetweenLayers':'22',
-      'elk.layered.nodePlacement.strategy':'NETWORK_SIMPLEX',
-      'elk.layered.considerModelOrder.strategy':'NODES_AND_EDGES',
-      'elk.edgeLabels.inline':'true' },
-    children: spec.nodes.map(n=>({ id:n.id, width:n.w, height:n.h, meta:n.meta })),
-    edges: spec.edges.map((e,i)=>({ id:'e'+i, sources:[e.from], targets:[e.to], ekind:e.kind||'spine',
-      labels: e.label ? [{ text:e.label, width: Math.min(220, String(e.label).length*6.6+26), height:20 }] : [] })) };
-  let laid; try{ laid=await elk.layout(graph); }catch(e){ container.innerHTML='<div class="model-empty">Layout error: '+esc(e.message||e)+'</div>'; return; }
-  const metaById=new Map(spec.nodes.map(n=>[n.id,n.meta]));
-  for(const c of (laid.children||[])) if(!c.meta) c.meta=metaById.get(c.id);
-  const ekById=new Map(graph.edges.map(e=>[e.id,e.ekind]));
-  for(const e of (laid.edges||[])) if(!e.ekind) e.ekind=ekById.get(e.id);
-  const svg=svgFromElk(laid);
-  container.innerHTML=
-    '<div class="dgm">'+
-      '<div class="dgm-bar">'+
-        '<button class="dgm-b" data-a="out" title="Zoom out">−</button>'+
-        '<button class="dgm-b" data-a="in" title="Zoom in">+</button>'+
-        '<button class="dgm-b" data-a="fit" title="Fit to view">Fit</button>'+
-        '<button class="dgm-b" data-a="reset" title="100%">100%</button>'+
-        '<span class="dgm-hint">drag to pan · wheel to zoom · click a node for context</span>'+
-        '<button class="dgm-b dgm-full" data-a="full" title="Fullscreen">⛶</button>'+
-      '</div>'+
-      '<div class="dgm-canvas"><div class="dgm-stage">'+svg+'</div></div>'+
-    '</div>';
-  const canvas=container.querySelector('.dgm-canvas');
-  const stage=container.querySelector('.dgm-stage');
-  const svgEl=stage.querySelector('svg');
-  const pz=attachPanZoom(canvas, stage, svgEl, (ck,cid)=>openContextPopup(ck,cid));
-  container.querySelector('.dgm-bar').addEventListener('click',(e)=>{ const a=e.target&&e.target.dataset&&e.target.dataset.a; if(!a) return;
-    if(a==='in') pz.zoomCenter(1.2); else if(a==='out') pz.zoomCenter(0.83);
-    else if(a==='fit') pz.fit(); else if(a==='reset') pz.reset();
-    else if(a==='full') openDiagramFullscreen(svgEl.outerHTML);
-  });
-}
 
 // Pan/zoom canvas like ide.gitmir.com's VisualBuilder: drag to pan, wheel zooms to
 // the cursor, click (not drag) a node fires onNodeClick.
-function attachPanZoom(canvas, stage, svgEl, onNodeClick){
-  let k=1, x=0, y=0;
-  if(svgEl){ svgEl.style.maxWidth='none'; svgEl.style.maxHeight='none'; }
-  const apply=()=>{ stage.style.transform='translate('+x+'px,'+y+'px) scale('+k+')'; const gs=28*k; canvas.style.backgroundSize=gs+'px '+gs+'px'; canvas.style.backgroundPosition=x+'px '+y+'px'; };
-  const nat=()=>{ if(svgEl && svgEl.viewBox && svgEl.viewBox.baseVal && svgEl.viewBox.baseVal.width) return {w:svgEl.viewBox.baseVal.width, h:svgEl.viewBox.baseVal.height}; return {w:800,h:600}; };
-  const fit=()=>{ const cw=canvas.clientWidth, ch=canvas.clientHeight, n=nat(); const s=Math.min(cw/n.w, ch/n.h)*0.94; k=Math.min(1.4, Math.max(0.08, (isFinite(s)&&s>0)?s:1)); x=(cw-n.w*k)/2; y=(ch-n.h*k)/2; apply(); };
-  const reset=()=>{ k=1; x=18; y=18; apply(); };
-  const zoomAt=(f,px,py)=>{ const nk=Math.min(2.6, Math.max(0.1, k*f)); const wx=(px-x)/k, wy=(py-y)/k; k=nk; x=px-wx*k; y=py-wy*k; apply(); };
-  const zoomCenter=f=> zoomAt(f, canvas.clientWidth/2, canvas.clientHeight/2);
-  canvas.addEventListener('wheel',(e)=>{ e.preventDefault(); const r=canvas.getBoundingClientRect(); zoomAt(e.deltaY<0?1.12:0.89, e.clientX-r.left, e.clientY-r.top); }, {passive:false});
-  let drag=false, moved=false, lx=0, ly=0;
-  canvas.addEventListener('mousedown',(e)=>{ if(e.button!==0) return; drag=true; moved=false; lx=e.clientX; ly=e.clientY; canvas.classList.add('grab'); });
-  canvas.addEventListener('mousemove',(e)=>{ if(!drag) return; const dx=e.clientX-lx, dy=e.clientY-ly; if(Math.abs(dx)+Math.abs(dy)>4) moved=true; x+=dx; y+=dy; lx=e.clientX; ly=e.clientY; apply(); });
-  const end=()=>{ drag=false; canvas.classList.remove('grab'); };
-  canvas.addEventListener('mouseup', end); canvas.addEventListener('mouseleave', end);
-  canvas.addEventListener('click',(e)=>{ if(moved){ moved=false; return; } const node=e.target.closest('[data-cid]'); if(node && node.dataset.cid && onNodeClick) onNodeClick(node.dataset.ck, node.dataset.cid); });
-  setTimeout(fit, 30);
-  return { fit, reset, zoomCenter };
-}
 
 let modelReq = 0;
 async function loadModel(pathStr){
@@ -1040,39 +912,14 @@ async function renderModelView(){
     const scene=window.hudSceneProductMap
       ? hudSceneProductMap(m, layerData, { onSelect:(id)=>{ if(id) openContextPopup(kindOf(id), id); } })
       : null;
-    if(scene) return renderHud(d, scene, seq);
-    return renderElk(d, graphProductMap(m, layerData));
+    return renderHud(d, scene, seq);
   }
-  if(modelView==='er') return renderElk(box, graphER(m));
-  if(modelView==='flow') return renderElk(box, graphFlow(m));
+  if(modelView==='er') return hudRenderSpec(box, graphER(m), m, {title:'DATA', subtitle:'BUSINESS OBJECTS AND WHAT LINKS THEM'}, seq);
+  if(modelView==='flow') return hudRenderSpec(box, graphFlow(m), m, {title:'DATA FLOW', subtitle:'WHERE DATA COMES FROM AND WHERE IT GOES'}, seq);
   view.innerHTML='<div class="model-empty">No data for this diagram.</div>';
 }
 
 function fsClose(){ const ov=document.getElementById('fsOverlay'); if(ov){ ov.classList.remove('show'); ov.innerHTML=''; } }
-function openDiagramFullscreen(svg){
-  let ov=document.getElementById('fsOverlay');
-  if(!ov){ ov=document.createElement('div'); ov.id='fsOverlay'; ov.className='fs-overlay'; document.body.appendChild(ov); }
-  ov.innerHTML=
-    '<div class="fs-bar">'+
-      '<button class="fs-btn" data-a="out">−</button>'+
-      '<button class="fs-btn" data-a="in">+</button>'+
-      '<button class="fs-btn" data-a="fit">Fit</button>'+
-      '<button class="fs-btn" data-a="reset">100%</button>'+
-      '<span class="fs-hint">drag to pan · wheel to zoom · click a node for context</span>'+
-      '<button class="fs-btn fs-close" data-a="close">✕ Esc</button>'+
-    '</div>'+
-    '<div class="fs-canvas" id="fsCanvas"><div class="fs-stage" id="fsStage">'+svg+'</div></div>';
-  ov.classList.add('show');
-  const canvas=ov.querySelector('#fsCanvas');
-  const stage=ov.querySelector('#fsStage');
-  const svgEl=stage.querySelector('svg');
-  const pz=attachPanZoom(canvas, stage, svgEl, (ck,cid)=>openContextPopup(ck,cid));
-  ov.querySelector('.fs-bar').addEventListener('click',(e)=>{ const a=e.target&&e.target.dataset&&e.target.dataset.a; if(!a) return;
-    if(a==='in') pz.zoomCenter(1.2); else if(a==='out') pz.zoomCenter(0.83);
-    else if(a==='fit') pz.fit(); else if(a==='reset') pz.reset();
-    else if(a==='close') fsClose();
-  });
-}
 
 // ----- helpers -----
 function mSafe(s){ return String(s==null?'':s).replace(/[^A-Za-z0-9_]/g,'_'); }
@@ -1587,7 +1434,7 @@ async function renderProcesses(view, m, seq){
         journeyStepsHtml(p, m)+
         '<div class="proc-diagram"></div>';
       view.appendChild(block);
-      await renderElk(block.querySelector('.proc-diagram'), graphProcess(p, m));
+      hudRenderSpec(block.querySelector('.proc-diagram'), graphProcess(p, m), m, {title:String(p.name||'JOURNEY').toUpperCase(), subtitle:'THE PATH A PERSON WALKS'});
     }
   }
 }
@@ -1672,7 +1519,7 @@ async function renderEntityLogic(container, entId, m){
   else for(const fl of flows){
     if(fl.fieldName){ const cap=document.createElement('div'); cap.className='logic-cap'; cap.textContent='field: '+e.name+'.'+fl.fieldName; secL.appendChild(cap); }
     const w=document.createElement('div'); w.className='proc-diagram'; secL.appendChild(w);
-    await renderElk(w, graphLifecycle(fl, m));
+    hudRenderSpec(w, graphLifecycle(fl, m), m, {title:String(fl.name||'LIFECYCLE').toUpperCase(), subtitle:'STATES AND THE TRANSITIONS BETWEEN THEM'});
   }
 
   // 2) processes involving the entity
@@ -1689,7 +1536,7 @@ async function renderEntityLogic(container, entId, m){
     const b=document.createElement('div'); b.className='proc-block';
     b.innerHTML='<div class="proc-title">'+esc(p.name)+'</div>'+(p.description?'<div class="proc-desc">'+esc(p.description)+'</div>':'')+'<div class="proc-diagram"></div>';
     secP.appendChild(b);
-    await renderElk(b.querySelector('.proc-diagram'), graphProcess(p, m, entId));
+    hudRenderSpec(b.querySelector('.proc-diagram'), graphProcess(p, m, entId), m, {title:String(p.name||'JOURNEY').toUpperCase(), subtitle:'THE PATH A PERSON WALKS'});
   }
 
   // 3) operations
@@ -2626,7 +2473,7 @@ async function renderEvents(view, m, seq){
       ' — either dead, or the model has not caught up with the code.</span>':'');
   view.appendChild(cap);
   const d=document.createElement('div'); view.appendChild(d);
-  await renderElk(d, graphEvents(m));
+  hudRenderSpec(d, graphEvents(m), m, {title:'EVENTS', subtitle:'WHAT RAISES A SIGNAL AND WHAT REACTS TO IT'}, seq);
 }
 
 /* ---------------- Decisions — every point where the product chooses ---------------- */
@@ -2681,7 +2528,7 @@ async function renderDecisions(view, m, seq){
         '<span class="jr-trig">'+esc(ent?(ent.name||ent.id):'')+(fl.fieldName?' · '+esc(fl.fieldName):'')+'</span></div>'+
       '<div class="proc-diagram"></div>';
     view.appendChild(block);
-    await renderElk(block.querySelector('.proc-diagram'), graphDecisions(fl, m));
+    hudRenderSpec(block.querySelector('.proc-diagram'), graphDecisions(fl, m), m, {title:'DECISIONS', subtitle:'EVERY BRANCH AND THE CONDITION ON IT'});
   }
   if(rx.length){
     const box=document.createElement('div'); box.className='logic-sec';
@@ -2964,6 +2811,6 @@ async function drawImpactGraph(box, named, m, seq, task){
     ? hudSceneImpact(task, m, blastRadius(named, m, 2),
         { onSelect:(id)=>{ if(id) openContextPopup(kindOf(id), id); } })
     : null;
-  if(scene) renderHud(d, scene, seq); else await renderElk(d, spec);
+  renderHud(d, scene, seq);
   if(seq!=null && !viewAlive(seq)) box.innerHTML='';
 }

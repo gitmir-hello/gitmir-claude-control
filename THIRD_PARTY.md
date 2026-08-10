@@ -8,7 +8,6 @@ to those files.
 
 | Component | Version | License | File(s) |
 |-----------|---------|---------|---------|
-| [elkjs](https://github.com/kieler/elkjs) (Eclipse Layout Kernel, JS build) | 0.11.1 | [EPL-2.0](https://www.eclipse.org/legal/epl-2.0/) | `vendor/elk.bundled.js` |
 | [Onest](https://github.com/getflourish/Onest) font | — | [SIL Open Font License 1.1](https://openfontlicense.org/) | `vendor/fonts/*.woff2`, `vendor/fonts.css` |
 | [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) font | — | [SIL Open Font License 1.1](https://openfontlicense.org/) | `vendor/fonts/*.woff2`, `vendor/fonts.css` |
 

@@ -579,8 +579,10 @@ function buildShareBundle(projectPath: string, displayName: string): { html: str
       } catch { return m; }
     });
   } catch {}
-  const elk = fs.readFileSync(V('elk.bundled.js'), 'utf8');
-  const app = fs.readFileSync(path.join(import.meta.dirname, 'public', 'app.js'), 'utf8');
+  const P = (f: string) => fs.readFileSync(path.join(import.meta.dirname, 'public', f), 'utf8');
+  const hud = P('hud.js');
+  const hudScenes = P('hud-scenes.js');
+  const app = P('app.js');
 
   const html = `<!doctype html>
 <html lang="en"><head>
@@ -609,8 +611,9 @@ function buildShareBundle(projectPath: string, displayName: string): { html: str
 <div class="toast" id="toast"></div>
 <script id="gitmir-share" type="application/json">${json}</script>
 <script>window.__GITMIR_SHARE__ = JSON.parse(document.getElementById('gitmir-share').textContent);</script>
-<script>${elk}</script>
 <script>${impactForBrowser()}</script>
+<script>${hud}</script>
+<script>${hudScenes}</script>
 <script>${app}</script>
 </body></html>`;
 

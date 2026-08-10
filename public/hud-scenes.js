@@ -271,3 +271,58 @@ function hudWrap(text, cols) {
   if (line) out.push(line);
   return out;
 }
+
+/* -----------------------------------------------------------------------------
+ * Every other diagram, from the spec its builder already produces.
+ *
+ * Those builders encode what each picture means — which lines are worth drawing
+ * on a lifecycle, what counts as a branch on a decision map. None of that is a
+ * rendering question, so none of it is rewritten here: this only translates the
+ * shape they emit into the shape the renderer wants.
+ * -------------------------------------------------------------------------- */
+const HUD_SPEC_KIND = {
+  module: 'primary', entity: 'data', process: 'core', state: 'sub',
+  decision: 'alert', start: 'core', trigger: 'core', effect: 'sub',
+};
+
+function hudSceneFromSpec(spec, m, hooks, head) {
+  if (!spec || !spec.nodes || !spec.nodes.length) return null;
+  const nodes = spec.nodes.map((n) => {
+    const md = n.meta || {};
+    const rows = [];
+    // `sub` is prose about the node; `fields` are the lines the builder chose to
+    // show. Both are already written for a person, so they go through unedited.
+    for (const line of (md.subLines || [])) rows.push([String(line), '']);
+    for (const f of (md.fields || [])) {
+      const s = String(f);
+      // "2 screens · 2 actions" reads better split than squeezed into one column.
+      const cut = s.lastIndexOf('  ');
+      rows.push(cut > 0 ? [s.slice(0, cut).trim(), s.slice(cut).trim()] : [s, '']);
+    }
+    return {
+      id: n.id,
+      modelId: (md.ref && md.ref.id) || null,
+      kind: HUD_SPEC_KIND[md.kind] || 'sub',
+      title: hudTitle(md.label || n.id),
+      tag: String((md.ref && md.ref.id) || md.kind || '').slice(0, 14),
+      rows: rows.slice(0, 5),
+      detailText: md.sub || '',
+    };
+  });
+  const have = new Set(nodes.map((n) => n.id));
+  const edges = (spec.edges || [])
+    .filter((e) => have.has(e.from) && have.has(e.to))
+    .map((e) => [e.from, e.to, e.label || '']);
+  return hudScene({
+    title: (head && head.title) || 'DIAGRAM',
+    subtitle: (head && head.subtitle) || '',
+    nodes, edges, m, hooks,
+  });
+}
+
+/** The one call site every migrated diagram goes through. */
+function hudRenderSpec(container, spec, m, head, seq) {
+  const scene = hudSceneFromSpec(spec, m,
+    { onSelect: (id) => { if (id) openContextPopup(kindOf(id), id); } }, head);
+  return renderHud(container, scene, seq);
+}

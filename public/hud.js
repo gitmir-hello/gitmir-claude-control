@@ -1,37 +1,37 @@
 /* =============================================================================
  *  HOLO-HUD ENGINE
- *  Голографический рендер графа на чистом Canvas 2D. Без библиотек.
+ *  A holographic graph renderer on plain Canvas 2D. No libraries.
  *
- *  Движок ничего не знает о предметной области. Что рисовать, он спрашивает у
- *  сцены: она объявляет window.SCENE_FACTORY(HUD) и возвращает описание —
- *  узлы, связи и хуки для листовых элементов (их сводка, жизнь и досье).
- *  Так одна и та же машинерия обслуживает и сеть агентов, и схему бизнес-логики.
+ *  The engine knows nothing about the subject. What to draw, it asks the scene:
+ *  the scene hands over nodes, edges, and hooks for the leaf elements (their
+ *  summary, their movement, their detail card). One machine therefore serves
+ *  both a network of agents and a map of business logic.
  *
- *  Конвейер кадра:
- *      сцена (offscreen)
- *        -> bright-pass (возведение яркости в квадрат)
- *        -> пирамида down/upsample = bloom
- *        -> анаморфный горизонтальный streak
- *        -> разделение RGB + радиальная хроматическая аберрация
- *        -> скан-линии, развёртка, зерно, виньетка
- *        -> экран
+ *  The frame pipeline:
+ *      scene (offscreen)
+ *        -> bright-pass (brightness squared)
+ *        -> down/upsample pyramid = bloom
+ *        -> anamorphic horizontal streak
+ *        -> RGB split + radial chromatic aberration
+ *        -> scanlines, sweep, grain, vignette
+ *        -> screen
  *
- *  Секции файла:
- *      1  математика и утилиты
- *      2  палитра
- *      3  подключение сцены
- *      4  текстовый движок
- *      5  геометрия и раскладка
- *      6  камера
+ *  Sections of this file:
+ *      1  maths and utilities
+ *      2  palette
+ *      3  connecting the scene
+ *      4  the text engine
+ *      5  geometry and layout
+ *      6  camera
  *      7  render targets
- *      8  примитивы формы
- *      9  фон
- *     10  рёбра
- *     11  узлы
- *     12  экранный HUD
- *     13  постобработка
- *     14  ввод
- *     15  главный цикл
+ *      8  shape primitives
+ *      9  background
+ *     10  edges
+ *     11  nodes
+ *     12  the on-screen HUD
+ *     13  post-processing
+ *     14  input
+ *     15  the main loop
  * ========================================================================== */
 
 /**
@@ -55,7 +55,7 @@ const on = (target, type, fn, opts) => {
 };
 
 /* =============================================================================
- * 1. МАТЕМАТИКА И УТИЛИТЫ
+ * 1. MATHS AND UTILITIES
  * ========================================================================== */
 
 const TAU = Math.PI * 2;
@@ -66,10 +66,10 @@ const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
 const easeOutQuint = (t) => 1 - Math.pow(1 - t, 5);
 const easeInOutCubic = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
-// Кадронезависимое приближение к цели: rate — «жёсткость» в 1/сек.
+// Frame-rate independent approach to a target: rate is stiffness, in 1/sec.
 const approach = (cur, target, rate, dt) => cur + (target - cur) * (1 - Math.exp(-rate * dt));
 
-// Детерминированный ГПСЧ — картинка воспроизводима между запусками.
+// A deterministic PRNG, so the picture is reproducible between runs.
 function mulberry32(seed) {
   let a = seed >>> 0;
   return function () {
@@ -81,7 +81,7 @@ function mulberry32(seed) {
   };
 }
 
-// Гладкий 1D value-noise — для дрожания голограммы и «живых» показаний.
+// Smooth 1D value noise, for the hologram's shimmer and its live readings.
 function makeNoise1D(seed) {
   const rnd = mulberry32(seed);
   const N = 512;
@@ -102,7 +102,7 @@ const noiseB = makeNoise1D(9001);
 const noiseC = makeNoise1D(4242);
 
 /* =============================================================================
- * 2. ПАЛИТРА
+ * 2. PALETTE
  * ========================================================================== */
 
 const C = {
@@ -124,7 +124,7 @@ const mix = (c1, c2, t) => [
   Math.round(lerp(c1[2], c2[2], t)),
 ];
 
-// Типы узлов: цвет + вес свечения.
+// Node kinds: colour plus how much glow each carries.
 const KIND = {
   core:    { color: C.amber, accent: C.gold,  glow: 1.35 },
   primary: { color: C.cyan,  accent: C.ice,   glow: 1.00 },
@@ -134,27 +134,27 @@ const KIND = {
 };
 
 /* =============================================================================
- * 3. ПОДКЛЮЧЕНИЕ СЦЕНЫ
- *    Сцена объявляет window.SCENE_FACTORY(HUD) и возвращает:
- *      title, subtitle, ticker[]      — надписи HUD
- *      nodes[], edges[]               — граф верхнего уровня
- *      groupRows()                    — строки сводки для узла-контейнера
- *      leaf.init(src, rnd)            — данные листа (null, если лист пустой)
- *      leaf.rows(data)                — строки сводки листа
- *      leaf.step(data, dt)            — покадровая жизнь листа
- *      leaf.stats(data)               — вклад листа в агрегаты контейнеров
- *      leaf.progress(data)            — 0..1 для строки типа 'bar'
- *      resolveRow(node, row)          — живое значение строки
- *      detail: { w, h, draw(...) }    — раскрытая карточка листа
- *      labels                         — показывать подписи связей по умолчанию
+ * 3. CONNECTING THE SCENE
+ *    A scene provides:
+ *      title, subtitle, ticker[]      — the HUD's own captions
+ *      nodes[], edges[]               — the top-level graph
+ *      groupRows()                    — summary rows for a container node
+ *      leaf.init(src, rnd)            — leaf data, or null for an empty leaf
+ *      leaf.rows(data)                — summary rows for a leaf
+ *      leaf.step(data, dt)            — the leaf's per-frame movement
+ *      leaf.stats(data)               — what the leaf contributes to its container
+ *      leaf.progress(data)            — 0..1 for a row drawn as a bar
+ *      resolveRow(node, row)          — the live value behind a row
+ *      detail: { w, h, draw(...) }    — the opened card for a leaf
+ *      labels                         — show edge labels by default
  * ========================================================================== */
 
-const HUD_API = {};                  // заполняется ниже, перед вызовом фабрики
+const HUD_API = {};                  // filled in below, before the scene is built
 let SCENE = null;
 
 /* =============================================================================
- * 4. ТЕКСТОВЫЙ ДВИЖОК
- *    Моноширинный шрифт + ручной трекинг (letter-spacing есть не везде).
+ * 4. THE TEXT ENGINE
+ *    Monospace plus manual tracking — letterSpacing is not everywhere.
  * ========================================================================== */
 
 const FONT_STACK = 'ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace';
@@ -179,9 +179,9 @@ function applyFont(ctx, size, weight, tracking) {
 }
 
 /**
- * Ширина строки с трекингом — ровно та, что получится при отрисовке.
- * Нативный letterSpacing добавляет зазор и после последнего символа,
- * поэтому его вычитаем: иначе выравнивание вправо «плывёт».
+ * The width a tracked string will actually occupy when drawn.
+ * Native letterSpacing adds a gap after the last character too, so subtract
+ * it — otherwise right-alignment drifts.
  */
 function textWidth(str, size, weight, tracking) {
   const key = `${size}|${weight}|${tracking}|${str}`;
@@ -201,17 +201,17 @@ function textWidth(str, size, weight, tracking) {
   return w;
 }
 
-/* --- отложенная отрисовка текста ----------------------------------------- *
- * Свечение в этом рендере даёт bloom, а он берёт яркость прямо из кадра.
- * Текст — самое яркое, что есть на панели, поэтому вокруг букв набухал ореол
- * и они «плыли». Поэтому текст не рисуется сразу: вызовы копятся в очередь,
- * bloom считается по кадру без единой буквы, и только потом текст ложится
- * сверху — идеально резким. В очереди сохраняем матрицу, прозрачность и
- * область отсечения, чтобы воспроизведение было неотличимо от прямого вызова.
+/* --- deferred text ------------------------------------------------------- *
+ * Glow here comes from bloom, and bloom reads brightness straight off the
+ * frame. Text is the brightest thing on a panel, so a halo swelled around
+ * every letter and made it swim. So text is not drawn as it is asked for:
+ * the calls queue up, bloom is computed on a frame with no letters in it, and
+ * only then does the text land on top, perfectly sharp. The queue keeps the
+ * matrix, alpha and clip so replaying is indistinguishable from drawing directly.
  */
 const textQueue = [];
 let deferText = true;
-let textClip = null;          // {x, y, w, h} — прямоугольник панели или null
+let textClip = null;          // {x, y, w, h} — the panel's rect, or null
 
 function flushText(ctx) {
   if (!textQueue.length) return;
@@ -234,8 +234,8 @@ function flushText(ctx) {
 }
 
 /**
- * Рисует текст с трекингом. align: 'left' | 'center' | 'right'.
- * Возвращает ширину строки (доступна сразу, даже когда отрисовка отложена).
+ * Draws tracked text. align: 'left' | 'center' | 'right'.
+ * Returns the width, available immediately even when drawing is deferred.
  */
 function drawText(ctx, str, x, y, opt) {
   const size = opt.size;
@@ -267,7 +267,7 @@ function drawText(ctx, str, x, y, opt) {
   if (HAS_LETTER_SPACING || tracking === 0) {
     ctx.fillText(str, sx, y);
   } else {
-    // Фолбэк: посимвольно, чтобы трекинг работал везде одинаково.
+    // Fallback: character by character, so tracking behaves the same everywhere.
     measureCtx.font = fontString(size, weight);
     let cx = sx;
     for (let i = 0; i < str.length; i++) {
@@ -281,7 +281,7 @@ function drawText(ctx, str, x, y, opt) {
 }
 
 /* =============================================================================
- * 5. ГЕОМЕТРИЯ УЗЛОВ И РАСКЛАДКА
+ * 5. NODE GEOMETRY AND LAYOUT
  * ========================================================================== */
 
 const METRIC = {
@@ -301,19 +301,19 @@ const METRIC = {
   rowGap: 42,
 };
 
-// Отступы вложенного уровня внутри раскрытого узла.
+// Padding for a nested level inside an opened node.
 const NEST = {
   padX: 26,
-  padTop: 34,      // под заголовком контейнера
-  padBottom: 42,   // с запасом: обходные дуги ныряют ниже панелей
-  colGap: 74,      // внутри контейнера панели стоят плотнее, чем на верхнем уровне
+  padTop: 34,      // below the container's own header
+  padBottom: 42,   // generous: bypass arcs dip below the panels
+  colGap: 74,      // inside a container, panels sit closer than at the top level
   rowGap: 32,
 };
 
 const root = { nodes: [], edges: [], cols: null, w: 0, h: 0, parent: null };
-const nodes = root.nodes;      // корневой уровень — им пользуется большая часть кода
+const nodes = root.nodes;      // the root level, which most of this code works on
 const edges = root.edges;
-const allNodes = [];           // плоский список всех узлов всех уровней
+const allNodes = [];           // every node of every level, flat
 const allEdges = [];
 
 function buildLevel(nodeSpecs, edgeSpecs, rnd, parent) {
@@ -326,12 +326,12 @@ function buildLevel(nodeSpecs, edgeSpecs, rnd, parent) {
 
   for (const src of nodeSpecs) {
     const kind = KIND[src.kind] || KIND.primary;
-    // Лист сети — агент: строки панели выводим из его состояния.
-    // Контейнер — группа: его строки заполняются агрегатом по детям ниже.
+    // A leaf gets its rows from its own state; a container gets them from an
+    // aggregate over its children, filled in below.
     const leafData = SCENE.leaf.init(src, rnd);
     const rows = src.rows || (leafData ? SCENE.leaf.rows(leafData) : SCENE.groupRows());
 
-    // Ширина — по самому длинному содержимому, с ограничением.
+    // Width follows the longest thing inside, up to a cap.
     let w = METRIC.minW;
     w = Math.max(w, textWidth(src.title, METRIC.titleSize, 600, METRIC.titleTrack)
                   + textWidth(src.tag, METRIC.tagSize, 400, METRIC.tagTrack)
@@ -357,29 +357,29 @@ function buildLevel(nodeSpecs, edgeSpecs, rnd, parent) {
       color: kind.color,
       accent: kind.accent,
       glowK: kind.glow,
-      // baseW/baseH — свёрнутый размер; w/h — текущий, растёт при раскрытии.
+      // baseW/baseH is the collapsed size; w/h is current and grows when opened.
       baseW: w, baseH: h,
       openW: w, openH: h,
       w, h,
-      lx: 0, ly: 0,        // локальные координаты внутри своего уровня
-      ltx: 0, lty: 0,      // цели, к которым локальные координаты едут
-      x: 0, y: 0,          // абсолютные мировые (пересчитываются каждый кадр)
+      lx: 0, ly: 0,        // local coordinates within its own level
+      ltx: 0, lty: 0,      // where those local coordinates are travelling to
+      x: 0, y: 0,          // absolute world coordinates, recomputed every frame
       depth: 0,
       col: 0,
-      level: null,         // уровень, которому принадлежит узел
-      sub: null,           // вложенный уровень
+      level: null,         // the level this node belongs to
+      sub: null,           // the nested level, if any
       expanded: false,
-      expandT: 0,          // 0..1 — прогресс раскрытия
-      boot: 0,             // 0..1 — прогресс голографической сборки
+      expandT: 0,          // 0..1 — how far open
+      boot: 0,             // 0..1 — how far assembled
       bootDelay: 0,
-      hover: 0,            // 0..1 — плавная подсветка
+      hover: 0,            // 0..1 — smoothed highlight
       select: 0,
-      dim: 1,              // затемнение вне фокуса
+      dim: 1,              // dimming when out of focus
       seed: rnd() * 1000,
       load: rnd(),
       inEdges: [],
       outEdges: [],
-      // Частицы сборки — сходятся к периметру при появлении узла.
+      // Assembly particles, converging on the outline as the node appears.
       motes: Array.from({ length: 14 }, () => {
         const a = rnd() * TAU;
         const d = 180 + rnd() * 320;
@@ -392,8 +392,8 @@ function buildLevel(nodeSpecs, edgeSpecs, rnd, parent) {
     allNodes.push(n);
     byId.set(n.id, n);
 
-    // Вложенный уровень строим и раскладываем сразу: его габариты задают
-    // размер контейнера, а он нужен раскладке текущего уровня.
+    // The nested level is built and laid out immediately: its size decides the
+    // container's size, which this level's own layout needs.
     if (src.children && src.children.nodes && src.children.nodes.length) {
       n.sub = buildLevel(src.children.nodes, src.children.edges || [], rnd, n);
       layoutLevel(n.sub, 1.5);
@@ -409,14 +409,14 @@ function buildLevel(nodeSpecs, edgeSpecs, rnd, parent) {
     const e = {
       a, b,
       label: label || '',
-      pts: [],            // полилиния-аппроксимация кривой
-      cum: [],            // накопленная длина по точкам
+      pts: [],            // polyline approximation of the curve
+      cum: [],            // cumulative length along those points
       len: 0,
       dirty: true,
       boot: 0,
       hover: 0,
       dim: 1,
-      // Пакеты данных, бегущие по связи.
+      // Data packets running along the edge.
       packets: Array.from({ length: 1 + Math.floor(rnd() * 2) }, () => ({
         t: rnd(),
         speed: 0.10 + rnd() * 0.16,
@@ -440,26 +440,26 @@ function buildGraph() {
   root.nodes.push(...built.nodes);
   root.edges.push(...built.edges);
   root.cols = built.cols;
-  // Узлы корневого уровня должны ссылаться на root, а не на временный объект.
+  // Root-level nodes must point at root, not at the temporary object.
   for (const n of root.nodes) n.level = root;
   for (const e of root.edges) e.level = root;
 }
 
-/** Слоистая раскладка: глубина по рёбрам + барицентрическая сортировка. */
+/** Layered layout: depth along edges, then barycentric ordering. */
 function layoutLevel(level, aspectOverride) {
   const nodes = level.nodes;
   const edges = level.edges;
   if (!nodes.length) return level;
-  // --- обратные рёбра.
-  // В схеме есть циклы обратной связи (телеметрия -> контроллер). Считать по
-  // ним уровни нельзя — глубина росла бы бесконечно, поэтому замыкающие рёбра
-  // исключаются из расчёта продольной координаты (рисуются они как обычно,
-  // просто идут «против течения»).
+  // --- feedback edges.
+  // A graph has cycles (telemetry -> controller). Depth cannot be counted
+  // through them — it would grow without end — so the closing edges are left
+  // out of the along-flow coordinate. They are still drawn; they simply run
+  // against the current.
   //
-  // Наивный DFS помечает произвольное ребро цикла — какое попадётся первым при
-  // обходе, — и схема разъезжается на лишние колонки. Поэтому используем
-  // эвристику Eades–Lin–Smyth: строим линейный порядок узлов, в котором против
-  // направления идёт минимум рёбер. Они и есть обратные.
+  // A naive DFS marks whichever cycle edge it meets first, and the picture
+  // spreads into columns it does not need. So: the Eades-Lin-Smyth heuristic,
+  // which builds an order of nodes with as few edges as possible running
+  // backwards. Those few are the feedback edges.
   const outDeg = new Map();
   const inDeg = new Map();
   const alive = new Set(nodes);
@@ -476,8 +476,8 @@ function layoutLevel(level, aspectOverride) {
     for (const e of n.inEdges) if (e.a !== e.b && alive.has(e.a)) outDeg.set(e.a, outDeg.get(e.a) - 1);
   };
 
-  const head = [];   // источники — уходят в начало порядка
-  const tail = [];   // стоки — в конец
+  const head = [];   // sources, which go to the front of the order
+  const tail = [];   // sinks, which go to the back
   while (alive.size) {
     let moved = true;
     while (moved) {
@@ -490,7 +490,7 @@ function layoutLevel(level, aspectOverride) {
       }
     }
     if (!alive.size) break;
-    // Остался цикл: жертвуем узлом с максимальным перевесом исходящих связей.
+    // A cycle is left: sacrifice the node with the largest outgoing surplus.
     let best = null;
     let bestVal = -Infinity;
     for (const n of alive) {
@@ -505,7 +505,7 @@ function layoutLevel(level, aspectOverride) {
   head.concat(tail).forEach((n, i) => pos.set(n, i));
   for (const e of edges) e.back = e.a === e.b || pos.get(e.a) > pos.get(e.b);
 
-  // --- глубина: длиннейший путь по прямым рёбрам (граф уже ациклический)
+  // --- depth: the longest path along forward edges (now acyclic)
   for (const n of nodes) n.depth = 0;
   for (let it = 0; it < nodes.length; it++) {
     let changed = false;
@@ -516,18 +516,18 @@ function layoutLevel(level, aspectOverride) {
     if (!changed) break;
   }
 
-  // --- ограничение высоты колонки.
-  // Без него широкий уровень вытягивает схему в вертикальную ленту, и после
-  // вписывания в экран текст становится нечитаемым. Ёмкость подбираем так,
-  // чтобы пропорции графа тяготели к пропорциям окна; переполнение сдвигает
-  // узел вправо — порядок «слева направо» по прямым рёбрам сохраняется.
+  // --- capping column height.
+  // Without it a wide level stretches the picture into a vertical ribbon, and
+  // once fitted to the screen the text is unreadable. Capacity is chosen so
+  // the graph's proportions tend towards the window's; an overflowing node
+  // moves right, which keeps the left-to-right reading along forward edges.
   const avgW = nodes.reduce((s, n) => s + n.baseW, 0) / nodes.length + (level.gapX || METRIC.colGap);
   const avgH = nodes.reduce((s, n) => s + n.baseH, 0) / nodes.length + (level.gapY || METRIC.rowGap);
   const aspect = aspectOverride
     || Math.max(0.6, (cssW || 1600) / (cssH || 900));
   const capacity = Math.max(3, Math.round(Math.sqrt((nodes.length * avgW) / (avgH * aspect))));
 
-  const topo = nodes.slice().sort((p, q) => p.depth - q.depth);   // валидный топопорядок
+  const topo = nodes.slice().sort((p, q) => p.depth - q.depth);   // a valid topological order
   const fill = [];
   for (const n of topo) {
     let cand = 0;
@@ -540,17 +540,17 @@ function layoutLevel(level, aspectOverride) {
     fill[cand] = (fill[cand] || 0) + 1;
   }
 
-  // --- группировка по колонкам
+  // --- grouping into columns
   const cols = [];
   for (const n of nodes) {
     (cols[n.depth] || (cols[n.depth] = [])).push(n);
     n.col = n.depth;
   }
 
-  // Первичная расстановка нужна барицентрическим проходам как отправная точка.
+  // The barycentric passes need a starting arrangement to improve on.
   placeLevel(level, cols, true);
 
-  // --- барицентрические проходы: уменьшают пересечения рёбер
+  // --- barycentric passes, which cut down edge crossings
   const bary = (n, side) => {
     const list = side === 'in' ? n.inEdges : n.outEdges;
     if (!list.length) return n.lty;
@@ -574,7 +574,7 @@ function layoutLevel(level, aspectOverride) {
 
   level.cols = cols;
 
-  // --- очерёдность сборки: слева направо, сверху вниз
+  // --- assembly order: left to right, top to bottom
   const order = nodes.slice().sort((p, q) => (p.col - q.col) || (p.lty - q.lty));
   order.forEach((n, i) => { n.bootDelay = n.col * 0.18 + i * 0.05; });
 
@@ -582,16 +582,16 @@ function layoutLevel(level, aspectOverride) {
 }
 
 /**
- * Расставляет узлы уровня по колонкам, исходя из ТЕКУЩИХ размеров.
- * Вызывается заново каждый раз, когда узел раскрывается или схлопывается —
- * именно отсюда берётся эффект «схема раздвигается»: цели смещаются, а узлы
- * плавно к ним едут. snap=true ставит узлы в цель мгновенно (первичный расчёт).
+ * Places a level's nodes in columns from their CURRENT sizes. Called again
+ * every time a node opens or closes — this is where the picture's habit of
+ * spreading apart comes from: the targets move, and the nodes travel smoothly
+ * to them. snap=true puts them there at once, for the first computation.
  */
 function placeLevel(level, cols, snap) {
   cols = cols || level.cols;
   if (!cols) return;
 
-  // X колонок: ширина колонки = максимум ширины её узлов
+  // Column x: a column is as wide as its widest node.
   const gapX = level.gapX || METRIC.colGap;
   const gapY = level.gapY || METRIC.rowGap;
 
@@ -618,7 +618,7 @@ function placeLevel(level, cols, snap) {
     }
   }
 
-  // Центрируем уровень в собственном начале координат.
+  // Centre the level on its own origin.
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (const n of level.nodes) {
     minX = Math.min(minX, n.ltx - n.w / 2); maxX = Math.max(maxX, n.ltx + n.w / 2);
@@ -633,11 +633,11 @@ function placeLevel(level, cols, snap) {
   if (snap) for (const n of level.nodes) { n.lx = n.ltx; n.ly = n.lty; }
 }
 
-/* --- маршрутизация рёбер ------------------------------------------------- */
+/* --- edge routing -------------------------------------------------------- */
 
 const EDGE_SEGMENTS = 44;
 
-/** Точки крепления: по горизонтали или вертикали — что естественнее. */
+/** Attachment points, horizontal or vertical, whichever is the shorter run. */
 function edgeAnchors(a, b) {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
@@ -661,9 +661,9 @@ function rebuildEdge(e) {
   let an, k;
 
   if (e.back) {
-    // Обратная связь идёт против общего течения схемы. Проложенная напрямую,
-    // она прошивает насквозь все панели между источником и целью, поэтому
-    // уводим её вниз — отдельной шиной, огибающей схему снизу.
+    // A feedback edge runs against the flow. Routed straight, it would stitch
+    // through every panel between its ends, so it is taken underneath instead —
+    // a separate bus that skirts the picture along the bottom.
     an = {
       p1x: e.a.x, p1y: e.a.y + e.a.h / 2, d1x: 0, d1y: 1,
       p2x: e.b.x, p2y: e.b.y + e.b.h / 2, d2x: 0, d2y: 1,
@@ -701,8 +701,8 @@ function rebuildEdge(e) {
   e.len = total;
   e.endDirX = an.d2x; e.endDirY = an.d2y;
 
-  // Обходные дуги выходят далеко за габариты панелей — запоминаем размах,
-  // чтобы вписывание в экран их не обрезало.
+  // Bypass arcs reach well beyond the panels, so remember their extent or
+  // fitting to the screen would cut them off.
   if (e.back) {
     let lo = Infinity, hi = -Infinity;
     for (const p of pts) { if (p.y < lo) lo = p.y; if (p.y > hi) hi = p.y; }
@@ -713,7 +713,7 @@ function rebuildEdge(e) {
   e.dirty = false;
 }
 
-/** Точка на ребре по нормированной длине 0..1 (равномерно, не по параметру). */
+/** A point at 0..1 along an edge by length, not by curve parameter. */
 function pointAtLen(e, s) {
   const target = clamp(s, 0, 1) * e.len;
   const cum = e.cum;
@@ -729,12 +729,12 @@ function pointAtLen(e, s) {
 }
 
 /* =============================================================================
- * 6. КАМЕРА
+ * 6. CAMERA
  * ========================================================================== */
 
 const cam = {
   x: 0, y: 0, scale: 1,
-  tx: 0, ty: 0, tscale: 1,   // цели, к которым идёт плавное приближение
+  tx: 0, ty: 0, tscale: 1,   // the targets it eases towards
 };
 
 let cssW = 1, cssH = 1;
@@ -759,8 +759,8 @@ function graphBounds(pad = 0) {
     minX = Math.min(minX, n.x - n.w / 2); maxX = Math.max(maxX, n.x + n.w / 2);
     minY = Math.min(minY, n.y - n.h / 2); maxY = Math.max(maxY, n.y + n.h / 2);
   }
-  // Обходные дуги ныряют далеко за панели. Учитываем их лишь частично: иначе
-  // схема прижимается к краю экрана ради пустоты под обходом.
+  // Bypass arcs dip far below the panels. Count them only partly, or the
+  // picture is pushed to the edge of the screen to make room for empty space.
   let bowTop = minY, bowBot = maxY;
   for (const e of edges) {
     if (e.maxY == null) continue;
@@ -776,14 +776,14 @@ function fitView(instant = false) {
   const b = graphBounds(90);
   const w = b.maxX - b.minX, h = b.maxY - b.minY;
 
-  // Сцена может занять часть экрана своими панелями — вписываем в остаток,
-  // иначе схема уезжает под них.
+  // A scene may take part of the screen for its own panels: fit into what is
+  // left, or the graph slides underneath them.
   const ins = (SCENE && SCENE.viewInset) || {};
   const availW = Math.max(200, cssW - (ins.left || 0) - (ins.right || 0));
   const availH = Math.max(200, cssH - (ins.top || 0) - (ins.bottom || 0));
   const s = clamp(Math.min(availW / w, availH / h), 0.18, 1.6);
 
-  // Центр свободной области в мировых координатах.
+  // The centre of the free area, in world coordinates.
   const shiftX = ((ins.left || 0) - (ins.right || 0)) / 2 / s;
   const shiftY = ((ins.top || 0) - (ins.bottom || 0)) / 2 / s;
   cam.tx = (b.minX + b.maxX) / 2 - shiftX;
@@ -810,12 +810,12 @@ function makeRT(w, h, alpha = false) {
 
 const RT = {
   scene: null,
-  levels: [],     // пирамида блума
-  tint: [],       // R/G/B копии для хроматической аберрации
-  chroma: null,   // каналы, сведённые обратно в один слой
-  half: null,     // промежуточный буфер bright-pass
-  streak: null,   // анаморфный горизонтальный блик
-  overlay: null,  // статичный слой: скан-линии + виньетка
+  levels: [],     // the bloom pyramid
+  tint: [],       // R/G/B copies for chromatic aberration
+  chroma: null,   // those channels merged back into one layer
+  half: null,     // the bright-pass intermediate
+  streak: null,   // the anamorphic horizontal flare
+  overlay: null,  // the static layer: scanlines and vignette
 };
 
 const BLOOM_LEVELS = 6;
@@ -846,8 +846,8 @@ function resize() {
     lh = Math.max(2, lh >> 1);
   }
 
-  // Каналы для аберрации берём на четверти разрешения: блум и так размыт,
-  // а три полноразмерных тонировки заметно съедали бы кадр.
+  // Aberration channels are taken at quarter resolution: bloom is blurred
+  // anyway, and three full-size tints would cost a visible slice of the frame.
   const l0 = RT.levels[0];
   const l1 = RT.levels[1];
   const l2 = RT.levels[2];
@@ -862,12 +862,12 @@ function resize() {
 }
 
 /**
- * Виньетка не меняется от кадра к кадру, поэтому запекается в отдельный слой:
- * за кадр остаётся один drawImage вместо полноэкранного градиента.
+ * The vignette never changes, so it is baked into its own layer: one
+ * drawImage per frame instead of a full-screen gradient.
  *
- * Глобальных скан-линий здесь намеренно нет — тёмная решётка поверх всего
- * кадра съедала читаемость текста в панелях. Ощущение развёртки дают
- * подвижные линии внутри самих панелей: они светлые и текст не забивают.
+ * There are deliberately no global scanlines: a dark grille over the whole
+ * frame ate the readability of the text in the panels. The sense of a sweep
+ * comes from moving lines inside the panels instead — light, not smothering.
  */
 function buildOverlay() {
   const o = RT.overlay;
@@ -887,10 +887,10 @@ function buildOverlay() {
 }
 
 /* =============================================================================
- * 8. ПРИМИТИВЫ ФОРМЫ
+ * 8. SHAPE PRIMITIVES
  * ========================================================================== */
 
-/** Прямоугольник со срезанными углами — базовая форма HUD-панели. */
+/** A chamfered rectangle: the basic shape of a HUD panel. */
 function chamferPath(ctx, x, y, w, h, c, corners) {
   const tl = !corners || corners[0], tr = !corners || corners[1];
   const br = !corners || corners[2], bl = !corners || corners[3];
@@ -908,7 +908,7 @@ function chamferPath(ctx, x, y, w, h, c, corners) {
   ctx.closePath();
 }
 
-/** Угловые скобки — «прицельные» маркеры вокруг панели. */
+/** Corner brackets, the targeting marks around a panel. */
 function cornerBrackets(ctx, x, y, w, h, len, gap) {
   const L = Math.min(len, w / 2 - 2, h / 2 - 2);
   const X0 = x - gap, Y0 = y - gap, X1 = x + w + gap, Y1 = y + h + gap;
@@ -920,7 +920,7 @@ function cornerBrackets(ctx, x, y, w, h, len, gap) {
   ctx.stroke();
 }
 
-/** Пересечение прямоугольников отсечения — для текста на вложенных уровнях. */
+/** Intersection of clip rectangles, for text on nested levels. */
 function clipIntersect(a, b) {
   if (!a) return b;
   if (!b) return a;
@@ -931,18 +931,18 @@ function clipIntersect(a, b) {
   return { x: x0, y: y0, w: Math.max(0, x1 - x0), h: Math.max(0, y1 - y0) };
 }
 
-/** Пунктирная «направляющая» между подписью и значением. */
+/** The dotted leader between a label and its value. */
 function leaderDots(ctx, x0, x1, y, step, color) {
   if (x1 - x0 < step) return;
   ctx.fillStyle = color;
   for (let x = x0; x < x1; x += step) ctx.fillRect(x, y, 1, 1);
 }
 
-/* --- предрендеренное свечение -------------------------------------------- */
+/* --- pre-rendered glow --------------------------------------------------- */
 
-// Радиальный градиент на каждую светящуюся точку обходится слишком дорого:
-// их в кадре под сотню. Вместо этого держим готовые спрайты по цветам —
-// цвет квантуем, поэтому кэш остаётся крошечным.
+// A radial gradient per glowing point is far too expensive — there are close
+// to a hundred in a frame. Keep ready-made sprites per colour instead; the
+// colour is quantised, so the cache stays tiny.
 const glowCache = new Map();
 
 function glowSprite(c) {
@@ -968,9 +968,9 @@ function glowSprite(c) {
 }
 
 /**
- * Светящаяся точка радиуса r. Ожидает режим наложения 'lighter'.
- * Прозрачность перемножается с текущей, а не затирает её: вложенные уровни
- * проявляются через общий globalAlpha, и сброс в единицу их бы «засветил».
+ * A glowing dot of radius r. Expects 'lighter' composition.
+ * Alpha multiplies with the current one rather than replacing it: nested
+ * levels fade in through the global alpha, and resetting it would flare them.
  */
 function drawGlow(ctx, x, y, r, color, alpha) {
   if (r <= 0 || alpha <= 0.004) return;
@@ -981,11 +981,11 @@ function drawGlow(ctx, x, y, r, color, alpha) {
 }
 
 /* =============================================================================
- * 9. ФОН
+ * 9. BACKGROUND
  * ========================================================================== */
 
 function drawBackground(ctx, t) {
-  // Базовая заливка + мягкий центральный подсвет.
+  // Base fill plus a soft light in the middle.
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.globalCompositeOperation = 'source-over';
   ctx.globalAlpha = 1;
@@ -1003,7 +1003,7 @@ function drawBackground(ctx, t) {
   ctx.fillRect(0, 0, cssW, cssH);
 }
 
-/** Мировая сетка с адаптивным шагом — фиксирует масштаб в пространстве. */
+/** A world grid with an adaptive step, which anchors the sense of scale. */
 function drawGrid(ctx, t) {
   if (!FLAGS.grid) return;
 
@@ -1020,7 +1020,7 @@ function drawGrid(ctx, t) {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.lineWidth = 1;
 
-  // Мелкая сетка.
+  // The fine grid.
   ctx.beginPath();
   for (let wx = x0; wx <= br.x; wx += step) {
     const sx = Math.round((wx - cam.x) * cam.scale + cssW / 2) + 0.5;
@@ -1033,7 +1033,7 @@ function drawGrid(ctx, t) {
   ctx.strokeStyle = 'rgba(70,168,214,0.055)';
   ctx.stroke();
 
-  // Крупная сетка.
+  // The coarse grid.
   ctx.beginPath();
   const mx0 = Math.floor(tl.x / major) * major;
   const my0 = Math.floor(tl.y / major) * major;
@@ -1049,7 +1049,7 @@ function drawGrid(ctx, t) {
   ctx.stroke();
 }
 
-/** Концентрические кольца и вращающиеся тики — «стол проектора». */
+/** Concentric rings and turning ticks: the projector's table. */
 function drawRings(ctx, t) {
   if (!FLAGS.grid) return;
   const c = worldToScreen(0, 0);
@@ -1068,7 +1068,7 @@ function drawRings(ctx, t) {
     ctx.lineWidth = 1;
     ctx.stroke();
 
-    // Тики по кольцу.
+    // Ticks around the ring.
     const dir = i % 2 === 0 ? 1 : -1;
     const rot = t * 0.055 * dir + i;
     const count = 48;
@@ -1086,7 +1086,7 @@ function drawRings(ctx, t) {
   ctx.restore();
 }
 
-/* --- атмосферная пыль ----------------------------------------------------- */
+/* --- atmospheric dust ----------------------------------------------------- */
 
 const dust = (() => {
   const rnd = mulberry32(7777);
@@ -1095,7 +1095,7 @@ const dust = (() => {
     arr.push({
       x: (rnd() * 2 - 1) * 2400,
       y: (rnd() * 2 - 1) * 1500,
-      z: 0.35 + rnd() * 0.9,           // параллакс-глубина
+      z: 0.35 + rnd() * 0.9,           // parallax depth
       s: 0.5 + rnd() * 1.6,
       ph: rnd() * TAU,
       sp: 0.1 + rnd() * 0.35,
@@ -1109,7 +1109,7 @@ function drawDust(ctx, t) {
   for (const d of dust) {
     const wy = d.y + Math.sin(t * d.sp + d.ph) * 26;
     const wx = d.x + Math.cos(t * d.sp * 0.7 + d.ph) * 18;
-    // Параллакс: дальние точки движутся с камерой медленнее.
+    // Parallax: distant motes move with the camera more slowly.
     const sx = (wx - cam.x * d.z) * cam.scale + cssW / 2;
     const sy = (wy - cam.y * d.z) * cam.scale + cssH / 2;
     if (sx < -20 || sx > cssW + 20 || sy < -20 || sy > cssH + 20) continue;
@@ -1121,7 +1121,7 @@ function drawDust(ctx, t) {
 }
 
 /* =============================================================================
- * 10. РЁБРА
+ * 10. EDGES
  * ========================================================================== */
 
 function drawEdge(ctx, e, t) {
@@ -1143,9 +1143,9 @@ function drawEdge(ctx, e, t) {
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
 
-  // Путь строится один раз и обводится трижды — «ядро + гало» без дорогого
-  // shadowBlur. Преобразование координат разворачиваем вручную: на кадр
-  // приходится под тысячу точек, и объекты от worldToScreen здесь лишние.
+  // The path is built once and stroked three times — core plus halo — which
+  // avoids an expensive shadowBlur. The coordinate transform is inlined by
+  // hand: a frame carries close to a thousand points, and the objects
   const kx = cam.scale;
   const offX = cssW / 2 - cam.x * kx;
   const offY = cssH / 2 - cam.y * kx;
@@ -1159,17 +1159,17 @@ function drawEdge(ctx, e, t) {
   const flick = 0.9 + 0.1 * noiseA(t * 2.2 + e.seed);
   const mid = mix(ca, cb, 0.5);
 
-  // 1) широкое гало
+  // 1) the wide halo
   ctx.strokeStyle = rgba(mid, 0.16 * dim * flick * (1 + focus));
   ctx.lineWidth = (3.4 + focus * 3.2) * clamp(cam.scale, 0.5, 1.5);
   ctx.stroke();
 
-  // 2) средний слой
+  // 2) the middle layer
   ctx.strokeStyle = rgba(mid, 0.42 * dim * (0.7 + focus * 0.5));
   ctx.lineWidth = (1.5 + focus * 1.1) * clamp(cam.scale, 0.55, 1.4);
   ctx.stroke();
 
-  // 3) яркое ядро — здесь градиент виден, поэтому он остаётся
+  // 3) the bright core, where a gradient is visible and so is kept
   const grad = ctx.createLinearGradient(s1.x, s1.y, s2.x, s2.y);
   grad.addColorStop(0, rgba(mix(ca, C.ice, 0.55), (0.55 + focus * 0.45) * dim));
   grad.addColorStop(1, rgba(mix(cb, C.ice, 0.55), (0.55 + focus * 0.45) * dim));
@@ -1177,7 +1177,7 @@ function drawEdge(ctx, e, t) {
   ctx.lineWidth = 0.85 * clamp(cam.scale, 0.6, 1.3);
   ctx.stroke();
 
-  // Бегущий пунктир поверх — ощущение потока.
+  // A running dash on top, for the sense of flow.
   if (cam.scale > 0.4) {
     ctx.save();
     ctx.setLineDash([2.5, 9]);
@@ -1190,7 +1190,7 @@ function drawEdge(ctx, e, t) {
 
   if (p < 0.999) return;
 
-  // Наконечник.
+  // The arrowhead.
   const tip = pointAtLen(e, 1);
   const tp = worldToScreen(tip.x, tip.y);
   const ang = Math.atan2(-e.endDirY, -e.endDirX);
@@ -1208,7 +1208,7 @@ function drawEdge(ctx, e, t) {
   ctx.fill();
   ctx.restore();
 
-  // Подпись связи в середине — только при достаточном зуме.
+  // The edge label in the middle, only when zoomed in enough to read it.
   const labelZoom = FLAGS.labels ? 0.5 : 0.72;
   if (e.label && cam.scale > labelZoom && (focus > 0.02 || FLAGS.labels)) {
     const m = pointAtLen(e, 0.5);
@@ -1228,7 +1228,7 @@ function drawEdge(ctx, e, t) {
   }
 }
 
-/** Пакеты данных — светящиеся сегменты, бегущие по связям. */
+/** Data packets: glowing segments that run along the edges. */
 function drawPackets(ctx, e, t, dt) {
   if (e.boot < 0.999 || e.len < 1) return;
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -1266,7 +1266,7 @@ function drawPackets(ctx, e, t, dt) {
     ctx.lineWidth = 0.9 * k;
     ctx.stroke();
 
-    // Головка пакета со свечением.
+    // The packet's leading edge, with its glow.
     const r = 2.6 * k;
     ctx.globalCompositeOperation = 'lighter';
     drawGlow(ctx, hp.x, hp.y, r * 4, col, 0.85 * e.dim);
@@ -1275,15 +1275,15 @@ function drawPackets(ctx, e, t, dt) {
 }
 
 /* =============================================================================
- * 11. УЗЛЫ
+ * 11. NODES
  * ========================================================================== */
 
 /**
- * Сборка узла разбита на фазы — как разворачивающаяся голограмма:
- *   0.00-0.30  горизонтальная линия раскрывается из центра
- *   0.20-0.55  каркас набирает высоту
- *   0.45-0.75  появляются заливка, шапка, разделители
- *   0.62-1.00  текст «печатается» построчно
+ * A node assembles in phases, like a hologram unfolding:
+ *   0.00-0.30  a horizontal line opens from the centre
+ *   0.20-0.55  the frame gains height
+ *   0.45-0.75  fill, header and dividers appear
+ *   0.62-1.00  the text types itself in, line by line
  */
 function drawNode(ctx, n, t, dt) {
   const p = n.boot;
@@ -1297,8 +1297,8 @@ function drawNode(ctx, n, t, dt) {
   const dim = n.dim;
   const foc = Math.max(n.hover, n.select);
 
-  // Голографическое «дыхание» узла. Держим его на грани заметности: сильнее —
-  // и текст внутри панели начинает подрагивать при чтении.
+  // The node's holographic breathing. Kept at the edge of noticeable: any
+  // stronger and the text inside starts to tremble as you read it.
   const jx = noiseA(t * 0.55 + n.seed) * 0.28;
   const jy = noiseB(t * 0.65 + n.seed) * 0.28;
   const flick = 0.955 + 0.045 * (noiseC(t * 1.5 + n.seed) * 0.5 + 0.5);
@@ -1313,7 +1313,7 @@ function drawNode(ctx, n, t, dt) {
   const w = cw * s;
   const h = ch * s;
 
-  // Отсечение по экрану.
+  // Clip to the screen.
   if (x > cssW + 200 || x + w < -200 || y > cssH + 200 || y + h < -200) return;
 
   const col = n.color;
@@ -1323,7 +1323,7 @@ function drawNode(ctx, n, t, dt) {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.lineJoin = 'miter';
 
-  // --- фаза 1: линия раскрытия
+  // --- phase 1: the opening line
   if (pb < 0.02) {
     ctx.beginPath();
     ctx.moveTo(c.x - (w / 2), c.y);
@@ -1339,13 +1339,13 @@ function drawNode(ctx, n, t, dt) {
 
   const ch1 = Math.min(11 * s, h / 2, w / 2);
 
-  // Раскрытый контейнер — это рамка вокруг вложенной схемы, а не светящаяся
-  // панель. Его собственную заливку и ореол приглушаем, иначе плита такого
-  // размера уводит bloom в пересвет и топит содержимое.
+  // An opened container is a frame around a nested picture, not a glowing
+  // panel. Its own fill and halo are damped, or a plate that size pushes
+  // bloom into blowout and drowns what is inside it.
   const openK = (n.sub || n.leaf) ? easeInOutCubic(n.expandT) : 0;
   const fillK = 1 - openK * 0.74;
 
-  // --- подложка: мягкое свечение под панелью
+  // --- backing: a soft glow beneath the panel
   if ((foc > 0.01 || n.kind === 'core') && openK < 0.98) {
     const k = (n.kind === 'core' ? 0.5 : 0) + foc * 1.5;
     ctx.globalCompositeOperation = 'lighter';
@@ -1354,10 +1354,10 @@ function drawNode(ctx, n, t, dt) {
     ctx.globalCompositeOperation = 'source-over';
   }
 
-  // --- корпус.
-  // Сначала плотная тёмная подложка: связи проходят под панелями, и без неё
-  // они просвечивают сквозь строки данных, перечёркивая текст. Немного света
-  // всё же пропускаем — панель должна остаться стеклом, а не картонкой.
+  // --- the body.
+  // A dense dark backing first: edges pass beneath the panels, and without it
+  // they show through the rows of data and strike the text out. Some light
+  // still gets through — a panel should stay glass rather than become card.
   chamferPath(ctx, x, y, w, h, ch1, [true, false, true, false]);
   ctx.fillStyle = `rgba(3,11,20,${0.93 * pc * dim})`;
   ctx.fill();
@@ -1369,7 +1369,7 @@ function drawNode(ctx, n, t, dt) {
   ctx.fillStyle = body;
   ctx.fill();
 
-  // Тонкая внутренняя «плёнка» — стеклянный блик по верхней кромке.
+  // A thin inner film: the glassy highlight along the top edge.
   ctx.save();
   ctx.clip();
   const sheen = ctx.createLinearGradient(x, y, x + w * 0.4, y + h);
@@ -1378,7 +1378,7 @@ function drawNode(ctx, n, t, dt) {
   ctx.fillStyle = sheen;
   ctx.fillRect(x, y, w, h);
 
-  // Внутренние скан-линии, медленно ползущие вверх.
+  // Inner scanlines, crawling slowly upwards.
   if (s > 0.35) {
     const period = 4 * s;
     const off = ((-t * 22 * s) % period + period) % period;
@@ -1388,7 +1388,7 @@ function drawNode(ctx, n, t, dt) {
     }
   }
 
-  // Проходящая волна подсветки — «сканирование» панели.
+  // A wave of light passing over, as if the panel were being scanned.
   const wavePos = ((t * 0.42 + n.seed * 0.37) % 2.2) / 2.2;
   if (wavePos < 1) {
     const wy = y + h * wavePos;
@@ -1401,7 +1401,7 @@ function drawNode(ctx, n, t, dt) {
   }
   ctx.restore();
 
-  // --- рамка
+  // --- the frame
   chamferPath(ctx, x, y, w, h, ch1, [true, false, true, false]);
   ctx.strokeStyle = rgba(col, (0.30 + foc * 0.35) * alpha);
   ctx.lineWidth = 3.2;
@@ -1410,15 +1410,15 @@ function drawNode(ctx, n, t, dt) {
   ctx.lineWidth = 1.15;
   ctx.stroke();
 
-  // --- угловые скобки
+  // --- corner brackets
   ctx.strokeStyle = rgba(acc, (0.45 + foc * 0.55) * alpha * pb);
   ctx.lineWidth = 1.3;
   cornerBrackets(ctx, x, y, w, h, 12 * s, (3 + foc * 4) * s);
 
-  // Сцена может пометить узел поверх рамки — например, следом воздействия AI.
+  // A scene may mark a node over its frame — a trace of what an agent did.
   if (SCENE.decorateNode) SCENE.decorateNode(ctx, n, { x, y, w, h, s, alpha }, t);
 
-  // Внешний прицельный контур при наведении.
+  // The outer targeting outline on hover.
   if (foc > 0.01) {
     const g2 = (10 + Math.sin(t * 3) * 2) * s * foc;
     ctx.strokeStyle = rgba(acc, 0.30 * foc * alpha);
@@ -1430,7 +1430,7 @@ function drawNode(ctx, n, t, dt) {
 
   const openT = n.expandT;
 
-  // --- раскрытый лист: вместо сводки — развёрнутая карточка
+  // --- an opened leaf: the summary gives way to a full card
   if (openT > 0.10 && n.leaf && !n.sub) {
     ctx.save();
     chamferPath(ctx, x, y, w, h, ch1, [true, false, true, false]);
@@ -1449,7 +1449,7 @@ function drawNode(ctx, n, t, dt) {
     return;
   }
 
-  // --- раскрытый контейнер: вместо строк данных внутри живёт вложенный граф
+  // --- an opened container: rows of data give way to the nested graph
   if (openT > 0.10 && n.sub) {
     ctx.save();
     chamferPath(ctx, x, y, w, h, ch1, [true, false, true, false]);
@@ -1458,7 +1458,7 @@ function drawNode(ctx, n, t, dt) {
     const prevClip = textClip;
     textClip = clipIntersect(prevClip, { x, y, w, h });
 
-    // Заголовок контейнера остаётся на месте, содержимое проявляется.
+    // The container's header stays put while its contents fade in.
     const headH = METRIC.headerH * s;
     ctx.fillStyle = rgba(col, 0.14 * pc * alpha);
     ctx.fillRect(x, y, w, headH);
@@ -1487,7 +1487,7 @@ function drawNode(ctx, n, t, dt) {
     textClip = prevClip;
     ctx.restore();
 
-    // Контур поверх содержимого, чтобы вложенные панели не «резали» рамку.
+    // Outline over the contents, so nested panels do not cut the frame.
     chamferPath(ctx, x, y, w, h, ch1, [true, false, true, false]);
     ctx.strokeStyle = rgba(mix(col, acc, 0.6), (0.85 + foc * 0.15) * alpha);
     ctx.lineWidth = 1.15;
@@ -1495,21 +1495,21 @@ function drawNode(ctx, n, t, dt) {
     return;
   }
 
-  // --- содержимое
+  // --- the contents
   ctx.save();
   chamferPath(ctx, x, y, w, h, ch1, [true, false, true, false]);
   ctx.clip();
-  // Тот же клип понадобится отложенному тексту — панель может оказаться уже
-  // своего содержимого, и строки не должны выезжать за корпус. Пересекаем с
-  // внешним клипом и потом восстанавливаем его: обнулять нельзя, иначе панель
-  // внутри контейнера снимала бы отсечение со всех, кто рисуется после неё.
+  // The deferred text needs the same clip: a panel can be narrower than what
+  // is in it, and rows must not escape the body. Intersect with the outer
+  // clip and restore it afterwards — clearing it would let a panel inside a
+  // container lift the clip from everything drawn after it.
   const outerClip = textClip;
   textClip = clipIntersect(outerClip, { x, y, w, h });
 
   const padX = METRIC.padX * s;
   const headH = METRIC.headerH * s;
 
-  // Шапка
+  // The header
   ctx.fillStyle = rgba(col, 0.14 * pc * alpha);
   ctx.fillRect(x, y, w, headH);
   ctx.beginPath();
@@ -1519,7 +1519,7 @@ function drawNode(ctx, n, t, dt) {
   ctx.lineWidth = 1;
   ctx.stroke();
 
-  // Индикатор состояния — мигает с индивидуальной фазой.
+  // The status light, blinking on its own phase.
   const blink = 0.55 + 0.45 * Math.sin(t * 2.6 + n.seed);
   const ledX = x + padX * 0.62;
   const ledY = y + headH / 2;
@@ -1532,7 +1532,7 @@ function drawNode(ctx, n, t, dt) {
   ctx.arc(ledX, ledY, ledR * 0.75, 0, TAU);
   ctx.fill();
 
-  // Заголовок с посимвольным появлением.
+  // The title, appearing character by character.
   if (s > 0.3) {
     const titleShown = n.title.slice(0, Math.ceil(n.title.length * clamp(pd * 1.6, 0, 1)));
     drawText(ctx, titleShown, x + padX + 8 * s, y + headH / 2 + 0.5 * s, {
@@ -1542,7 +1542,7 @@ function drawNode(ctx, n, t, dt) {
       color: rgba(mix(C.paper, acc, 0.25), (0.92 + foc * 0.08) * pc * alpha),
     });
 
-    // Тег справа.
+    // The tag on the right.
     drawText(ctx, n.tag, x + w - padX, y + headH / 2 + 0.5 * s, {
       size: METRIC.tagSize * s,
       weight: 400,
@@ -1552,7 +1552,7 @@ function drawNode(ctx, n, t, dt) {
     });
   }
 
-  // Левая шкала с тиками — декоративный «линеал».
+  // The ticked scale down the left: a decorative rule.
   if (s > 0.45) {
     const bodyTop = y + headH + 4 * s;
     const bodyBot = y + h - METRIC.footerH * s;
@@ -1567,7 +1567,7 @@ function drawNode(ctx, n, t, dt) {
     ctx.stroke();
   }
 
-  // Строки данных.
+  // Rows of data.
   if (s > 0.42) {
     const rowH = METRIC.rowH * s;
     let ry = y + headH + rowH * 0.72;
@@ -1582,7 +1582,7 @@ function drawNode(ctx, n, t, dt) {
       const ra = rowP * pc * alpha;
 
       if (type === 'bar') {
-        // Индикатор загрузки с «живым» значением.
+        // A load bar with a live value.
         const label = row[0];
         drawText(ctx, label, lx, ry, {
           size: METRIC.rowSize * s, weight: 400, tracking: METRIC.rowTrack * s,
@@ -1604,7 +1604,7 @@ function drawNode(ctx, n, t, dt) {
           bg.addColorStop(1, rgba(acc, 0.95 * ra));
           ctx.fillStyle = bg;
           ctx.fillRect(bx, by, fillW, bh);
-          // Насечки на шкале.
+          // Notches along the bar.
           ctx.fillStyle = `rgba(2,8,14,${0.6 * ra})`;
           for (let k = 1; k < 8; k++) ctx.fillRect(bx + (bw * k) / 8, by, 1, bh);
           drawText(ctx, `${Math.round(val * 100)}%`, rx, ry, {
@@ -1614,7 +1614,7 @@ function drawNode(ctx, n, t, dt) {
         }
       } else {
         const label = row[0];
-        // Значение может быть живым: расход токенов, счётчик задач, активность.
+        // A value may be live: tokens spent, tasks counted, activity.
         const resolved = SCENE.resolveRow(n, row);
         const value = resolved.value;
         const shownValue = value.slice(0, Math.ceil(value.length * clamp(rowP * 1.5, 0, 1)));
@@ -1638,7 +1638,7 @@ function drawNode(ctx, n, t, dt) {
           align: 'right', color: rgba(vc, 0.95 * ra),
         });
 
-        // Точка-маркер статуса.
+        // The status dot.
         if (vk === 'ok' || vk === 'warn' || vk === 'bad') {
           const mx = rx - vw - 10 * s;
           ctx.fillStyle = rgba(vc, 0.85 * ra * (vk === 'bad' ? 0.5 + 0.5 * Math.sin(t * 7) : 1));
@@ -1649,7 +1649,7 @@ function drawNode(ctx, n, t, dt) {
     }
   }
 
-  // Подвал: id-полоска и штрих-код.
+  // The footer: the id strip and a barcode.
   if (s > 0.5) {
     const fy = y + h - METRIC.footerH * s / 2;
     ctx.beginPath();
@@ -1664,7 +1664,7 @@ function drawNode(ctx, n, t, dt) {
       color: rgba(col, 0.5 * pc * alpha),
     });
 
-    // Псевдо-штрихкод справа — детерминированный по seed узла.
+    // A pseudo-barcode on the right, deterministic from the node's seed.
     const bcW = 42 * s;
     let bx = x + w - padX * 0.7 - bcW;
     const rnd = mulberry32(Math.floor(n.seed * 1000));
@@ -1679,7 +1679,7 @@ function drawNode(ctx, n, t, dt) {
   ctx.restore();
   textClip = outerClip;
 
-  // Метка выбора над панелью.
+  // The selection mark above the panel.
   if (n.select > 0.02 && s > 0.3) {
     const ly = y - 10 * s;
     drawText(ctx, '◂ SELECTED ▸', c.x, ly, {
@@ -1689,7 +1689,7 @@ function drawNode(ctx, n, t, dt) {
   }
 }
 
-/** Частицы, слетающиеся к узлу в момент сборки. */
+/** Particles converging on a node as it assembles. */
 function drawNodeMotes(ctx, n, t) {
   const p = n.boot;
   if (p <= 0 || p >= 1) return;
@@ -1710,7 +1710,7 @@ function drawNodeMotes(ctx, n, t) {
     drawGlow(ctx, sp.x, sp.y, r * 4, n.color, a);
     ctx.globalCompositeOperation = 'source-over';
 
-    // Трассирующий хвост к цели.
+    // A tracer tail towards the target.
     const tail = worldToScreen(n.x + m.ax * (1 - e) * 1.12, n.y + m.ay * (1 - e) * 1.12);
     ctx.strokeStyle = rgba(n.accent, a * 0.4);
     ctx.lineWidth = 0.9;
@@ -1722,7 +1722,7 @@ function drawNodeMotes(ctx, n, t) {
 }
 
 /* =============================================================================
- * 12. ЭКРАННЫЙ HUD
+ * 12. THE ON-SCREEN HUD
  * ========================================================================== */
 
 function pad2(v) { return v < 10 ? '0' + v : '' + v; }
@@ -1730,13 +1730,13 @@ function pad2(v) { return v < 10 ? '0' + v : '' + v; }
 function drawOverlay(ctx, t, fps) {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.globalCompositeOperation = 'source-over';
-  const chrome = SCENE.chrome !== false;   // сцена может рисовать свой интерфейс
-  const M = 22;                       // отступ от края
+  const chrome = SCENE.chrome !== false;   // a scene may draw its own interface
+  const M = 22;                       // margin from the edge
   const ink = rgba(C.cyan, 0.72);
   const inkDim = rgba(C.cyan, 0.36);
 
   if (!chrome) {
-    // Интерфейс рисует сцена — от движка нужны только крошки пути.
+    // The scene draws the interface; all it wants from here is the breadcrumb.
     drawBreadcrumbs(ctx, t);
     if (SCENE.minimap !== false) drawMinimap(ctx, t);
     if (SCENE.overlay) SCENE.overlay(ctx, t, { cssW, cssH, drillPath, hovered, selected });
@@ -1744,7 +1744,7 @@ function drawOverlay(ctx, t, fps) {
     return;
   }
 
-  // --- рамка кадра с разрывами по углам
+  // --- the screen border, broken at the corners
   ctx.strokeStyle = rgba(C.cyan, 0.20);
   ctx.lineWidth = 1;
   ctx.beginPath();
@@ -1755,7 +1755,7 @@ function drawOverlay(ctx, t, fps) {
   ctx.moveTo(cssW - M - 0.5, M + 90); ctx.lineTo(cssW - M - 0.5, cssH - M - 90);
   ctx.stroke();
 
-  // Угловые скобки экрана.
+  // The screen's corner brackets.
   ctx.strokeStyle = rgba(C.cyan, 0.55);
   ctx.lineWidth = 1.4;
   const L = 28;
@@ -1766,7 +1766,7 @@ function drawOverlay(ctx, t, fps) {
   ctx.moveTo(M + L, cssH - M); ctx.lineTo(M, cssH - M); ctx.lineTo(M, cssH - M - L);
   ctx.stroke();
 
-  // --- заголовок слева сверху
+  // --- the title, top left
   drawText(ctx, SCENE.title, M + 8, M + 16, {
     size: 15, weight: 600, tracking: 5.2, color: rgba(C.ice, 0.92),
   });
@@ -1774,7 +1774,7 @@ function drawOverlay(ctx, t, fps) {
     size: 8.5, weight: 400, tracking: 2.6, color: inkDim,
   });
 
-  // Бегунок под заголовком.
+  // The slider beneath the title.
   const barW = 168;
   ctx.fillStyle = rgba(C.cyan, 0.16);
   ctx.fillRect(M + 8, M + 44, barW, 2);
@@ -1786,7 +1786,7 @@ function drawOverlay(ctx, t, fps) {
   ctx.fillStyle = sg;
   ctx.fillRect(M + 8, M + 44, barW, 2);
 
-  // --- телеметрия справа сверху
+  // --- telemetry, top right
   const now = new Date();
   const clock = `${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`;
   const right = cssW - M - 8;
@@ -1804,7 +1804,7 @@ function drawOverlay(ctx, t, fps) {
     sy += 13;
   }
 
-  // --- бегущая строка снизу
+  // --- the ticker along the bottom
   const tickY = cssH - M - 16;
   ctx.fillStyle = 'rgba(4,14,24,0.55)';
   ctx.fillRect(M + 1, tickY - 8, cssW - M * 2 - 2, 16);
@@ -1822,11 +1822,11 @@ function drawOverlay(ctx, t, fps) {
   }
   ctx.restore();
 
-  // Мигающая точка перед строкой.
+  // The blinking dot before it.
   ctx.fillStyle = rgba(C.green, 0.4 + 0.6 * (Math.sin(t * 4) * 0.5 + 0.5));
   ctx.fillRect(M + 4, tickY - 2, 4, 4);
 
-  // --- подсказки по управлению
+  // --- the control hints
   const help = 'CLICK ▸ OPEN / CLOSE · [ESC] BACK · DRAG ORBIT · WHEEL ZOOM · [F] FIT  [R] REBUILD  [G] GRID  [B] BLOOM  [L] LABELS  [SPACE] PAUSE';
   drawText(ctx, help, M + 8, cssH - M - 32, {
     size: 7.5, weight: 400, tracking: 1.5, color: rgba(C.cyan, 0.30),
@@ -1841,11 +1841,11 @@ function drawOverlay(ctx, t, fps) {
 }
 
 /**
- * Хлебные крошки текущего пути погружения. Показывают, на каком уровне
- * находишься и как глубоко — без них drill-down дезориентирует.
+ * Breadcrumbs for the current path. They say which level you are on and how
+ * deep it goes; without them, drilling down is disorienting.
  */
 function drawBreadcrumbs(ctx, t) {
-  // В демонстрационном режиме крошки нужны только когда мы внутри объекта.
+  // In presentation mode the crumbs matter only once you are inside something.
   if (SCENE.chrome === false && !drillPath.length && SCENE.hideEmptyCrumbs) return;
   const M = 22;
   let x = M + 8;
@@ -1885,7 +1885,7 @@ function drawBreadcrumbs(ctx, t) {
   }
 }
 
-/** Мини-карта в правом нижнем углу с рамкой видимой области. */
+/** The minimap, bottom right, with a box for the visible area. */
 function drawMinimap(ctx, t) {
   const w = 176, h = 116;
   const x = cssW - 22 - 8 - w;
@@ -1908,7 +1908,7 @@ function drawMinimap(ctx, t) {
     size: 7, weight: 500, tracking: 1.8, color: rgba(C.cyan, 0.5),
   });
 
-  // Рёбра.
+  // Edges.
   ctx.strokeStyle = rgba(C.cyan, 0.22);
   ctx.lineWidth = 0.7;
   ctx.beginPath();
@@ -1918,7 +1918,7 @@ function drawMinimap(ctx, t) {
   }
   ctx.stroke();
 
-  // Узлы.
+  // Nodes.
   for (const n of nodes) {
     const nx = ox + (n.x - n.w / 2) * s;
     const ny = oy + (n.y - n.h / 2) * s;
@@ -1927,7 +1927,7 @@ function drawMinimap(ctx, t) {
     ctx.fillRect(nx, ny, Math.max(2, n.w * s), Math.max(1.5, n.h * s));
   }
 
-  // Видимая область.
+  // The visible area.
   const tl = screenToWorld(0, 0);
   const br = screenToWorld(cssW, cssH);
   ctx.strokeStyle = rgba(C.ice, 0.55);
@@ -1940,7 +1940,7 @@ function drawMinimap(ctx, t) {
   ctx.restore();
 }
 
-/** Панель детали выбранного узла — слева внизу. */
+/** The detail panel for the selected node, bottom left. */
 function drawInspector(ctx, t) {
   const n = selected;
   inspectorAlpha = approach(inspectorAlpha, n ? 1 : 0, 9, 1 / 60);
@@ -2012,7 +2012,7 @@ function drawInspector(ctx, t) {
   ctx.restore();
 }
 
-/** Прицельное перекрестие у курсора. */
+/** The targeting crosshair at the cursor. */
 function drawReticle(ctx, t) {
   if (!pointer.inside) return;
   const x = pointer.x, y = pointer.y;
@@ -2042,7 +2042,7 @@ function drawReticle(ctx, t) {
 }
 
 /* =============================================================================
- * 13. ПОСТОБРАБОТКА
+ * 13. POST-PROCESSING
  * ========================================================================== */
 
 const FLAGS = { grid: true, bloom: true, post: true, labels: false, paused: false };
@@ -2086,14 +2086,14 @@ function tintChannel(dst, src, color) {
   x.globalCompositeOperation = 'source-over';
 }
 
-/** Строит пирамиду блума из сцены. */
+/** Builds the bloom pyramid from the scene. */
 function buildBloom() {
   const levels = RT.levels;
   const l0 = levels[0];
 
-  // Bright-pass: уменьшаем сцену вдвое, затем умножаем результат сам на себя.
-  // Возведение яркости в квадрат гасит фон (0.05 -> 0.0025) и сохраняет свечение.
-  // Полный кадр читаем ровно один раз — второй множитель берём уже с half.
+  // Bright-pass: halve the scene, then multiply the result by itself. Squaring
+  // brightness kills the background (0.05 -> 0.0025) and keeps the glow.
+  // The full frame is read exactly once; the second factor comes from half.
   const half = RT.half;
   half.x.setTransform(1, 0, 0, 1, 0, 0);
   half.x.globalCompositeOperation = 'source-over';
@@ -2110,7 +2110,7 @@ function buildBloom() {
   l0.x.drawImage(half.c, 0, 0, l0.w, l0.h);
   l0.x.globalCompositeOperation = 'source-over';
 
-  // Downsample: каждый уровень вдвое меньше, билинейная фильтрация даёт размытие.
+  // Downsample: each level halves, and bilinear filtering does the blurring.
   for (let i = 1; i < levels.length; i++) {
     const a = levels[i - 1], b = levels[i];
     b.x.setTransform(1, 0, 0, 1, 0, 0);
@@ -2121,8 +2121,8 @@ function buildBloom() {
     b.x.drawImage(a.c, 0, 0, b.w, b.h);
   }
 
-  // Анаморфный горизонтальный блик — снимается с мелкого уровня, там он и
-  // нужен: блик широкий и размытый, детализация ему только вредит.
+  // The anamorphic flare is taken from a small level, which is where it wants
+  // to come from: it is wide and soft, and detail only hurts it.
   const st = RT.streak;
   const src = levels[3];
   st.x.setTransform(1, 0, 0, 1, 0, 0);
@@ -2138,9 +2138,9 @@ function buildBloom() {
   st.x.globalAlpha = 1;
   st.x.globalCompositeOperation = 'source-over';
 
-  // Upsample с накоплением: снизу вверх собираем широкое мягкое гало.
-  // Останавливаемся на четверти разрешения — дальше апскейлить незачем,
-  // финальное растягивание на экран всё равно билинейное.
+  // Upsample and accumulate: bottom up, this builds the wide soft halo.
+  // Stop at quarter resolution: there is no point going further, since the
+  // final stretch to the screen is bilinear anyway.
   for (let i = levels.length - 1; i > 1; i--) {
     const a = levels[i], b = levels[i - 1];
     b.x.globalCompositeOperation = 'lighter';
@@ -2150,8 +2150,8 @@ function buildBloom() {
     b.x.globalCompositeOperation = 'source-over';
   }
 
-  // Резкую составляющую свечения подмешиваем с половинного уровня напрямую:
-  // именно она даёт плотный ореол вокруг тонких линий.
+  // The sharp part of the glow is mixed in straight from the half level: that
+  // is what gives thin lines their dense halo.
   const l1 = levels[1];
   l1.x.globalCompositeOperation = 'lighter';
   l1.x.globalAlpha = 0.55;
@@ -2160,7 +2160,7 @@ function buildBloom() {
   l1.x.globalCompositeOperation = 'source-over';
 }
 
-/** Рисует слой по центру приёмника с масштабом k — основа радиальной аберрации. */
+/** Draws a layer centred at scale k: the basis of the radial aberration. */
 function drawScaledCentered(ctx, rt, dw, dh, k, alpha) {
   const w = dw * k, h = dh * k;
   ctx.globalAlpha = alpha;
@@ -2180,17 +2180,17 @@ function composite(t) {
   if (!FLAGS.post) return;
 
   if (FLAGS.bloom) {
-    // Пирамида уже построена в frame() — до того, как на сцену лёг текст.
-    const bloomRT = RT.levels[1];                // здесь собрана пирамида
-    const ab = 0.0016;                           // амплитуда хроматической аберрации
+    // The pyramid was built in frame(), before any text landed on the scene.
+    const bloomRT = RT.levels[1];                // where the pyramid ended up
+    const ab = 0.0016;                           // chromatic aberration amplitude
 
     tintChannel(RT.tint[0], bloomRT, '#ff2a2a');
     tintChannel(RT.tint[1], bloomRT, '#2aff5a');
     tintChannel(RT.tint[2], bloomRT, '#2a6aff');
 
-    // Каналы сводим в один буфер половинного разрешения и лишь потом
-    // растягиваем на экран: три полноэкранных масштабирования превращаются
-    // в одно. Радиальный сдвиг от этого не страдает — он пропорционален.
+    // The channels are merged into one half-resolution buffer and only then
+    // stretched to the screen: three full-screen scalings become one. The
+    // radial shift does not suffer, being proportional.
     const ch = RT.chroma;
     ch.x.setTransform(1, 0, 0, 1, 0, 0);
     ch.x.globalCompositeOperation = 'source-over';
@@ -2201,7 +2201,7 @@ function composite(t) {
     drawScaledCentered(ch.x, RT.tint[0], ch.w, ch.h, 1 + ab, 1);
     drawScaledCentered(ch.x, RT.tint[1], ch.w, ch.h, 1, 1);
     drawScaledCentered(ch.x, RT.tint[2], ch.w, ch.h, 1 - ab, 1);
-    // Анаморфный блик подмешиваем здесь же.
+    // The anamorphic flare is mixed in here too.
     ch.x.globalAlpha = 0.55;
     ch.x.drawImage(RT.streak.c, 0, 0, ch.w, ch.h);
     ch.x.globalAlpha = 1;
@@ -2214,7 +2214,7 @@ function composite(t) {
     out.globalCompositeOperation = 'source-over';
   }
 
-  // --- бегущая полоса развёртки
+  // --- the sweeping band
   const sweepY = ((t * 0.16) % 1.35) * H;
   const sg = out.createLinearGradient(0, sweepY - 90 * DPR, 0, sweepY + 90 * DPR);
   sg.addColorStop(0, 'rgba(120,220,255,0)');
@@ -2225,7 +2225,7 @@ function composite(t) {
   out.fillRect(0, sweepY - 90 * DPR, W, 180 * DPR);
   out.globalCompositeOperation = 'source-over';
 
-  // --- зерно
+  // --- grain
   if (grainTiles.length) {
     const tile = grainTiles[(frameCount >> 1) % grainTiles.length];
     out.globalCompositeOperation = 'lighter';
@@ -2239,7 +2239,7 @@ function composite(t) {
     out.globalCompositeOperation = 'source-over';
   }
 
-  // --- запечённый слой: скан-линии + виньетка одним проходом
+  // --- the baked layer: scanlines and vignette in one pass
   if (RT.overlay) {
     out.globalCompositeOperation = 'source-over';
     out.drawImage(RT.overlay.c, 0, 0);
@@ -2247,7 +2247,7 @@ function composite(t) {
 }
 
 /* =============================================================================
- * 14. ВВОД
+ * 14. INPUT
  * ========================================================================== */
 
 const pointer = { x: 0, y: 0, inside: false, down: false, moved: false };
@@ -2258,13 +2258,13 @@ let panStartX = 0, panStartY = 0, panCamX = 0, panCamY = 0;
 
 let hovered = null;
 let selected = null;
-let pointerConsumed = false;   // клик ушёл в модальный слой сцены
+let pointerConsumed = false;   // the click went to the scene's modal layer
 let lastSelected = null;
 let inspectorAlpha = 0;
 
-/** Ищет узел под точкой, спускаясь внутрь раскрытых контейнеров. */
+/** Finds the node under a point, descending into opened containers. */
 function hitLevel(level, wx, wy) {
-  // Сверху вниз по порядку отрисовки — последний нарисованный ловит первым.
+  // Reverse draw order: whatever was drawn last catches the click first.
   for (let i = level.nodes.length - 1; i >= 0; i--) {
     const n = level.nodes[i];
     if (n.boot < 0.3) continue;
@@ -2283,12 +2283,12 @@ function nodeAt(sx, sy) {
   return hitLevel(root, w.x, w.y);
 }
 
-/* --- проваливание по уровням --------------------------------------------- */
+/* --- drilling through levels ---------------------------------------------- */
 
-const drillPath = [];        // цепочка раскрытых контейнеров, сверху вниз
-let autoFrame = null;        // кадрирование, удерживаемое до конца анимации
+const drillPath = [];        // the chain of opened containers, outermost first
+let autoFrame = null;        // framing held until the animation finishes
 
-/** Запускает голографическую сборку уровня заново. */
+/** Starts a level assembling again from nothing. */
 function bootLevel(level) {
   level.bootStart = time;
   for (const n of level.nodes) {
@@ -2303,9 +2303,9 @@ function bootLevel(level) {
 }
 
 /**
- * Наводит камеру на раскрытый контейнер. Поле вокруг оставляем щедрое: если
- * вписать контейнер впритык, соседние узлы уезжают за край и переключиться
- * на другую подсистему можно только через закрытие.
+ * Points the camera at an opened container, leaving generous room around it.
+ * Fitted tightly, its neighbours leave the screen and the only way to another
+ * subsystem is to close this one first.
  */
 function focusCamera(n) {
   const pad = 300;
@@ -2318,7 +2318,7 @@ function focusCamera(n) {
   cam.ty = n.y + (NEST.padTop - NEST.padBottom) / 2 - ((ins.top || 0) - (ins.bottom || 0)) / 2 / s;
 }
 
-/** Узел можно раскрыть, если внутри него есть уровень или досье агента. */
+/** A node opens if it holds a level inside, or a card of its own. */
 function canOpen(n) {
   return !!(n && (n.sub || n.leaf));
 }
@@ -2327,13 +2327,13 @@ function drillInto(n) {
   if (SCENE.onDrill) setTimeout(() => SCENE.onDrill(drillPath.map((x) => x.src || x)), 0);
   if (!canOpen(n) || n.expanded) return false;
 
-  // На одном уровне раскрыт только один контейнер — иначе схема превращается
-  // в кашу и целевые позиции скачут.
+  // Only one container per level is open at a time, or the picture turns to
+  // porridge and the target positions jump about.
   for (const s of n.level.nodes) if (s !== n && s.expanded) collapse(s);
 
-  // Путь обрезаем до контейнера, внутри которого лежит n. Без этого переход
-  // к соседнему узлу оставлял бы в цепочке уже свёрнутый контейнер, и Esc
-  // возвращал бы не туда.
+  // Trim the path back to the container n sits in. Without this, moving to a
+  // sibling would leave an already-closed container in the chain, and Esc
+  // would take you somewhere you had not been.
   const host = n.level.parent || null;
   const idx = host ? drillPath.indexOf(host) : -1;
   drillPath.length = idx + 1;
@@ -2352,7 +2352,7 @@ function collapse(n) {
   if (n.sub) for (const c of n.sub.nodes) if (c.expanded) collapse(c);
 }
 
-/** Сворачивает конкретный контейнер и поднимает навигацию на его уровень. */
+/** Closes one container and lifts navigation back to its level. */
 function collapseNode(n) {
   if (!n || !n.expanded) return false;
   collapse(n);
@@ -2367,7 +2367,7 @@ function collapseNode(n) {
   return true;
 }
 
-/** Возврат на уровень выше. */
+/** Back up one level. */
 function drillOut() {
   return collapseNode(drillPath[drillPath.length - 1]);
 }
@@ -2377,7 +2377,7 @@ function setCursor(cls) {
 }
 
 on(view, 'pointerdown', (ev) => {
-  // Сцена может держать поверх схемы модальный слой и забирать клики себе.
+  // A scene may hold a modal layer over the graph and take the clicks itself.
   if (SCENE.onPointer && SCENE.onPointer(ev.clientX, ev.clientY)) {
     pointerConsumed = true;
     return;
@@ -2386,7 +2386,7 @@ on(view, 'pointerdown', (ev) => {
   view.setPointerCapture(ev.pointerId);
   pointer.down = true;
   pointer.moved = false;
-  // Точку нажатия запоминаем всегда — по ней отличаем клик от перетаскивания.
+  // Always remember where the press landed: it is how a click is told from a drag.
   panStartX = ev.clientX;
   panStartY = ev.clientY;
 
@@ -2401,7 +2401,7 @@ on(view, 'pointerdown', (ev) => {
     panning = true;
     panCamX = cam.tx;
     panCamY = cam.ty;
-    autoFrame = null;          // ручная панорама важнее автокадрирования
+    autoFrame = null;          // a hand on the picture outranks automatic framing
     setCursor('grabbing');
   }
 });
@@ -2428,7 +2428,7 @@ on(view, 'pointermove', (ev) => {
   if (panning) {
     cam.tx = panCamX - (ev.clientX - panStartX) / cam.scale;
     cam.ty = panCamY - (ev.clientY - panStartY) / cam.scale;
-    cam.x = cam.tx; cam.y = cam.ty;      // панорама без инерции — точнее ощущается
+    cam.x = cam.tx; cam.y = cam.ty;      // panning without inertia feels more exact
     return;
   }
 
@@ -2447,10 +2447,10 @@ const endPointer = (ev) => {
   if (pointer.down && !pointer.moved) {
     const n = nodeAt(ev.clientX, ev.clientY);
     if (n && n.expanded) {
-      // Попали в сам раскрытый узел, а не в его содержимое — закрываем.
+      // The opened node itself was hit rather than its contents: close it.
       collapseNode(n);
     } else if (canOpen(n)) {
-      // У узла есть нижний слой — проваливаемся внутрь.
+      // The node has a layer beneath it: go in.
       drillInto(n);
     } else if (n) {
       selected = n === selected ? null : n;
@@ -2459,7 +2459,7 @@ const endPointer = (ev) => {
     } else if (selected) {
       selected = null;
     } else {
-      // Клик по пустому фону — выход на уровень выше.
+      // A click on empty background means back up a level.
       drillOut();
     }
   }
@@ -2481,7 +2481,7 @@ on(view, 'wheel', (ev) => {
   const k = Math.exp(-ev.deltaY * (ev.ctrlKey ? 0.012 : 0.0022));
   const next = clamp(cam.tscale * k, 0.18, 3.2);
 
-  // Зум к точке под курсором.
+  // Zoom towards whatever is under the cursor.
   const before = screenToWorld(ev.clientX, ev.clientY);
   cam.tscale = next;
   cam.scale = next;
@@ -2501,7 +2501,7 @@ on(window, 'keydown', (ev) => {
   if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
   if (!view.isConnected || !view.offsetParent) return;
   const k = ev.key.toLowerCase();
-  if (SCENE.onKey && SCENE.onKey(k, ev)) return;          // сцена перехватила клавишу
+  if (SCENE.onKey && SCENE.onKey(k, ev)) return;          // the scene took the key
   if (k === 'f') fitView();
   else if (k === 'r') startBoot();
   else if (k === 'g') FLAGS.grid = !FLAGS.grid;
@@ -2509,7 +2509,7 @@ on(window, 'keydown', (ev) => {
   else if (k === 'p') FLAGS.post = !FLAGS.post;
   else if (k === 'l') FLAGS.labels = !FLAGS.labels;
   else if (k === 'escape' || k === 'backspace') {
-    // Сначала снимаем выделение, затем поднимаемся на уровень выше.
+    // Clear the selection first, then step up a level.
     ev.preventDefault();
     if (selected) selected = null;
     else drillOut();
@@ -2521,6 +2521,15 @@ on(window, 'keydown', (ev) => {
   else if (ev.code === 'Space') { ev.preventDefault(); FLAGS.paused = !FLAGS.paused; }
 });
 
+// Only the diagram someone is actually looking at should be drawing.
+let onScreen = true;
+if (typeof IntersectionObserver === 'function') {
+  const io = new IntersectionObserver((es) => { onScreen = es.some((e) => e.isIntersecting); },
+    { rootMargin: '120px' });
+  io.observe(view);
+  teardown.push(() => io.disconnect());
+}
+
 // A panel is resized by layout far more often than a window is: watch the box.
 if (typeof ResizeObserver === 'function' && view.parentNode) {
   const ro = new ResizeObserver(() => { if (!stopped) { resize(); fitView(); } });
@@ -2531,7 +2540,7 @@ if (typeof ResizeObserver === 'function' && view.parentNode) {
 }
 
 /* =============================================================================
- * 15. ГЛАВНЫЙ ЦИКЛ
+ * 15. THE MAIN LOOP
  * ========================================================================== */
 
 
@@ -2547,7 +2556,7 @@ function startBoot() {
   fitView();
 }
 
-/** Множество узлов и рёбер, связанных с активным — для режима фокуса. */
+/** Everything connected to the active node, for the focus mode. */
 function updateFocus(dt) {
   const active = hovered || selected;
   const related = new Set();
@@ -2559,10 +2568,10 @@ function updateFocus(dt) {
     }
   }
 
-  // Уровень, внутри которого сейчас находимся. Всё, что лежит выше по дереву,
-  // приглушаем — иначе на глубине соседи верхних уровней спорят за внимание с
-  // тем, что рассматриваешь. Сами контейнеры пути гасить нельзя: они служат
-  // рамкой и показывают, откуда пришёл.
+  // The level currently inside. Everything above it in the tree is dimmed, or
+  // at depth the neighbours from higher levels compete for attention with what
+  // you are looking at. The containers on the path itself must stay lit: they
+  // are the frame, and they show where you came from.
   const host = drillPath[drillPath.length - 1] || null;
   const activeLevel = host ? host.sub : root;
   const onPath = new Set(drillPath);
@@ -2573,8 +2582,8 @@ function updateFocus(dt) {
     n.hover = approach(n.hover, isHover ? 1 : 0, 12, dt);
     n.select = approach(n.select, isSel ? 1 : 0, 10, dt);
 
-    // Затеняем только соседей по тому же уровню: контейнер, внутри которого
-    // сидит активный узел, гасить нельзя — он его же и показывает.
+    // Dim only siblings on the same level: the container the active node sits
+    // in must not be dimmed, since it is what is showing it.
     const sameLevel = active && n.level === active.level;
     let target = !active || !sameLevel ? 1 : (related.has(n) ? 1 : 0.26);
     if (n.level !== activeLevel && !onPath.has(n)) target = Math.min(target, 0.24);
@@ -2592,27 +2601,27 @@ function updateFocus(dt) {
 }
 
 /**
- * Обновляет один уровень: голографическую сборку, раскрытие узлов и движение
- * к целевым позициям. Возвращает true, пока хоть что-то движется — по этому
- * признаку пересчитывается расстановка и геометрия рёбер.
+ * Updates one level: assembly, opening, and travel towards target positions.
+ * Returns true while anything is still moving, which is the signal to redo
+ * the arrangement and the edge geometry.
  */
 function updateLevel(level, dt) {
   let moving = false;
   const elapsed = time - (level.bootStart || 0);
 
-  // Сборка узлов по расписанию уровня.
+  // Nodes assemble on the level's own schedule.
   for (const n of level.nodes) {
     const target = clamp((elapsed - n.bootDelay) / 1.05, 0, 1);
     if (target > n.boot) { n.boot = target; moving = true; }
   }
-  // Связь прорастает только после того, как оба её узла достаточно собраны.
+  // An edge only grows once both of its nodes are assembled enough to hold it.
   for (const e of level.edges) {
     if (e.boot < 1 && e.a.boot > 0.55 && e.b.boot > 0.35) {
       e.boot = clamp(e.boot + dt * 1.35, 0, 1);
     }
   }
 
-  // Раскрытие: размер узла едет от свёрнутого к контейнерному.
+  // Opening: the node's size travels from collapsed to container-sized.
   for (const n of level.nodes) {
     const target = n.expanded ? 1 : 0;
     if (Math.abs(n.expandT - target) > 0.0015) {
@@ -2622,19 +2631,19 @@ function updateLevel(level, dt) {
       n.expandT = target;
     }
     if (n.sub) {
-      // Вложенный уровень живёт, пока контейнер хоть немного раскрыт.
+      // A nested level lives as long as its container is even slightly open.
       if (n.expandT > 0.002 && updateLevel(n.sub, dt)) moving = true;
-      // Габариты контейнера берём из ТЕКУЩЕЙ раскладки его содержимого:
-      // когда внутри раскрывается ещё один узел, подграф вырастает, и
-      // контейнер обязан вырасти следом — иначе содержимое режется рамкой.
+      // The container's size comes from the CURRENT layout of its contents:
+      // when a node inside opens too, the subgraph grows, and the container
+      // must grow with it or the frame cuts its own contents off.
       n.openW = Math.max(n.baseW, n.sub.w + NEST.padX * 2);
       n.openH = n.sub.h + NEST.padTop + NEST.padBottom;
       const k = easeInOutCubic(n.expandT);
       n.w = lerp(n.baseW, n.openW, k);
       n.h = lerp(n.baseH, n.openH, k);
     } else if (n.leaf) {
-      // Лист раскрывается не в подграф, а в карточку. Сцена может подобрать
-      // её размер под объём содержимого — пустая нижняя треть выглядит плохо.
+      // A leaf opens into a card rather than a subgraph. The scene may size it
+      // to what it holds: an empty bottom third looks like a mistake.
       const size = SCENE.detail.size ? SCENE.detail.size(n) : SCENE.detail;
       n.openW = Math.max(n.baseW, size.w);
       n.openH = Math.max(n.baseH, size.h);
@@ -2644,7 +2653,7 @@ function updateLevel(level, dt) {
     }
   }
 
-  // Размеры изменились — пересчитываем цели, соседи разъезжаются.
+  // Sizes changed, so recompute the targets and let the neighbours move aside.
   if (moving) placeLevel(level, null, false);
 
   for (const n of level.nodes) {
@@ -2658,13 +2667,13 @@ function updateLevel(level, dt) {
   return moving;
 }
 
-/** Переводит локальные координаты уровня в мировые — сверху вниз по дереву. */
+/** Turns a level's local coordinates into world ones, down the tree. */
 function syncAbsolute(level, ox, oy) {
   for (const n of level.nodes) {
     n.x = ox + n.lx;
     n.y = oy + n.ly;
     if (n.sub && n.expandT > 0.002) {
-      // Содержимое контейнера смещено вниз: сверху остаётся его заголовок.
+      // A container's contents sit lower down: its header keeps the top.
       syncAbsolute(n.sub, n.x, n.y + (NEST.padTop - NEST.padBottom) / 2);
     }
   }
@@ -2674,9 +2683,9 @@ function update(dt) {
   const moving = updateLevel(root, dt);
   syncAbsolute(root, 0, 0);
 
-  // Пока схема раздвигается или схлопывается, габариты меняются каждый кадр,
-  // поэтому кадрирование нужно пересчитывать до конца анимации — иначе камера
-  // фиксируется на промежуточном, ещё раздутом состоянии.
+  // While the picture is spreading or collapsing its extent changes every
+  // frame, so the framing has to be recomputed until the animation ends, or
+  // the camera settles on some half-inflated intermediate state.
   if (autoFrame) {
     if (autoFrame.fit) fitView();
     else if (autoFrame.node) focusCamera(autoFrame.node);
@@ -2685,19 +2694,19 @@ function update(dt) {
 
   updateFocus(dt);
 
-  // Камера: плавное приближение к целям. Кадр намеренно стоит неподвижно —
-  // тряска проектора и сбои развёртки мешали читать схему.
+  // The camera eases towards its targets. The frame deliberately does not
+  // shake: projector wobble and sweep glitches got in the way of reading.
   cam.scale = approach(cam.scale, cam.tscale, 9, dt);
   cam.x = approach(cam.x, cam.tx, 9, dt);
   cam.y = approach(cam.y, cam.ty, 9, dt);
 
   if (SCENE.tick) SCENE.tick(dt);
 
-  // Перестройка геометрии рёбер после перетаскивания и раскрытия.
+  // Rebuild edge geometry after dragging and opening.
   for (const e of allEdges) if (e.dirty) rebuildEdge(e);
 
-  // Сеть работает вся целиком, а не только видимая её часть: агенты внутри
-  // закрытых групп тоже жгут токены и продвигают очередь.
+  // The whole graph runs, not only the visible part: what is inside a closed
+  // group is still doing its work.
   for (const n of allNodes) {
     if (n.leaf) SCENE.leaf.step(n.leaf, dt);
     else n.load = clamp(n.load + (Math.random() - 0.5) * dt * 0.06, 0.08, 0.97);
@@ -2705,7 +2714,7 @@ function update(dt) {
   computeStats(root);
 }
 
-/** Сводка по поддереву: сколько агентов, сколько токенов сожжено, кто в работе. */
+/** A summary over a subtree, aggregated from its leaves. */
 function computeStats(level) {
   let agents = 0, tokens = 0, active = 0;
   for (const n of level.nodes) {
@@ -2739,18 +2748,18 @@ function renderScene(t, dt, fps) {
 }
 
 /**
- * Рисует один уровень схемы. Вложенные уровни попадают сюда рекурсивно из
- * drawNode — у раскрытого узла содержимым становится его подграф.
+ * Draws one level. Nested levels arrive here recursively from drawNode: an
+ * opened node's contents are its own subgraph.
  */
 function drawLevel(ctx, level, t, dt) {
-  // Рёбра под панелями.
+  // Edges go under the panels.
   for (const e of level.edges) drawEdge(ctx, e, t);
   for (const e of level.edges) drawPackets(ctx, e, t, dt);
 
-  // Частицы сборки, затем сами панели.
+  // Assembly particles, then the panels themselves.
   for (const n of level.nodes) drawNodeMotes(ctx, n, t);
 
-  // Активный узел рисуется последним, чтобы быть поверх остальных.
+  // The active node is drawn last so that it sits above the rest.
   const active = hovered || selected;
   let deferred = null;
   for (const n of level.nodes) {
@@ -2771,12 +2780,13 @@ function frame(now) {
   requestAnimationFrame(frame);
   // Tabs here are switched by hiding, not by removing. A panel nobody is looking
   // at still costs a bloom pyramid per frame, so keep the loop and skip the work.
-  if (!view.offsetParent) { lastTime = 0; return; }
+  // Same for a diagram scrolled off: a page of journeys holds one canvas each.
+  if (!view.offsetParent || !onScreen) { lastTime = 0; return; }
 
   const nowSec = now / 1000;
   let dt = lastTime ? nowSec - lastTime : 1 / 60;
   lastTime = nowSec;
-  dt = Math.min(dt, 1 / 20);            // защита от «прыжка» после вкладки в фоне
+  dt = Math.min(dt, 1 / 20);            // guards against the jump after a background tab
 
   fps = lerp(fps, 1 / Math.max(dt, 1e-4), 0.08);
 
@@ -2785,14 +2795,14 @@ function frame(now) {
     update(dt);
   }
 
-  // Порядок принципиален: сцена рисуется без текста, по ней считается bloom,
-  // и только затем текст ложится сверху — так буквы не набирают ореол.
+  // The order matters: the scene is drawn without text, bloom is computed from
+  // it, and only then does the text land on top — so letters gain no halo.
   renderScene(time, FLAGS.paused ? 0 : dt, fps);
   if (FLAGS.post && FLAGS.bloom) buildBloom();
   flushText(RT.scene.x);
 
-  // Слой сцены поверх всего, включая уже уложенный текст узлов: панели HUD
-  // и модальные экраны иначе оказываются под подписями схемы.
+  // The scene's own layer goes over everything, the node text included: HUD
+  // panels and modal screens would otherwise end up under the graph's labels.
   if (SCENE.overlayTop) {
     const ctx = RT.scene.x;
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -2818,15 +2828,15 @@ function frame(now) {
   }
 }
 
-/* --- запуск --------------------------------------------------------------- */
+/* --- start ---------------------------------------------------------------- */
 
-// Утилиты, которыми сцена рисует свои карточки.
+// The utilities a scene uses to draw its own cards.
 Object.assign(HUD_API, {
   C, KIND, rgba, mix, clamp, lerp, invLerp,
   allNodes, findNode: (id) => allNodes.find((n) => n.id === id),
   fit: () => { autoFrame = { fit: true }; fitView(); },
   focus: (n) => { autoFrame = { node: n }; focusCamera(n); },
-  // Программное управление раскрытием — нужно демонстрационному режиссёру.
+  // Opening under program control, which a presentation needs.
   open: (id) => { const n = allNodes.find((x) => x.id === id); return n ? drillInto(n) : false; },
   closeAll: () => { while (drillPath.length) drillOut(); },
   path: () => drillPath.slice(),
@@ -2845,8 +2855,8 @@ Object.assign(HUD_API, {
 if (!SCENE_INPUT) throw new Error('HUD_MOUNT: no scene given.');
 SCENE = typeof SCENE_INPUT === 'function' ? SCENE_INPUT(HUD_API) : SCENE_INPUT;
 FLAGS.labels = !!SCENE.labels;
-if (SCENE.kinds) Object.assign(KIND, SCENE.kinds);        // свои типы узлов сцены
-if (SCENE.metric) Object.assign(METRIC, SCENE.metric);   // плотность раскладки сцены
+if (SCENE.kinds) Object.assign(KIND, SCENE.kinds);        // the scene's own node kinds
+if (SCENE.metric) Object.assign(METRIC, SCENE.metric);   // the scene's layout density
 
 buildGraph();
 computeStats(root);
