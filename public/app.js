@@ -2659,7 +2659,13 @@ async function renderTimeline(view, m, seq){
   // task file — it carries the ids and the outcome — and drop the log twin, matching on
   // the title, which is the only thing both records are guaranteed to share.
   const norm=s=>String(s||'').toLowerCase().replace(/[^a-zа-яёіїєґ0-9]+/gi,' ').trim();
+  const logAt=new Map();
+  for(const i of items) if(i.kind==='log' && i.at) logAt.set(norm(i.title), i.at);
   const fromQueue=new Set(items.filter(i=>i.kind==='task'&&i.col==='done').map(i=>norm(i.title)));
+  // Keep the task file — it has the ids and the outcome — but take the date from the
+  // log twin when there is one. A log entry records when the work was done; a file's
+  // mtime is only a stand-in for that, and a checkout rewrites it.
+  for(const i of items) if(i.kind==='task' && i.col==='done' && logAt.has(norm(i.title))) i.at=logAt.get(norm(i.title));
   const merged=items.filter(i=>!(i.kind==='log' && fromQueue.has(norm(i.title))));
   const done=merged.filter(i=>i.kind==='log'||i.col==='done');
   const rest=merged.filter(i=>!(i.kind==='log'||i.col==='done'));
