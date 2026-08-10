@@ -46,6 +46,24 @@ That is how one entry can answer about several repositories.
 Requires Node 22.18+ — the same requirement as the dashboard, and for the same
 reason: Node runs the TypeScript directly, so there is nothing to build.
 
+## Seeing it work before you wire it up
+
+An MCP server has no screen, which makes a broken setup hard to tell from a working
+one. `mcp-check.ts` speaks the protocol and prints the answer for a person:
+
+```
+node mcp-check.ts examples/refund-shop init      # handshake — version, name, what it offers
+node mcp-check.ts examples/refund-shop tools     # the tools and their behaviour hints
+node mcp-check.ts examples/refund-shop model     # what this product is
+node mcp-check.ts examples/refund-shop impact 010-partial-refund.md
+node mcp-check.ts                                # every command
+```
+
+It starts `mcp.ts` as a subprocess and stops it again — the same thing your editor
+does. Point it at your own project and you see exactly what an agent would read.
+
+Three of its commands write: `new`, `approve`, `withdraw`. The rest only read.
+
 ## The tools
 
 | Tool | Answers |

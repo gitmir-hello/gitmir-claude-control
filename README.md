@@ -124,6 +124,13 @@ network, and the dashboard does not need to be running** — they are two progra
 the same files, sharing the same arithmetic, so they cannot disagree. Every answer says
 how fresh the model is, because there is no amber banner in someone else's editor.
 
+To see what your editor will see before wiring one up:
+
+```
+node mcp-check.ts examples/refund-shop tools
+node mcp-check.ts examples/refund-shop impact 010-partial-refund.md
+```
+
 **→ [The MCP server](docs/MCP.md)**
 
 ---
