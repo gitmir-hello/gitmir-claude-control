@@ -2259,6 +2259,16 @@ let panStartX = 0, panStartY = 0, panCamX = 0, panCamY = 0;
 let hovered = null;
 let selected = null;
 let pointerConsumed = false;   // the click went to the scene's modal layer
+
+// Pointer coordinates have to be local to the canvas. This engine was written
+// for a canvas filling the viewport, where clientX/clientY already were local.
+// Inside a panel the canvas sits at an offset — and the page scrolls under it —
+// so every hit test, the crosshair and zoom-to-cursor were wrong by exactly
+// that offset. Read the rect per event: it changes on scroll, and one
+// getBoundingClientRect for one element is cheaper than being wrong.
+function localX(ev) { return ev.clientX - view.getBoundingClientRect().left; }
+function localY(ev) { return ev.clientY - view.getBoundingClientRect().top; }
+function localXY(ev) { const r = view.getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top]; }
 let lastSelected = null;
 let inspectorAlpha = 0;
 
@@ -2378,7 +2388,8 @@ function setCursor(cls) {
 
 on(view, 'pointerdown', (ev) => {
   // A scene may hold a modal layer over the graph and take the clicks itself.
-  if (SCENE.onPointer && SCENE.onPointer(ev.clientX, ev.clientY)) {
+  const [lx0, ly0] = localXY(ev);
+  if (SCENE.onPointer && SCENE.onPointer(lx0, ly0)) {
     pointerConsumed = true;
     return;
   }
@@ -2387,13 +2398,13 @@ on(view, 'pointerdown', (ev) => {
   pointer.down = true;
   pointer.moved = false;
   // Always remember where the press landed: it is how a click is told from a drag.
-  panStartX = ev.clientX;
-  panStartY = ev.clientY;
+  panStartX = lx0;
+  panStartY = ly0;
 
-  const n = nodeAt(ev.clientX, ev.clientY);
+  const n = nodeAt(lx0, ly0);
   if (n) {
     dragNode = n;
-    const w = screenToWorld(ev.clientX, ev.clientY);
+    const w = screenToWorld(lx0, ly0);
     dragOffX = n.x - w.x;
     dragOffY = n.y - w.y;
     setCursor('grabbing');
@@ -2407,17 +2418,18 @@ on(view, 'pointerdown', (ev) => {
 });
 
 on(view, 'pointermove', (ev) => {
-  pointer.x = ev.clientX;
-  pointer.y = ev.clientY;
+  const [lx, ly] = localXY(ev);
+  pointer.x = lx;
+  pointer.y = ly;
   pointer.inside = true;
 
   if (pointer.down) {
-    const dx = ev.clientX - panStartX, dy = ev.clientY - panStartY;
+    const dx = lx - panStartX, dy = ly - panStartY;
     if (Math.abs(dx) + Math.abs(dy) > 3) pointer.moved = true;
   }
 
   if (dragNode) {
-    const w = screenToWorld(ev.clientX, ev.clientY);
+    const w = screenToWorld(lx, ly);
     dragNode.x = w.x + dragOffX;
     dragNode.y = w.y + dragOffY;
     for (const e of edges) if (e.a === dragNode || e.b === dragNode) e.dirty = true;
@@ -2426,18 +2438,18 @@ on(view, 'pointermove', (ev) => {
   }
 
   if (panning) {
-    cam.tx = panCamX - (ev.clientX - panStartX) / cam.scale;
-    cam.ty = panCamY - (ev.clientY - panStartY) / cam.scale;
+    cam.tx = panCamX - (lx - panStartX) / cam.scale;
+    cam.ty = panCamY - (ly - panStartY) / cam.scale;
     cam.x = cam.tx; cam.y = cam.ty;      // panning without inertia feels more exact
     return;
   }
 
-  if (SCENE.onHover && SCENE.onHover(ev.clientX, ev.clientY)) {
+  if (SCENE.onHover && SCENE.onHover(lx, ly)) {
     hovered = null;
     setCursor('pointing');
     return;
   }
-  const n = nodeAt(ev.clientX, ev.clientY);
+  const n = nodeAt(lx, ly);
   hovered = n;
   setCursor(n ? 'pointing' : '');
 });
@@ -2445,7 +2457,10 @@ on(view, 'pointermove', (ev) => {
 const endPointer = (ev) => {
   if (pointerConsumed) { pointerConsumed = false; return; }
   if (pointer.down && !pointer.moved) {
-    const n = nodeAt(ev.clientX, ev.clientY);
+    // pointerleave fires this without an event of its own, so fall back to the
+    // last position the pointer was known to be at.
+    const [lxu, lyu] = ev && ev.clientX != null ? localXY(ev) : [pointer.x, pointer.y];
+    const n = nodeAt(lxu, lyu);
     if (n && n.expanded) {
       // The opened node itself was hit rather than its contents: close it.
       collapseNode(n);
@@ -2482,10 +2497,11 @@ on(view, 'wheel', (ev) => {
   const next = clamp(cam.tscale * k, 0.18, 3.2);
 
   // Zoom towards whatever is under the cursor.
-  const before = screenToWorld(ev.clientX, ev.clientY);
+  const [lxw, lyw] = localXY(ev);
+  const before = screenToWorld(lxw, lyw);
   cam.tscale = next;
   cam.scale = next;
-  const after = screenToWorld(ev.clientX, ev.clientY);
+  const after = screenToWorld(lxw, lyw);
   cam.tx += before.x - after.x;
   cam.ty += before.y - after.y;
   cam.x = cam.tx; cam.y = cam.ty;
@@ -2876,6 +2892,10 @@ Object.assign(HUD_API, {
   // copy time, which froze this at zero and made it useless as a probe.
   frames: () => frameCount,
   running: () => !stopped,
+  // Enough to check the aim from outside: where the engine thinks the pointer is,
+  // and what it believes is under it.
+  pointer: () => ({ x: pointer.x, y: pointer.y, inside: pointer.inside }),
+  hovered: () => hovered,
   destroy() {
     if (stopped) return;
     stopped = true;

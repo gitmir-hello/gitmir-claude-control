@@ -1989,6 +1989,13 @@ const HTML = /* html */ `<!doctype html>
   .dgm-b:hover{border-color:var(--cyan); color:var(--cyan)}
   .dgm-hint{flex:1; color:var(--ink-3); font-family:var(--font-mono); font-size:11px; letter-spacing:.02em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:0 6px}
   .dgm-full{min-width:34px}
+  /* Fullscreen makes the frame the whole screen, but the canvas kept its 60vh and
+     so filled a little over half of it. In fullscreen the frame is a column and the
+     canvas takes whatever is left under the toolbar. */
+  .dgm:fullscreen, .dgm:-webkit-full-screen{display:flex; flex-direction:column;
+    width:100vw; height:100vh; background:#02060b; border:0}
+  .dgm:fullscreen .dgm-canvas, .dgm:-webkit-full-screen .dgm-canvas{
+    flex:1 1 auto; height:auto; min-height:0}
   /* The HUD renderer paints its own grid and background, so the frame gets out of
      its way — otherwise two grids at different scales moire against each other. */
   .dgm-canvas.hud-canvas{background-image:none; background-color:#02060b; cursor:crosshair}
