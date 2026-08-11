@@ -553,11 +553,11 @@ function skillDefs(): SkillDef[] {
     const fm = /^---\n([\s\S]*?)\n---/.exec(head);
     if (fm) {
       const d = /^description:\s*(?:>-?\s*\n([\s\S]*?)(?=\n\S|$)|(.*))/m.exec(fm[1]);
-      if (d) desc = (d[1] || d[2] || '').split('\n').map((s) => s.trim()).join(' ').trim();
+      if (d) desc = (d[1] || d[2] || '').split(/\r?\n/).map((s) => s.trim()).join(' ').trim();
     }
     if (!desc) {
       const body = fm ? head.slice(fm[0].length) : head;
-      desc = body.split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 2).join(' ');
+      desc = body.split(/\r?\n/).map((s) => s.trim()).filter(Boolean).slice(0, 2).join(' ');
     }
     out.push({
       name, file: f, title: name,

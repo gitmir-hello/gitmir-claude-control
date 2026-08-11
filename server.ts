@@ -819,7 +819,7 @@ const server = http.createServer(async (req, res) => {
           if (st.size > 1024 * 1024) continue;
           searched++;
           let text; try { text = fs.readFileSync(full, 'utf8'); } catch { continue; }
-          const lines = text.split('\n');
+          const lines = text.split(/\r?\n/);
           for (const n of wanted) {
             if (!text.includes(n)) continue;
             for (let i = 0; i < lines.length; i++) {
@@ -907,7 +907,7 @@ const server = http.createServer(async (req, res) => {
           items = fs.readdirSync(dir).filter((f) => f.endsWith('.md')).map((f) => {
             let title = f.replace(/\.md$/, '');
             try {
-              const first = fs.readFileSync(path.join(dir, f), 'utf8').split('\n').find((l) => l.trim());
+              const first = fs.readFileSync(path.join(dir, f), 'utf8').split(/\r?\n/).find((l) => l.trim());
               if (first) title = first.replace(/^#+\s*/, '').trim().slice(0, 120);
             } catch {}
             let mtime = 0; try { mtime = fs.statSync(path.join(dir, f)).mtimeMs; } catch {}
@@ -1029,7 +1029,7 @@ const server = http.createServer(async (req, res) => {
         for (const f of files.slice(0, 400)) {
           let text = '';
           try { text = fs.readFileSync(path.join(dir, f), 'utf8').slice(0, 60000); } catch { continue; }
-          const title = (text.split('\n').find((l) => l.trim()) || f).replace(/^#+\s*/, '').trim().slice(0, 160);
+          const title = (text.split(/\r?\n/).find((l) => l.trim()) || f).replace(/^#+\s*/, '').trim().slice(0, 160);
           // A `Touches:` line is the task saying so itself. Without one, fall back to
           // every model id the task mentions anywhere: the planner is told to write
           // the slice of the product a task touches into `## Context`, so those ids
