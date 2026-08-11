@@ -2591,7 +2591,11 @@ async function mapLayerData(m){
     for(const id of br.seed){ const md=moduleOf(id,m); if(md) per.set(md,{n:2}); }
     for(const id of br.dist.keys()){ const md=moduleOf(id,m); if(md && !per.has(md)) per.set(md,{n:1}); }
     for(const [k,v] of per) per.set(k,{text: v.n===2?'changed here':'downstream', t: v.n===2?1:0.42});
-    return { kind:'change', per, legend: what+' — solid where it changes something, faint where the change arrives on its own.' };
+    // Which object the question was asked about. On the map it is drawn in its
+    // own colour: after the jump from the popup it would otherwise look like
+    // every other thing the change happens to reach.
+    return { kind:'change', per, origin: ids.length===1 ? ids[0] : null,
+      legend: what+' — solid where it changes something, faint where the change arrives on its own.' };
   }
   if(mapLayer==='owner'){
     const out=new Map();

@@ -49,6 +49,8 @@ const HUD_PALETTE = {
   gm_trigger:   { color: [170, 130, 255], accent: [220, 200, 255], glow: 0.95 },
   gm_care:      { color: [255, 92, 110],  accent: [255, 200, 120], glow: 1.10 },
   gm_changed:   { color: [255, 92, 110],  accent: [255, 214, 130], glow: 1.30 },
+  // The thing the question was asked about, and nothing else on the map.
+  gm_origin:    { color: [178, 128, 255], accent: [232, 214, 255], glow: 1.35 },
 };
 
 const HUD_KINDS_LABEL = {
@@ -114,8 +116,11 @@ function hudSceneProductMap(m, layer, hooks) {
   if (!inArea.size) return null;
 
   const idx = reachIndex(m);
+  // Which object the map was opened about, if any: it is drawn in its own colour.
+  const origin = (layer && layer.origin) || null;
   const nodes = [];
   for (const [aid, ids] of inArea) {
+    const inside = new Set(ids);
     const mod = modById.get(aid);
     const byKind = {};
     for (const id of ids) { const k = kindOf(id); (byKind[k] = byKind[k] || []).push(id); }
@@ -131,19 +136,24 @@ function hudSceneProductMap(m, layer, hooks) {
     const lay = layer && layer.per && layer.per.get(aid);
     if (lay) rows.unshift([({ owner: 'OWNER', heat: 'TOUCHES', change: 'THIS CHANGE' })[layer.kind] || 'RISK',
       hudTitle(lay.text)]);
+    if (origin && inside.has(origin)) rows.unshift(['ASKED ABOUT', hudTitle(labelOf(origin, m))]);
 
     // Inside the area: its own objects, linked by the model's own links. Only
     // links that stay inside the area are drawn here — the ones that leave it
     // are what the top-level lines already say.
-    const inside = new Set(ids);
-    const kids = ids.slice(0, 60).map((id) => hudObjectNode(id, m));
+    const kids = ids.slice(0, 60).map((id) => {
+      const k = hudObjectNode(id, m);
+      if (origin && id === origin) k.kind = 'gm_origin';
+      return k;
+    });
     const kidEdges = [];
     for (const id of ids) {
       for (const to of (idx.get(id) || [])) if (inside.has(to) && id !== to) kidEdges.push([id, to, '']);
     }
     nodes.push({
       id: aid, modelId: aid === OTHER ? null : aid,
-      kind: lay && layer.kind === 'risk' && lay.t > 0.6 ? 'gm_care' : 'gm_area',
+      kind: (origin && aid === origin) ? 'gm_origin'
+          : (lay && layer.kind === 'risk' && lay.t > 0.6 ? 'gm_care' : 'gm_area'),
       title: hudTitle(aid === OTHER ? 'Everything else' : ((mod || {}).name || aid)),
       tag: (aid === OTHER ? 'AREA' : aid).slice(0, 14),
       rows: rows.slice(0, 5),
