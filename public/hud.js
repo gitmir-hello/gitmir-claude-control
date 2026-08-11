@@ -2859,8 +2859,11 @@ function updateFocus(dt) {
     // Dim only siblings on the same level: the container the active node sits
     // in must not be dimmed, since it is what is showing it.
     const sameLevel = active && n.level === active.level;
-    let target = !active || !sameLevel ? 1 : (related.has(n) ? 1 : 0.62);
-    if (n.level !== activeLevel && !onPath.has(n)) target = Math.min(target, 0.45);
+    // Pointing at a card is a question about that card. What it is not connected
+    // to steps well back — the answer should be visible without reading, and a
+    // card darkened by colour rather than faded is still legible if you look.
+    let target = !active || !sameLevel ? 1 : (related.has(n) ? 1 : 0.30);
+    if (n.level !== activeLevel && !onPath.has(n)) target = Math.min(target, 0.28);
     n.dim = approach(n.dim, target, 8, dt);
   }
 
