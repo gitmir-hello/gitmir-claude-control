@@ -1658,15 +1658,19 @@ function drawNode(ctx, n, t, dt) {
   const padX = METRIC.padX * s;
   const headH = (n.headH || METRIC.headerH) * s;
 
-  // The header
-  ctx.fillStyle = rgba(col, 0.085 * pc * alpha);
-  ctx.fillRect(x, y, w, headH);
-  ctx.beginPath();
-  ctx.moveTo(x, y + headH + 0.5);
-  ctx.lineTo(x + w, y + headH + 0.5);
-  ctx.strokeStyle = rgba(mix(col, acc, 0.5), 0.65 * pc * alpha);
-  ctx.lineWidth = 1;
-  ctx.stroke();
+  // The header. It separates a title from the rows under it — and when there are
+  // no rows, it separates the title from nothing and reads as an empty strip
+  // above the only word on the card.
+  if (!compact) {
+    ctx.fillStyle = rgba(col, 0.085 * pc * alpha);
+    ctx.fillRect(x, y, w, headH);
+    ctx.beginPath();
+    ctx.moveTo(x, y + headH + 0.5);
+    ctx.lineTo(x + w, y + headH + 0.5);
+    ctx.strokeStyle = rgba(mix(col, acc, 0.5), 0.65 * pc * alpha);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
 
   // The status light, blinking on its own phase.
   if (!compact) {
@@ -2646,20 +2650,16 @@ on(view, 'pointerdown', (ev) => {
   panStartX = lx0;
   panStartY = ly0;
 
-  const n = nodeAt(lx0, ly0);
-  if (n) {
-    dragNode = n;
-    const w = screenToWorld(lx0, ly0);
-    dragOffX = n.x - w.x;
-    dragOffY = n.y - w.y;
-    setCursor('grabbing');
-  } else {
-    panning = true;
-    panCamX = cam.tx;
-    panCamY = cam.ty;
-    autoFrame = null;          // a hand on the picture outranks automatic framing
-    setCursor('grabbing');
-  }
+  // Dragging moves the view, never a node. Pressing a node used to pick it up,
+  // and once you zoom inside an opened container it covers the whole viewport —
+  // there is no empty background left to grab, so the picture could not be moved
+  // at all. Positions here are computed from the graph anyway; dragging one node
+  // out of place says nothing and loses the layout's meaning.
+  panning = true;
+  panCamX = cam.tx;
+  panCamY = cam.ty;
+  autoFrame = null;            // a hand on the picture outranks automatic framing
+  setCursor('grabbing');
 });
 
 on(view, 'pointermove', (ev) => {
