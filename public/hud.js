@@ -1406,7 +1406,10 @@ function drawNode(ctx, n, t, dt) {
   // Hovering opens room inside the card for its own controls, rather than
   // loading two meanings onto one click. Everything drawn below derives from
   // x/y/w/h, so widening them here widens the whole card with no other change.
-  const grow = easeOutCubic(n.hover);
+  // An opened container is a frame around a picture, not a card. Growing it on
+  // hover the way a collapsed card grows makes it jump, and everything laid out
+  // inside it jumps with it.
+  const grow = (n.expanded || n.expandT > 0.02) ? 0 : easeOutCubic(n.hover);
   // Detail is dropped for the crowd, not for the one being looked at: the card
   // under the pointer shows itself in full, controls included. Without this the
   // controls were unreachable on exactly the diagrams that need them — a dense
@@ -2912,15 +2915,12 @@ function updateLevel(level, dt) {
       // when a node inside opens too, the subgraph grows, and the container
       // must grow with it or the frame cuts its own contents off.
       //
-      // A hovered child grows at draw time and the layout never hears about it,
-      // so this has to. Measured before the fix: the container's box did not
-      // move at all while a card inside it grew — which is exactly why the card
-      // came out through its frame.
-      let hov = 0;
-      for (const k2 of n.sub.nodes) if (k2.hover > hov) hov = k2.hover;
-      const room = easeOutCubic(hov);
-      n.openW = Math.max(n.baseW, n.sub.w + NEST.padX * 2 + room * HOVER_GROW_W);
-      n.openH = n.sub.h + NEST.padTop + NEST.padBottom + room * HOVER_GROW_H;
+      // Room for a hovered child is held permanently, not opened when the mouse
+      // arrives. A child grows at draw time and the layout never hears about it,
+      // so the space has to be there already — otherwise the container resizes
+      // every time the pointer crosses into it, and its whole contents shift.
+      n.openW = Math.max(n.baseW, n.sub.w + NEST.padX * 2 + HOVER_GROW_W);
+      n.openH = n.sub.h + NEST.padTop + NEST.padBottom + HOVER_GROW_H;
       const k = easeInOutCubic(n.expandT);
       n.w = lerp(n.baseW, n.openW, k);
       n.h = lerp(n.baseH, n.openH, k);
