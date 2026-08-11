@@ -27,10 +27,33 @@ const HUD_STATIC = {
   resolveRow: (n, row) => ({ value: String(row[1] == null ? '' : row[1]) }),
 };
 
+/* One hue per kind of thing in the product. The renderer ships five node kinds,
+ * and mapping ten model kinds onto them made routes, functions and screens the
+ * same blue — on a data-flow diagram that is most of the picture saying nothing.
+ * These are handed to the renderer, which merges them into its own table. */
+const HUD_PALETTE = {
+  gm_area:      { color: [96, 232, 255],  accent: [186, 246, 255], glow: 1.00 },
+  gm_entity:    { color: [96, 246, 176],  accent: [214, 248, 255], glow: 0.90 },
+  gm_function:  { color: [110, 160, 255], accent: [186, 246, 255], glow: 0.85 },
+  gm_route:     { color: [170, 130, 255], accent: [214, 200, 255], glow: 0.90 },
+  gm_screen:    { color: [255, 140, 215], accent: [255, 214, 240], glow: 0.90 },
+  gm_event:     { color: [255, 178, 78],  accent: [255, 214, 130], glow: 1.15 },
+  gm_journey:   { color: [255, 214, 130], accent: [255, 244, 210], glow: 1.25 },
+  gm_lifecycle: { color: [255, 122, 96],  accent: [255, 214, 130], glow: 1.05 },
+  gm_reaction:  { color: [90, 220, 210],  accent: [200, 255, 250], glow: 0.85 },
+  gm_state:     { color: [140, 190, 255], accent: [214, 248, 255], glow: 0.80 },
+  gm_decision:  { color: [255, 214, 60],  accent: [255, 245, 180], glow: 1.10 },
+  gm_effect:    { color: [96, 246, 176],  accent: [214, 255, 235], glow: 0.85 },
+  gm_trigger:   { color: [170, 130, 255], accent: [220, 200, 255], glow: 0.95 },
+  gm_care:      { color: [255, 92, 110],  accent: [255, 200, 120], glow: 1.10 },
+  gm_changed:   { color: [255, 92, 110],  accent: [255, 214, 130], glow: 1.30 },
+};
+
 const HUD_KINDS_LABEL = {
-  entity: 'data', function: 'sub', route: 'sub', frontend: 'primary',
-  event: 'core', process: 'core', statusFlow: 'alert', reaction: 'sub',
-  serverUnit: 'sub', module: 'primary',
+  entity: 'gm_entity', function: 'gm_function', route: 'gm_route',
+  frontend: 'gm_screen', event: 'gm_event', process: 'gm_journey',
+  statusFlow: 'gm_lifecycle', reaction: 'gm_reaction',
+  serverUnit: 'gm_function', module: 'gm_area',
 };
 
 /** Titles are cut to fit a card; cut from the end that carries less meaning. */
@@ -62,7 +85,7 @@ function hudObjectNode(id, m, extraRows) {
   for (const r of (extraRows || [])) rows.push(r);
   return {
     id, modelId: id,
-    kind: o.sensitive ? 'alert' : (HUD_KINDS_LABEL[k] || 'sub'),
+    kind: o.sensitive ? 'gm_care' : (HUD_KINDS_LABEL[k] || 'gm_function'),
     title: hudTitle(labelOf(id, m) || id),
     tag: id.slice(0, 14),
     rows: rows.slice(0, 5),
@@ -118,7 +141,7 @@ function hudSceneProductMap(m, layer, hooks) {
     }
     nodes.push({
       id: aid, modelId: aid === OTHER ? null : aid,
-      kind: lay && layer.kind === 'risk' && lay.t > 0.6 ? 'alert' : 'primary',
+      kind: lay && layer.kind === 'risk' && lay.t > 0.6 ? 'gm_care' : 'gm_area',
       title: String(aid === OTHER ? 'Everything else' : ((mod || {}).name || aid)).toUpperCase().slice(0, 26),
       tag: (aid === OTHER ? 'AREA' : aid).slice(0, 14),
       rows: rows.slice(0, 5),
@@ -159,7 +182,7 @@ function hudSceneImpact(t, m, br, hooks) {
 
   for (const id of seeds) {
     const n = hudObjectNode(id, m, [['IN THIS TASK', 'CHANGED']]);
-    n.kind = 'alert';
+    n.kind = 'gm_changed';
     nodes.push(n);
   }
 
@@ -182,7 +205,7 @@ function hudSceneImpact(t, m, br, hooks) {
     }
     if (mod.owner) rows.push(['OWNER', String(mod.owner).toUpperCase().slice(0, 16)]);
     nodes.push({
-      id: 'area:' + aid, modelId: aid === '__other' ? null : aid, kind: 'primary',
+      id: 'area:' + aid, modelId: aid === '__other' ? null : aid, kind: 'gm_area',
       title: String(mod.name || 'Everything else').toUpperCase().slice(0, 26),
       tag: 'AREA', rows: rows.slice(0, 5),
       detailText: mod.description || '',
@@ -196,7 +219,7 @@ function hudSceneImpact(t, m, br, hooks) {
     if (!hudIsJourney(id, m)) continue;
     const o = objById(id, m) || {};
     nodes.push({
-      id, modelId: id, kind: 'core',
+      id, modelId: id, kind: 'gm_journey',
       title: String(labelOf(id, m) || id).toUpperCase().slice(0, 26),
       tag: 'JOURNEY',
       rows: [['STEPS', String((o.steps || []).length)], ['ACTOR', String(o.actor || 'user').toUpperCase().slice(0, 14)]],
@@ -222,6 +245,11 @@ function hudScene({ title, subtitle, nodes, edges, m, hooks }) {
     ticker: hooks.ticker || '',
     nodes, edges,
     labels: true,
+    kinds: HUD_PALETTE,
+    // A working panel does not need a clock, a frame counter, or a second copy
+    // of the hint already printed on the toolbar above it.
+    telemetry: false,
+    hints: false,
     minimap: nodes.length > 6,
     metric: { maxW: 250, colGap: 92, rowGap: 40 },
     viewInset: { top: 96, bottom: 74, left: 34, right: 34 },
@@ -284,8 +312,11 @@ function hudWrap(text, cols) {
  * shape they emit into the shape the renderer wants.
  * -------------------------------------------------------------------------- */
 const HUD_SPEC_KIND = {
-  module: 'primary', entity: 'data', process: 'core', state: 'sub',
-  decision: 'alert', start: 'core', trigger: 'core', effect: 'sub',
+  module: 'gm_area', entity: 'gm_entity', process: 'gm_journey',
+  state: 'gm_state', decision: 'gm_decision', start: 'gm_journey',
+  trigger: 'gm_trigger', effect: 'gm_effect', function: 'gm_function',
+  route: 'gm_route', frontend: 'gm_screen', event: 'gm_event',
+  statusFlow: 'gm_lifecycle', reaction: 'gm_reaction',
 };
 
 function hudSceneFromSpec(spec, m, hooks, head) {
@@ -319,7 +350,7 @@ function hudSceneFromSpec(spec, m, hooks, head) {
       const c = specById.get(cid), cm = (c && c.meta) || {};
       return {
         id: cid, modelId: (cm.ref && cm.ref.id) || null,
-        kind: HUD_SPEC_KIND[cm.kind] || 'sub',
+        kind: HUD_SPEC_KIND[cm.kind] || 'gm_effect',
         title: hudTitle(cm.label || cid),
         tag: String(cm.kind || '').slice(0, 14),
         rows: (cm.subLines || []).slice(0, 4).map((l) => [String(l), '']),
@@ -329,7 +360,7 @@ function hudSceneFromSpec(spec, m, hooks, head) {
     return {
       id: n.id,
       modelId: (md.ref && md.ref.id) || null,
-      kind: HUD_SPEC_KIND[md.kind] || 'sub',
+      kind: HUD_SPEC_KIND[md.kind] || 'gm_function',
       title: hudTitle(md.label || n.id),
       tag: String((md.ref && md.ref.id) || md.kind || '').slice(0, 14),
       rows: kids.length ? [[kids.length === 1 ? 'EFFECT' : 'EFFECTS', String(kids.length)]].concat(rows.slice(0, 4))

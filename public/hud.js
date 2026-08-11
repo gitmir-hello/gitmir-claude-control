@@ -284,6 +284,11 @@ function drawText(ctx, str, x, y, opt) {
  * 5. NODE GEOMETRY AND LAYOUT
  * ========================================================================== */
 
+// Below this scale a row of card text is under 6 screen pixels — present, and
+// unreadable. Under it a card shows the one thing worth reading, its name, at a
+// size that does not shrink with the view.
+const LOD_ROWS = 0.62;
+
 const METRIC = {
   padX: 14,
   headerH: 26,
@@ -781,7 +786,12 @@ function fitView(instant = false) {
   const ins = (SCENE && SCENE.viewInset) || {};
   const availW = Math.max(200, cssW - (ins.left || 0) - (ins.right || 0));
   const availH = Math.max(200, cssH - (ins.top || 0) - (ins.bottom || 0));
-  const s = clamp(Math.min(availW / w, availH / h), 0.18, 1.6);
+  // Fitting everything is not the goal — being able to read it is. Below the
+  // floor a card is a coloured tile with a name on it and nothing else, so
+  // shrinking further buys no information; the view stops there and the rest is
+  // one drag away.
+  const floor = (SCENE && SCENE.fitFloor != null) ? SCENE.fitFloor : 0.55;
+  const s = clamp(Math.min(availW / w, availH / h), floor, 1.6);
 
   // The centre of the free area, in world coordinates.
   const shiftX = ((ins.left || 0) - (ins.right || 0)) / 2 / s;
@@ -1345,12 +1355,17 @@ function drawNode(ctx, n, t, dt) {
   const openK = (n.sub || n.leaf) ? easeInOutCubic(n.expandT) : 0;
   const fillK = 1 - openK * 0.74;
 
+  // Glow is damped as the view pulls back. At a distance the halo of every card
+  // merges with its neighbours' into one wash, and the edge of a node stops
+  // being visible before its name does.
+  const glowScale = clamp((s - 0.28) / 0.5, 0.25, 1);
+
   // --- backing: a soft glow beneath the panel
   if ((foc > 0.01 || n.kind === 'core') && openK < 0.98) {
     const k = (n.kind === 'core' ? 0.5 : 0) + foc * 1.5;
     ctx.globalCompositeOperation = 'lighter';
     drawGlow(ctx, c.x, c.y, Math.max(w, h) * 0.85, col,
-             0.20 * k * alpha * n.glowK * (1 - openK));
+             0.20 * k * alpha * n.glowK * glowScale * (1 - openK));
     ctx.globalCompositeOperation = 'source-over';
   }
 
@@ -1403,8 +1418,11 @@ function drawNode(ctx, n, t, dt) {
 
   // --- the frame
   chamferPath(ctx, x, y, w, h, ch1, [true, false, true, false]);
-  ctx.strokeStyle = rgba(col, (0.30 + foc * 0.35) * alpha);
-  ctx.lineWidth = 3.2;
+  // The wide stroke is the frame's own halo. Its width is in screen pixels, so
+  // pulled back it stops being an outline and becomes the loudest thing in the
+  // picture — thirty of them merge into a single glare.
+  ctx.strokeStyle = rgba(col, (0.30 + foc * 0.35) * alpha * glowScale);
+  ctx.lineWidth = 1.4 + 1.8 * glowScale;
   ctx.stroke();
   ctx.strokeStyle = rgba(mix(col, acc, 0.6), (0.85 + foc * 0.15) * alpha);
   ctx.lineWidth = 1.15;
@@ -1520,6 +1538,7 @@ function drawNode(ctx, n, t, dt) {
   ctx.stroke();
 
   // The status light, blinking on its own phase.
+  if (s >= LOD_ROWS) {
   const blink = 0.55 + 0.45 * Math.sin(t * 2.6 + n.seed);
   const ledX = x + padX * 0.62;
   const ledY = y + headH / 2;
@@ -1531,9 +1550,24 @@ function drawNode(ctx, n, t, dt) {
   ctx.beginPath();
   ctx.arc(ledX, ledY, ledR * 0.75, 0, TAU);
   ctx.fill();
+  }
 
-  // The title, appearing character by character.
-  if (s > 0.3) {
+  // The title. Zoomed out it is all that is drawn, so it stops shrinking with
+  // the view: a name at 4 screen pixels is a smear, and thirty of them are one
+  // smear. It is centred in the whole card, since nothing else is in there, and
+  // cut to what the card can hold at that size.
+  const compact = s < LOD_ROWS;
+  if (compact) {
+    const size = clamp(METRIC.titleSize * s, 8.4, METRIC.titleSize);
+    const avail = w - 10 * s;
+    let label = n.title;
+    while (label.length > 3 && textWidth(label, size, 600, 0.8) > avail) label = label.slice(0, -1);
+    if (label !== n.title) label = label.slice(0, -1) + '…';
+    drawText(ctx, label, x + w / 2, y + h / 2, {
+      size, weight: 600, tracking: 0.8, align: 'center',
+      color: rgba(mix(C.paper, acc, 0.25), (0.92 + foc * 0.08) * pc * alpha),
+    });
+  } else {
     const titleShown = n.title.slice(0, Math.ceil(n.title.length * clamp(pd * 1.6, 0, 1)));
     drawText(ctx, titleShown, x + padX + 8 * s, y + headH / 2 + 0.5 * s, {
       size: METRIC.titleSize * s,
@@ -1553,7 +1587,7 @@ function drawNode(ctx, n, t, dt) {
   }
 
   // The ticked scale down the left: a decorative rule.
-  if (s > 0.45) {
+  if (!compact) {
     const bodyTop = y + headH + 4 * s;
     const bodyBot = y + h - METRIC.footerH * s;
     ctx.beginPath();
@@ -1568,7 +1602,7 @@ function drawNode(ctx, n, t, dt) {
   }
 
   // Rows of data.
-  if (s > 0.42) {
+  if (!compact) {
     const rowH = METRIC.rowH * s;
     let ry = y + headH + rowH * 0.72;
     const lx = x + padX + 4 * s;
@@ -1650,7 +1684,7 @@ function drawNode(ctx, n, t, dt) {
   }
 
   // The footer: the id strip and a barcode.
-  if (s > 0.5) {
+  if (!compact) {
     const fy = y + h - METRIC.footerH * s / 2;
     ctx.beginPath();
     ctx.moveTo(x + padX * 0.5, y + h - METRIC.footerH * s);
@@ -1787,6 +1821,7 @@ function drawOverlay(ctx, t, fps) {
   ctx.fillRect(M + 8, M + 44, barW, 2);
 
   // --- telemetry, top right
+  if (SCENE.telemetry !== false) {
   const now = new Date();
   const clock = `${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`;
   const right = cssW - M - 8;
@@ -1802,6 +1837,8 @@ function drawOverlay(ctx, t, fps) {
     drawText(ctx, k, right - 74, sy, { size: 8, weight: 400, tracking: 1.6, align: 'right', color: inkDim });
     drawText(ctx, v, right, sy, { size: 9, weight: 600, tracking: 1.4, align: 'right', color: ink });
     sy += 13;
+  }
+
   }
 
   // --- the ticker along the bottom
@@ -1827,10 +1864,14 @@ function drawOverlay(ctx, t, fps) {
   ctx.fillRect(M + 4, tickY - 2, 4, 4);
 
   // --- the control hints
-  const help = 'CLICK ▸ OPEN / CLOSE · [ESC] BACK · DRAG ORBIT · WHEEL ZOOM · [F] FIT  [R] REBUILD  [G] GRID  [B] BLOOM  [L] LABELS  [SPACE] PAUSE';
-  drawText(ctx, help, M + 8, cssH - M - 32, {
-    size: 7.5, weight: 400, tracking: 1.5, color: rgba(C.cyan, 0.30),
-  });
+  // Returning early here also skipped the breadcrumb, the minimap and the
+  // inspector, which are not chrome — they are how you know where you are.
+  if (SCENE.hints !== false) {
+    const help = 'CLICK ▸ OPEN / CLOSE · [ESC] BACK · DRAG ORBIT · WHEEL ZOOM · [F] FIT  [R] REBUILD  [G] GRID  [B] BLOOM  [L] LABELS  [SPACE] PAUSE';
+    drawText(ctx, help, M + 8, cssH - M - 32, {
+      size: 7.5, weight: 400, tracking: 1.5, color: rgba(C.cyan, 0.30),
+    });
+  }
 
   drawBreadcrumbs(ctx, t);
 
