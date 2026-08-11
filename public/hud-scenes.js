@@ -166,7 +166,7 @@ function hudSceneProductMap(m, layer, hooks) {
     .map((e) => [e.from, e.to, e.label || '']);
   return hudScene({
     title: 'PRODUCT MAP',
-    subtitle: (layer && layer.caption) || 'AREAS OF THE PRODUCT — CLICK ONE TO OPEN IT',
+    subtitle: (layer && layer.caption) || 'AREAS OF THE PRODUCT — HOVER A CARD FOR ITS CONTROLS',
     nodes, edges, m, hooks,
   });
 }
@@ -255,6 +255,8 @@ function hudScene({ title, subtitle, nodes, edges, m, hooks }) {
     // of the hint already printed on the toolbar above it.
     telemetry: false,
     hints: false,
+    inspector: false,
+    reticle: false,
     minimap: nodes.length > 6,
     metric: { maxW: 250, colGap: 92, rowGap: 40 },
     viewInset: { top: 96, bottom: 74, left: 34, right: 34 },

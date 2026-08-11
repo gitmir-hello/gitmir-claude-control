@@ -289,6 +289,9 @@ function drawText(ctx, str, x, y, opt) {
 // size that does not shrink with the view.
 const LOD_ROWS = 0.62;
 
+// How present an edge is when nothing is pointed at.
+const EDGE_REST = 0.42;
+
 const METRIC = {
   padX: 14,
   headerH: 26,
@@ -1391,10 +1394,21 @@ function drawNode(ctx, n, t, dt) {
 
   const c = worldToScreen(n.x + jx, n.y + jy);
   const s = cam.scale;
-  const x = c.x - (cw / 2) * s;
-  const y = c.y - (ch / 2) * s;
-  const w = cw * s;
-  const h = ch * s;
+  // Hovering opens room inside the card for its own controls, rather than
+  // loading two meanings onto one click. Everything drawn below derives from
+  // x/y/w/h, so widening them here widens the whole card with no other change.
+  const grow = easeOutCubic(n.hover);
+  // Detail is dropped for the crowd, not for the one being looked at: the card
+  // under the pointer shows itself in full, controls included. Without this the
+  // controls were unreachable on exactly the diagrams that need them — a dense
+  // one fits at 55%, which is under the threshold.
+  const compact = s < LOD_ROWS && n.hover < 0.5;
+  const gw = grow * 58 * s;
+  const gh = grow * 30 * s;
+  const x = c.x - (cw * s + gw) / 2;
+  const y = c.y - (ch * s + gh) / 2;
+  const w = cw * s + gw;
+  const h = ch * s + gh;
 
   // Clip to the screen.
   if (x > cssW + 200 || x + w < -200 || y > cssH + 200 || y + h < -200) return;
@@ -1636,7 +1650,7 @@ function drawNode(ctx, n, t, dt) {
   ctx.stroke();
 
   // The status light, blinking on its own phase.
-  if (s >= LOD_ROWS) {
+  if (!compact) {
   const blink = 0.55 + 0.45 * Math.sin(t * 2.6 + n.seed);
   const ledX = x + padX * 0.62;
   const ledY = y + headH / 2;
@@ -1654,7 +1668,6 @@ function drawNode(ctx, n, t, dt) {
   // the view: a name at 4 screen pixels is a smear, and thirty of them are one
   // smear. It is centred in the whole card, since nothing else is in there, and
   // cut to what the card can hold at that size.
-  const compact = s < LOD_ROWS;
   const tcol = rgba(mix(C.paper, acc, 0.25), (0.92 + foc * 0.08) * pc * alpha);
   if (compact) {
     // Zoomed out the name is all there is, so it is wrapped to the card and, if
@@ -1796,6 +1809,35 @@ function drawNode(ctx, n, t, dt) {
     }
   }
 
+  // The controls, in the room the hover just opened. Two plain things: go in,
+  // or ask what this is. Neither is guessed from where you clicked.
+  n.actBtns = null;
+  if (grow > 0.35 && !compact) {
+    const acts = [];
+    if (canOpen(n) || n.expanded) acts.push([n.expanded ? 'CLOSE' : 'OPEN', 'open']);
+    acts.push(['CONTEXT', 'context']);
+    const bh = 15 * s;
+    const by = y + h - METRIC.footerH * s - bh - 5 * s;
+    const gap = 6 * s;
+    const bw = (w - padX * 1.4 - gap * (acts.length - 1)) / acts.length;
+    let bx = x + padX * 0.7;
+    n.actBtns = [];
+    for (const [label, act] of acts) {
+      const on = n.hotBtn === act;
+      ctx.fillStyle = rgba(col, (on ? 0.30 : 0.13) * grow * alpha);
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.strokeStyle = rgba(acc, (on ? 0.85 : 0.42) * grow * alpha);
+      ctx.lineWidth = 1;
+      ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
+      drawText(ctx, label, bx + bw / 2, by + bh / 2 + 0.5 * s, {
+        size: Math.max(6, 7.4 * s), weight: 600, tracking: 1.1 * s, align: 'center',
+        color: rgba(mix(C.paper, acc, 0.2), (on ? 1 : 0.82) * grow * alpha),
+      });
+      n.actBtns.push({ x: bx, y: by, w: bw, h: bh, act });
+      bx += bw + gap;
+    }
+  }
+
   // The footer: the id strip and a barcode.
   if (!compact) {
     const fy = y + h - METRIC.footerH * s / 2;
@@ -1899,7 +1941,9 @@ function drawOverlay(ctx, t, fps) {
     drawBreadcrumbs(ctx, t);
     if (SCENE.minimap !== false) drawMinimap(ctx, t);
     if (SCENE.overlay) SCENE.overlay(ctx, t, { cssW, cssH, drillPath, hovered, selected });
-    drawReticle(ctx, t);
+    // The drawn crosshair duplicates the real cursor and lands on top of whatever
+  // card you are reading, coordinates and all.
+  if (SCENE.reticle !== false) drawReticle(ctx, t);
     return;
   }
 
@@ -2002,8 +2046,10 @@ function drawOverlay(ctx, t, fps) {
 
   if (SCENE.minimap !== false) drawMinimap(ctx, t);
   if (SCENE.overlay) SCENE.overlay(ctx, t, { cssW, cssH, drillPath, hovered, selected });
-  else drawInspector(ctx, t);
-  drawReticle(ctx, t);
+  // The inspector redraws the selected card in the corner — a second copy of
+  // something already on screen, in the way of the thing it copies.
+  else if (SCENE.inspector !== false) drawInspector(ctx, t);
+  if (SCENE.reticle !== false) drawReticle(ctx, t);   // the scene may rely on the real cursor
 }
 
 /**
@@ -2454,6 +2500,17 @@ function hitLevel(level, wx, wy) {
   return null;
 }
 
+/** A control under the pointer, if the hovered card is showing any. */
+function buttonAt(sx, sy) {
+  for (const n of allNodes) {
+    if (!n.actBtns) continue;
+    for (const b of n.actBtns) {
+      if (sx >= b.x && sx <= b.x + b.w && sy >= b.y && sy <= b.y + b.h) return { node: n, act: b.act };
+    }
+  }
+  return null;
+}
+
 function nodeAt(sx, sy) {
   const w = screenToWorld(sx, sy);
   return hitLevel(root, w.x, w.y);
@@ -2615,7 +2672,12 @@ on(view, 'pointermove', (ev) => {
     setCursor('pointing');
     return;
   }
-  const n = nodeAt(lx, ly);
+  const hb = buttonAt(lx, ly);
+  const n = hb ? hb.node : nodeAt(lx, ly);
+  // The controls sit in the room the hover opened, and some of them reach past
+  // the card's own box — losing the hover there would make them unclickable.
+  for (const q of allNodes) q.hotBtn = null;
+  if (hb) hb.node.hotBtn = hb.act;
   hovered = n;
   setCursor(n ? 'pointing' : '');
 });
@@ -2626,16 +2688,24 @@ const endPointer = (ev) => {
     // pointerleave fires this without an event of its own, so fall back to the
     // last position the pointer was known to be at.
     const [lxu, lyu] = ev && ev.clientX != null ? localXY(ev) : [pointer.x, pointer.y];
-    const n = nodeAt(lxu, lyu);
-    if (n) {
-      // A click always answers "what is this" — that is what the panel beside
-      // the canvas is for, and it is the reason anyone clicks a diagram here.
-      // A group opens as well, so the two never compete for the same click:
-      // one hand goes to the context, the other to the level below it.
+    // A control decides what happens; nothing is inferred from where you hit
+    // the card. Loading both meanings onto one click meant a single press both
+    // opened a group and threw a dialog over it.
+    const hitBtn = buttonAt(lxu, lyu);
+    const n = hitBtn ? hitBtn.node : nodeAt(lxu, lyu);
+    if (hitBtn) {
       lastSelected = n;
-      if (n.expanded) collapseNode(n);
-      else if (canOpen(n)) drillInto(n);
-      else selected = n;
+      if (hitBtn.act === 'open') {
+        if (n.expanded) collapseNode(n); else if (canOpen(n)) drillInto(n);
+      } else {
+        selected = n;
+        if (SCENE.onNodeSelect) SCENE.onNodeSelect(n);
+      }
+    } else if (n) {
+      // The body of a card asks what it is — the thing people came to do. A
+      // group is opened from its own OPEN control, not by hitting it anywhere.
+      lastSelected = n;
+      selected = n;
       if (SCENE.onNodeSelect) SCENE.onNodeSelect(n);
     } else if (selected) {
       selected = null;
@@ -2776,7 +2846,11 @@ function updateFocus(dt) {
     const on = active && (e.a === active || e.b === active);
     const sameLevel = active && e.level === active.level;
     e.hover = approach(e.hover, on ? 1 : 0, 11, dt);
-    let target = !active || !sameLevel ? 1 : (on ? 1 : 0.14);
+    // At rest the lines sit back. Every edge at full strength turns the picture
+    // into a web with cards floating in it — the cards are what is being read,
+    // and the lines matter once you ask about one of them. Point at a card and
+    // its own lines come up to full.
+    let target = !active ? EDGE_REST : (!sameLevel ? 1 : (on ? 1 : 0.14));
     if (e.level !== activeLevel) target = Math.min(target, 0.12);
     e.dim = approach(e.dim, target, 8, dt);
   }

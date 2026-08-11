@@ -617,7 +617,7 @@ function renderHud(container, scene, seq){
         '<button class="dgm-b" data-a="back" title="One level up (Esc)">Back</button>'+
         '<button class="dgm-b" data-a="labels" title="Edge labels (L)">Labels</button>'+
         '<button class="dgm-b" data-a="bloom" title="Glow (B)">Glow</button>'+
-        '<span class="dgm-hint">click anything for its context and to queue a task · a group also opens in place, Esc goes back · drag to pan · wheel to zoom</span>'+
+        '<span class="dgm-hint">hover a card for its OPEN and CONTEXT controls · Esc goes back · drag to pan · wheel to zoom</span>'+
         '<button class="dgm-b dgm-full" data-a="full" title="Fullscreen">⛶</button>'+
       '</div>'+
       '<div class="dgm-canvas hud-canvas"><canvas></canvas></div>'+
