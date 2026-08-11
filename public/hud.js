@@ -292,10 +292,12 @@ const LOD_ROWS = 0.62;
 const METRIC = {
   padX: 14,
   headerH: 26,
+  titleLH: 13,        // extra height per wrapped title line
   rowH: 15,
   footerH: 16,
   minW: 168,
   maxW: 260,
+  hardMaxW: 380,     // a card may pass maxW only to keep one long word whole
   titleSize: 11.5,
   titleTrack: 1.6,
   tagSize: 8,
@@ -334,21 +336,56 @@ function buildLevel(nodeSpecs, edgeSpecs, rnd, parent) {
     // A leaf gets its rows from its own state; a container gets them from an
     // aggregate over its children, filled in below.
     const leafData = SCENE.leaf.init(src, rnd);
-    const rows = src.rows || (leafData ? SCENE.leaf.rows(leafData) : SCENE.groupRows());
+    const rawRows = src.rows || (leafData ? SCENE.leaf.rows(leafData) : SCENE.groupRows());
 
-    // Width follows the longest thing inside, up to a cap.
+    // Width follows the longest thing inside, up to a cap. Past the cap a card
+    // cannot get wider, so anything longer has to move down instead of being
+    // cut off: text wraps and the card grows taller for it.
     let w = METRIC.minW;
+    const tagW = textWidth(src.tag, METRIC.tagSize, 400, METRIC.tagTrack);
+    // +2 of slack over what the wrapper subtracts back out. Without it the width
+    // lands exactly on the title's own length and rounding decides whether the
+    // last character wraps — which is how "REFUNDORDER" became "REFUNDORDE / R".
     w = Math.max(w, textWidth(src.title, METRIC.titleSize, 600, METRIC.titleTrack)
-                  + textWidth(src.tag, METRIC.tagSize, 400, METRIC.tagTrack)
-                  + METRIC.padX * 2 + 26);
-    for (const r of rows) {
+                  + tagW + METRIC.padX * 2 + 28);
+    for (const r of rawRows) {
       const lw = textWidth(r[0], METRIC.rowSize, 400, METRIC.rowTrack);
       const rw = textWidth(r[1] || '', METRIC.rowSize, 600, METRIC.rowTrack);
-      w = Math.max(w, lw + rw + METRIC.padX * 2 + 34);
+      w = Math.max(w, lw + rw + METRIC.padX * 2 + 36);
     }
     w = Math.min(METRIC.maxW, Math.round(w));
 
-    const h = METRIC.headerH + rows.length * METRIC.rowH + METRIC.footerH;
+    // A word with nowhere to break — an id, a route — would be split mid-token
+    // and read as nonsense. The card is allowed past the usual cap for those,
+    // up to a hard ceiling, before wrapping is asked to do anything clever.
+    let longest = 0;
+    for (const word of String(src.title).split(/\s+/))
+      longest = Math.max(longest, textWidth(word, METRIC.titleSize, 600, METRIC.titleTrack)
+                                  + tagW + METRIC.padX * 2 + 28);
+    for (const r of rawRows)
+      for (const word of String(r[0] == null ? '' : r[0]).split(/\s+/))
+        longest = Math.max(longest, textWidth(word, METRIC.rowSize, 400, METRIC.rowTrack)
+                                    + textWidth(r[1] || '', METRIC.rowSize, 600, METRIC.rowTrack)
+                                    + METRIC.padX * 2 + 36);
+    if (longest > w) w = Math.round(Math.min(METRIC.hardMaxW, longest));
+
+    // The title gets as many lines as it needs; the tag keeps the first one.
+    const titleLines = wrapToWidth(src.title, METRIC.titleSize, 600, METRIC.titleTrack,
+      w - METRIC.padX * 2 - 26 - tagW, w - METRIC.padX * 2 - 26);
+    const headH = METRIC.headerH + (titleLines.length - 1) * METRIC.titleLH;
+
+    // Rows the same: a long label continues on the next line, and its value
+    // stays with the first.
+    const rows = [];
+    for (const r of rawRows) {
+      const valW = textWidth(r[1] || '', METRIC.rowSize, 600, METRIC.rowTrack);
+      const parts = wrapToWidth(String(r[0] == null ? '' : r[0]),
+        METRIC.rowSize, 400, METRIC.rowTrack,
+        w - METRIC.padX * 2 - 34 - valW, w - METRIC.padX * 2 - 34);
+      parts.forEach((s2, i) => rows.push(i === 0 ? [s2, r[1], r[2]] : [s2, '', r[2] === 'bar' ? null : r[2]]));
+    }
+
+    const h = headH + rows.length * METRIC.rowH + METRIC.footerH;
 
     const n = {
       // Keep the scene node itself: it carries the model id, and a click has to
@@ -357,6 +394,8 @@ function buildLevel(nodeSpecs, edgeSpecs, rnd, parent) {
       id: src.id,
       kind: src.kind,
       title: src.title,
+      titleLines,
+      headH,
       tag: src.tag,
       rows,
       color: kind.color,
@@ -448,6 +487,36 @@ function buildGraph() {
   // Root-level nodes must point at root, not at the temporary object.
   for (const n of root.nodes) n.level = root;
   for (const e of root.edges) e.level = root;
+}
+
+/**
+ * Breaks a string into lines that fit. The first line may be narrower than the
+ * rest — a value or a tag shares it — which is why two widths go in.
+ * A word longer than a whole line is broken rather than allowed to overflow:
+ * an id like `sf-refund-order-status` has nowhere to break politely.
+ */
+function wrapToWidth(text, size, weight, tracking, firstW, restW) {
+  const s = String(text == null ? '' : text);
+  if (!s) return [''];
+  const fits = (str, width) => textWidth(str, size, weight, tracking) <= width;
+  if (fits(s, Math.max(8, firstW))) return [s];
+
+  const out = [];
+  let rest = s;
+  let width = Math.max(8, firstW);
+  let guard = 0;
+  while (rest && guard++ < 40) {
+    if (fits(rest, width)) { out.push(rest); break; }
+    // Longest prefix that fits, preferring a break at a space.
+    let cut = rest.length;
+    while (cut > 1 && !fits(rest.slice(0, cut), width)) cut--;
+    let at = rest.lastIndexOf(' ', cut);
+    if (at <= 0) at = cut;                       // no space to break on
+    out.push(rest.slice(0, at).trimEnd());
+    rest = rest.slice(at).trimStart();
+    width = Math.max(8, restW);
+  }
+  return out.length ? out : [s];
 }
 
 /** Layered layout: depth along edges, then barycentric ordering. */
@@ -1477,7 +1546,7 @@ function drawNode(ctx, n, t, dt) {
     textClip = clipIntersect(prevClip, { x, y, w, h });
 
     // The container's header stays put while its contents fade in.
-    const headH = METRIC.headerH * s;
+    const headH = (n.headH || METRIC.headerH) * s;
     ctx.fillStyle = rgba(col, 0.14 * pc * alpha);
     ctx.fillRect(x, y, w, headH);
     ctx.beginPath();
@@ -1525,7 +1594,7 @@ function drawNode(ctx, n, t, dt) {
   textClip = clipIntersect(outerClip, { x, y, w, h });
 
   const padX = METRIC.padX * s;
-  const headH = METRIC.headerH * s;
+  const headH = (n.headH || METRIC.headerH) * s;
 
   // The header
   ctx.fillStyle = rgba(col, 0.14 * pc * alpha);
@@ -1557,27 +1626,42 @@ function drawNode(ctx, n, t, dt) {
   // smear. It is centred in the whole card, since nothing else is in there, and
   // cut to what the card can hold at that size.
   const compact = s < LOD_ROWS;
+  const tcol = rgba(mix(C.paper, acc, 0.25), (0.92 + foc * 0.08) * pc * alpha);
   if (compact) {
-    const size = clamp(METRIC.titleSize * s, 8.4, METRIC.titleSize);
-    const avail = w - 10 * s;
-    let label = n.title;
-    while (label.length > 3 && textWidth(label, size, 600, 0.8) > avail) label = label.slice(0, -1);
-    if (label !== n.title) label = label.slice(0, -1) + '…';
-    drawText(ctx, label, x + w / 2, y + h / 2, {
-      size, weight: 600, tracking: 0.8, align: 'center',
-      color: rgba(mix(C.paper, acc, 0.25), (0.92 + foc * 0.08) * pc * alpha),
-    });
+    // Zoomed out the name is all there is, so it is wrapped to the card and, if
+    // the wrapped block still will not fit the box, shrunk until it does. Text
+    // that has to be there is never cut — it gets smaller or it takes a line.
+    const avail = w - 12 * s;
+    let size = clamp(METRIC.titleSize * s, 8.4, METRIC.titleSize);
+    let lines = wrapToWidth(n.title, size, 600, 0.8, avail, avail);
+    let guard = 0;
+    while (guard++ < 14 && (lines.length * size * 1.25 > h - 6 * s
+           || textWidth(lines[0], size, 600, 0.8) > avail)) {
+      size *= 0.86;
+      if (size < 3) break;
+      lines = wrapToWidth(n.title, size, 600, 0.8, avail, avail);
+    }
+    const lh = size * 1.25;
+    let ty = y + h / 2 - (lines.length - 1) * lh / 2;
+    for (const line of lines) {
+      drawText(ctx, line, x + w / 2, ty, { size, weight: 600, tracking: 0.8, align: 'center', color: tcol });
+      ty += lh;
+    }
   } else {
-    const titleShown = n.title.slice(0, Math.ceil(n.title.length * clamp(pd * 1.6, 0, 1)));
-    drawText(ctx, titleShown, x + padX + 8 * s, y + headH / 2 + 0.5 * s, {
-      size: METRIC.titleSize * s,
-      weight: 600,
-      tracking: METRIC.titleTrack * s,
-      color: rgba(mix(C.paper, acc, 0.25), (0.92 + foc * 0.08) * pc * alpha),
-    });
+    // Each title line appears in turn, the way one long line used to type itself in.
+    const lines = n.titleLines || [n.title];
+    const shown = clamp(pd * 1.6, 0, 1);
+    const lh = METRIC.titleLH * s;
+    let ty = y + METRIC.headerH * s / 2 + 0.5 * s;
+    for (const line of lines) {
+      drawText(ctx, line.slice(0, Math.ceil(line.length * shown)), x + padX + 8 * s, ty, {
+        size: METRIC.titleSize * s, weight: 600, tracking: METRIC.titleTrack * s, color: tcol,
+      });
+      ty += lh;
+    }
 
-    // The tag on the right.
-    drawText(ctx, n.tag, x + w - padX, y + headH / 2 + 0.5 * s, {
+    // The tag keeps the first line, beside the title.
+    drawText(ctx, n.tag, x + w - padX, y + METRIC.headerH * s / 2 + 0.5 * s, {
       size: METRIC.tagSize * s,
       weight: 400,
       tracking: METRIC.tagTrack * s,
@@ -1693,13 +1777,25 @@ function drawNode(ctx, n, t, dt) {
     ctx.lineWidth = 1;
     ctx.stroke();
 
-    drawText(ctx, `NODE·${n.id}`, x + padX * 0.7, fy, {
+    // The id and the barcode share one strip, and on a narrow card the id ran
+    // straight through the bars. The barcode is decoration and gives way first;
+    // only if the id still does not fit is it cut, and then it says so.
+    const idText = `NODE·${n.id}`;
+    const idW = textWidth(idText, 7 * s, 400, 1.0 * s);
+    const room = w - padX * 1.4;
+    const showBar = idW + 42 * s + 8 * s <= room;
+    let idShown = idText;
+    if (idW > room) {
+      while (idShown.length > 4 && textWidth(idShown + '…', 7 * s, 400, 1.0 * s) > room) idShown = idShown.slice(0, -1);
+      idShown += '…';
+    }
+    drawText(ctx, idShown, x + padX * 0.7, fy, {
       size: 7 * s, weight: 400, tracking: 1.0 * s,
       color: rgba(col, 0.5 * pc * alpha),
     });
 
     // A pseudo-barcode on the right, deterministic from the node's seed.
-    const bcW = 42 * s;
+    const bcW = showBar ? 42 * s : 0;
     let bx = x + w - padX * 0.7 - bcW;
     const rnd = mulberry32(Math.floor(n.seed * 1000));
     ctx.fillStyle = rgba(col, 0.42 * pc * alpha);

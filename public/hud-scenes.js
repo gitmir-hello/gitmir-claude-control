@@ -15,10 +15,12 @@
 const HUD_STATIC = {
   groupRows: () => [],
   leaf: {
-    // A node with something to say opens into a card. Returning null here — as
-    // this did at first — leaves a leaf selectable but not openable, so only
-    // containers responded to a click and the rest looked broken.
-    init: (src) => ((src && (src.detailText || src.modelId)) ? { src } : null),
+    // Deliberately null. A leaf that reports data here becomes openable, and an
+    // openable node swallows the click to expand a card of its own — which took
+    // the click away from the context popup, the thing that assembles the
+    // deterministic context for this object and turns it into a queued task.
+    // That popup is the detail view; a card drawn on canvas is not worth losing it.
+    init: () => null,
     rows: () => [],
     step: () => {},
     stats: () => ({}),
@@ -56,12 +58,9 @@ const HUD_KINDS_LABEL = {
   serverUnit: 'gm_function', module: 'gm_area',
 };
 
-/** Titles are cut to fit a card; cut from the end that carries less meaning. */
+/** Titles are not cut: the renderer wraps them and the card grows to fit. */
 function hudTitle(s) {
-  s = String(s || '').toUpperCase();
-  if (s.length <= 26) return s;
-  // A route reads from the right: the tail says which resource, the host does not.
-  return s.indexOf('/') !== -1 ? '…' + s.slice(-25) : s.slice(0, 25) + '…';
+  return String(s == null ? '' : s).toUpperCase();
 }
 
 /** Short type word for a model object, in the words the dashboard already uses. */
@@ -142,7 +141,7 @@ function hudSceneProductMap(m, layer, hooks) {
     nodes.push({
       id: aid, modelId: aid === OTHER ? null : aid,
       kind: lay && layer.kind === 'risk' && lay.t > 0.6 ? 'gm_care' : 'gm_area',
-      title: String(aid === OTHER ? 'Everything else' : ((mod || {}).name || aid)).toUpperCase().slice(0, 26),
+      title: hudTitle(aid === OTHER ? 'Everything else' : ((mod || {}).name || aid)),
       tag: (aid === OTHER ? 'AREA' : aid).slice(0, 14),
       rows: rows.slice(0, 5),
       detailText: (mod || {}).description || '',
@@ -206,7 +205,7 @@ function hudSceneImpact(t, m, br, hooks) {
     if (mod.owner) rows.push(['OWNER', String(mod.owner).toUpperCase().slice(0, 16)]);
     nodes.push({
       id: 'area:' + aid, modelId: aid === '__other' ? null : aid, kind: 'gm_area',
-      title: String(mod.name || 'Everything else').toUpperCase().slice(0, 26),
+      title: hudTitle(mod.name || 'Everything else'),
       tag: 'AREA', rows: rows.slice(0, 5),
       detailText: mod.description || '',
       children: { nodes: ids.slice(0, 60).map((id) => hudObjectNode(id, m)), edges: [] },
@@ -220,7 +219,7 @@ function hudSceneImpact(t, m, br, hooks) {
     const o = objById(id, m) || {};
     nodes.push({
       id, modelId: id, kind: 'gm_journey',
-      title: String(labelOf(id, m) || id).toUpperCase().slice(0, 26),
+      title: hudTitle(labelOf(id, m) || id),
       tag: 'JOURNEY',
       rows: [['STEPS', String((o.steps || []).length)], ['ACTOR', String(o.actor || 'user').toUpperCase().slice(0, 14)]],
       detailText: o.description || '',
