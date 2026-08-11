@@ -393,6 +393,8 @@ function buildLevel(nodeSpecs, edgeSpecs, rnd, parent) {
       src,
       id: src.id,
       kind: src.kind,
+      // A layer's reading for this node, 0..1, or null when no layer is on.
+      heat: (src.heat == null ? null : clamp(+src.heat || 0, 0, 1)),
       title: src.title,
       titleLines,
       headH,
@@ -1373,7 +1375,9 @@ function drawNode(ctx, n, t, dt) {
   const pc = invLerp(0.45, 0.75, p);
   const pd = invLerp(0.62, 1.00, p);
 
-  const dim = n.dim;
+  // A node the active layer does not reach is pushed back, though never out of
+  // sight — it is still part of the product, just not part of the answer.
+  const dim = n.dim * (n.heat != null && n.heat <= 0.001 ? 0.5 : 1);
   const foc = Math.max(n.hover, n.select);
 
   // The node's holographic breathing. Kept at the edge of noticeable: any
@@ -1452,6 +1456,31 @@ function drawNode(ctx, n, t, dt) {
   body.addColorStop(1, rgba(col, (0.10 + foc * 0.07) * pc * alpha * fillK));
   ctx.fillStyle = body;
   ctx.fill();
+
+  // The layer's wash. The reading has to be the picture, not a word in a row:
+  // bright where the layer lands, and the untouched cards step back so the
+  // shape of what it reaches is visible without reading anything.
+  if (n.heat != null) {
+    // A wash bright enough to be read as intensity is also bright enough to
+    // swallow the labels sitting on it — the first attempt left ORDERS showing
+    // its numbers and none of the words. So the fill stays faint and in the
+    // card's own hue, and the reading is carried by a bar down the edge, which
+    // has no text on it to ruin.
+    chamferPath(ctx, x, y, w, h, ch1, [true, false, true, false]);
+    ctx.fillStyle = rgba(col, (0.03 + n.heat * 0.14) * pc * alpha);
+    ctx.fill();
+    if (n.heat > 0.001) {
+      ctx.save();
+      chamferPath(ctx, x, y, w, h, ch1, [true, false, true, false]);
+      ctx.clip();
+      ctx.globalCompositeOperation = 'lighter';
+      const barW = 3.5 * s;
+      ctx.fillStyle = rgba(acc, (0.30 + n.heat * 0.65) * pc * alpha);
+      ctx.fillRect(x, y, barW, h);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.restore();
+    }
+  }
 
   // A thin inner film: the glassy highlight along the top edge.
   ctx.save();

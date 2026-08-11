@@ -124,10 +124,13 @@ function hudSceneProductMap(m, layer, hooks) {
     if (byKind.function) rows.push(['ACTIONS', String(byKind.function.length)]);
     if (byKind.frontend) rows.push(['SCREENS', String(byKind.frontend.length)]);
     if (byKind.route) rows.push(['ENDPOINTS', String(byKind.route.length)]);
-    // A layer replaces the area's own summary with what the layer measures.
+    // A layer replaces the area's own summary with what the layer measures, and
+    // paints its intensity across the card. Passing only the words — which is
+    // all this did — left "Radius on map" landing on a picture that looked
+    // exactly like the one before it.
     const lay = layer && layer.per && layer.per.get(aid);
-    if (lay) rows.unshift([layer.kind === 'owner' ? 'OWNER' : layer.kind === 'heat' ? 'CHANGED' : 'RISK',
-      String(lay.text).toUpperCase().slice(0, 16)]);
+    if (lay) rows.unshift([({ owner: 'OWNER', heat: 'TOUCHES', change: 'THIS CHANGE' })[layer.kind] || 'RISK',
+      hudTitle(lay.text)]);
 
     // Inside the area: its own objects, linked by the model's own links. Only
     // links that stay inside the area are drawn here — the ones that leave it
@@ -145,6 +148,9 @@ function hudSceneProductMap(m, layer, hooks) {
       tag: (aid === OTHER ? 'AREA' : aid).slice(0, 14),
       rows: rows.slice(0, 5),
       detailText: (mod || {}).description || '',
+      // With a layer on, every area carries a reading — including zero. That is
+      // what lets the ones the layer does not reach recede instead of competing.
+      heat: layer ? (lay ? lay.t : 0) : null,
       children: kids.length ? { nodes: kids, edges: kidEdges.slice(0, 120) } : null,
     });
   }
