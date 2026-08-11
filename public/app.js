@@ -628,6 +628,9 @@ function renderHud(container, scene, seq){
   catch(e){ container.innerHTML='<div class="model-empty">Renderer failed: '+esc(e.message||e)+'</div>'; return; }
   hudLive.push(h);
   window.__HUD_API__=h;                 // the most recent one, for probing
+  // A scene can ask to arrive already open — the radius view lands inside the
+  // area holding the object it was taken from, so the answer is on screen.
+  if(scene.autoOpen) setTimeout(()=>{ try{ h.open(scene.autoOpen); }catch(e){} }, 260);
   window.__HUD_ALL__=hudLive;           // all of them: a view may hold several
   container.querySelector('.dgm-bar').addEventListener('click',(ev)=>{
     const b=ev.target.closest('.dgm-b'); if(!b||!h) return;
@@ -2591,10 +2594,16 @@ async function mapLayerData(m){
     for(const id of br.seed){ const md=moduleOf(id,m); if(md) per.set(md,{n:2}); }
     for(const id of br.dist.keys()){ const md=moduleOf(id,m); if(md && !per.has(md)) per.set(md,{n:1}); }
     for(const [k,v] of per) per.set(k,{text: v.n===2?'changed here':'downstream', t: v.n===2?1:0.42});
+    // The areas alone answer "somewhere in here". Which objects were reached is
+    // the question a developer actually has, so the ids travel with the layer
+    // and the map marks them inside each area.
+    const seedSet=new Set(br.seed);
+    const reach=new Map();
+    for(const [id,d] of br.dist) if(kindOf(id)!=='field') reach.set(id,d);
     // Which object the question was asked about. On the map it is drawn in its
     // own colour: after the jump from the popup it would otherwise look like
     // every other thing the change happens to reach.
-    return { kind:'change', per, origin: ids.length===1 ? ids[0] : null,
+    return { kind:'change', per, reach, seeds:seedSet, origin: ids.length===1 ? ids[0] : null,
       legend: what+' — solid where it changes something, faint where the change arrives on its own.' };
   }
   if(mapLayer==='owner'){

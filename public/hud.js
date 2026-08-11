@@ -1389,7 +1389,12 @@ function drawNode(ctx, n, t, dt) {
   // Out of the layer's reach is a step back, not a disappearance — the words on
   // those cards still have to be readable, or the picture answers one question
   // by destroying every other one.
-  const dim = n.dim * (n.heat != null && n.heat <= 0.001 ? 0.82 : 1);
+  // What the layer does not reach recedes hard. This was softened once because a
+  // layer left everything unreadable — but that was when dimming faded a card to
+  // transparent. A card dims by darkening now, so it stays legible while clearly
+  // being outside the answer, and "what does this reach" is a question whose
+  // answer has to be visible without reading a single label.
+  const dim = n.dim * (n.heat != null && n.heat <= 0.001 ? 0.45 : 1);
   const foc = Math.max(n.hover, n.select);
 
   // The node's holographic breathing. Kept at the edge of noticeable: any
@@ -1507,8 +1512,8 @@ function drawNode(ctx, n, t, dt) {
       chamferPath(ctx, x, y, w, h, ch1, [true, false, true, false]);
       ctx.clip();
       ctx.globalCompositeOperation = 'lighter';
-      const barW = 3.5 * s;
-      ctx.fillStyle = rgba(acc, (0.30 + n.heat * 0.65) * pc * alpha);
+      const barW = Math.max(3, 4.5 * s);   // legible when zoomed out, where the answer is read
+      ctx.fillStyle = rgba(acc, (0.42 + n.heat * 0.58) * pc * alpha);
       ctx.fillRect(x, y, barW, h);
       ctx.globalCompositeOperation = 'source-over';
       ctx.restore();

@@ -136,14 +136,33 @@ function hudSceneProductMap(m, layer, hooks) {
     const lay = layer && layer.per && layer.per.get(aid);
     if (lay) rows.unshift([({ owner: 'OWNER', heat: 'TOUCHES', change: 'THIS CHANGE' })[layer.kind] || 'RISK',
       hudTitle(lay.text)]);
+    // With the change layer on, "12 actions" is not the question. How many of
+    // them the change reaches is.
+    if (layer && layer.kind === 'change' && layer.reach) {
+      const hit = ids.filter((id) => layer.reach.has(id)).length;
+      rows.length = 0;
+      if (lay) rows.push(['THIS CHANGE', hudTitle(lay.text)]);
+      rows.push(['IN REACH', hit + ' of ' + ids.length]);
+    }
     if (origin && inside.has(origin)) rows.unshift(['ASKED ABOUT', hudTitle(labelOf(origin, m))]);
 
     // Inside the area: its own objects, linked by the model's own links. Only
     // links that stay inside the area are drawn here — the ones that leave it
     // are what the top-level lines already say.
+    const reach = layer && layer.reach;
+    const seeds = layer && layer.seeds;
     const kids = ids.slice(0, 60).map((id) => {
       const k = hudObjectNode(id, m);
       if (origin && id === origin) k.kind = 'gm_origin';
+      // Inside an area, an object is either in the radius or it is not. Leaving
+      // them all looking the same made the area answer "something in here" and
+      // left the reader to work out what — which is the whole question.
+      if (reach) {
+        const d = reach.get(id);
+        k.heat = d == null ? 0 : (seeds && seeds.has(id) ? 1 : (d === 1 ? 0.55 : 0.32));
+        if (d != null) k.rows = [[d === 0 ? 'CHANGED' : (d === 1 ? 'ONE STEP AWAY' : d + ' STEPS AWAY'), '']]
+          .concat(k.rows.slice(0, 3));
+      }
       return k;
     });
     const kidEdges = [];
@@ -174,11 +193,21 @@ function hudSceneProductMap(m, layer, hooks) {
   const edges = (flat.edges || [])
     .filter((e) => have.has(e.from) && have.has(e.to))
     .map((e) => [e.from, e.to, e.label || '']);
-  return hudScene({
-    title: 'PRODUCT MAP',
-    subtitle: (layer && layer.caption) || 'AREAS OF THE PRODUCT — HOVER A CARD FOR ITS CONTROLS',
+  // Landing on a map where the element you asked about is not visible leaves the
+  // first job as finding it again. If the radius was taken from one object, the
+  // area holding it opens on arrival.
+  let autoOpen = null;
+  if (origin) {
+    const home = kindOf(origin) === 'module' ? origin : moduleOf(origin, m);
+    if (home && nodes.some((n) => n.id === home && n.children)) autoOpen = home;
+  }
+  return Object.assign(hudScene({
+    title: origin ? 'WHAT ' + hudTitle(labelOf(origin, m)) + ' REACHES' : 'PRODUCT MAP',
+    subtitle: origin
+      ? 'LIT WHERE THE CHANGE ARRIVES, DARK WHERE IT DOES NOT — OPEN AN AREA TO SEE WHICH OBJECTS'
+      : ((layer && layer.caption) || 'AREAS OF THE PRODUCT — HOVER A CARD FOR ITS CONTROLS'),
     nodes, edges, m, hooks,
-  });
+  }), { autoOpen });
 }
 
 /* -----------------------------------------------------------------------------
