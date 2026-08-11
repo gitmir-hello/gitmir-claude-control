@@ -292,6 +292,12 @@ const LOD_ROWS = 0.62;
 // How present an edge is when nothing is pointed at.
 const EDGE_REST = 0.42;
 
+// How much a card grows under the pointer, in world units. The drawing and the
+// container that has to make room for it both read these. Two copies of the
+// number is how a card ended up spilling out through its container's frame.
+const HOVER_GROW_W = 58;
+const HOVER_GROW_H = 30;
+
 const METRIC = {
   padX: 14,
   headerH: 26,
@@ -1406,8 +1412,8 @@ function drawNode(ctx, n, t, dt) {
   // controls were unreachable on exactly the diagrams that need them — a dense
   // one fits at 55%, which is under the threshold.
   const compact = s < LOD_ROWS && n.hover < 0.5;
-  const gw = grow * 58 * s;
-  const gh = grow * 30 * s;
+  const gw = grow * HOVER_GROW_W * s;
+  const gh = grow * HOVER_GROW_H * s;
   const x = c.x - (cw * s + gw) / 2;
   const y = c.y - (ch * s + gh) / 2;
   const w = cw * s + gw;
@@ -2905,8 +2911,16 @@ function updateLevel(level, dt) {
       // The container's size comes from the CURRENT layout of its contents:
       // when a node inside opens too, the subgraph grows, and the container
       // must grow with it or the frame cuts its own contents off.
-      n.openW = Math.max(n.baseW, n.sub.w + NEST.padX * 2);
-      n.openH = n.sub.h + NEST.padTop + NEST.padBottom;
+      //
+      // A hovered child grows at draw time and the layout never hears about it,
+      // so this has to. Measured before the fix: the container's box did not
+      // move at all while a card inside it grew — which is exactly why the card
+      // came out through its frame.
+      let hov = 0;
+      for (const k2 of n.sub.nodes) if (k2.hover > hov) hov = k2.hover;
+      const room = easeOutCubic(hov);
+      n.openW = Math.max(n.baseW, n.sub.w + NEST.padX * 2 + room * HOVER_GROW_W);
+      n.openH = n.sub.h + NEST.padTop + NEST.padBottom + room * HOVER_GROW_H;
       const k = easeInOutCubic(n.expandT);
       n.w = lerp(n.baseW, n.openW, k);
       n.h = lerp(n.baseH, n.openH, k);
