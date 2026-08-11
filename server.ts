@@ -2066,20 +2066,60 @@ const HTML = /* html */ `<!doctype html>
   .fs-stage svg{display:block}
 
   /* context popup (click a schema element) */
-  .ctx-overlay{position:fixed; inset:0; z-index:1100; background:rgba(3,6,14,.72); display:none; align-items:center; justify-content:center; padding:30px}
+  /* ---- dialogs, in the same language the diagrams are drawn in --------------
+     A chamfered corner, a hairline that glows, targeting brackets outside the
+     frame, and the same 22px grid. The canvas draws its panels this way; a
+     dialog that opens over one should not look like it came from elsewhere. */
+  .ctx-overlay{position:fixed; inset:0; z-index:1100; display:none; align-items:center; justify-content:center; padding:30px;
+    background:radial-gradient(120% 90% at 50% 40%, rgba(6,14,30,.62), rgba(2,5,12,.88));
+    backdrop-filter:blur(3px); -webkit-backdrop-filter:blur(3px)}
   .ctx-overlay.show{display:flex}
-  .ctx-modal{width:100%; max-width:780px; max-height:88vh; display:flex; flex-direction:column; background:linear-gradient(165deg,rgba(16,32,60,.96),rgba(8,17,36,.98)); border:1px solid var(--glass-brd-strong); box-shadow:0 20px 60px rgba(0,0,0,.6), 0 0 30px rgba(47,216,255,.1)}
-  .ctx-head{display:flex; align-items:center; gap:10px; padding:16px 18px; border-bottom:1px solid var(--glass-brd)}
-  .ctx-title{font-weight:650; font-size:16px; color:#fff}
-  .ctx-x{margin-left:auto; background:none; border:none; color:var(--ink-2); cursor:pointer; font-size:16px}
-  .ctx-x:hover{color:var(--txt)}
-  .ctx-note{padding:11px 18px 0; color:var(--ink-3); font-size:12px; font-family:var(--font-mono); line-height:1.5}
-  .ctx-pre{margin:12px 18px; padding:14px; overflow:auto; background:#061021; border:1px solid var(--line); color:#cfe0f5; font:12px/1.55 "JetBrains Mono",ui-monospace,monospace; white-space:pre-wrap; word-break:break-word; flex:1; min-height:120px}
-  .ctx-taskl{padding:0 18px; color:var(--cyan-soft); font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase}
-  .ctx-task{margin:8px 18px 0; padding:11px 13px; background:rgba(8,16,36,.6); border:1px solid var(--glass-brd); color:var(--ink-0); font-size:14px; min-height:70px; resize:vertical; outline:none; font-family:inherit}
-  .ctx-task:focus{border-color:rgba(47,216,255,.55); box-shadow:0 0 0 3px rgba(47,216,255,.12)}
-  .ctx-actions{display:flex; gap:10px; align-items:center; padding:14px 18px 18px}
+  .ctx-modal{position:relative; width:100%; max-width:800px; max-height:88vh; display:flex; flex-direction:column;
+    padding:1px;                                   /* the 1px is the frame itself */
+    clip-path:polygon(20px 0, 100% 0, 100% calc(100% - 20px), calc(100% - 20px) 100%, 0 100%, 0 20px);
+    background:linear-gradient(150deg, rgba(96,232,255,.75), rgba(72,150,255,.34) 42%, rgba(96,232,255,.5));
+    filter:drop-shadow(0 22px 60px rgba(0,0,0,.62)) drop-shadow(0 0 26px rgba(47,216,255,.20))}
+  .ctx-modal::before{content:''; position:absolute; inset:1px; z-index:0; pointer-events:none;
+    clip-path:polygon(20px 0, 100% 0, 100% calc(100% - 20px), calc(100% - 20px) 100%, 0 100%, 0 20px);
+    background:
+      linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px) 0 0/22px 22px,
+      linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px) 0 0/22px 22px,
+      linear-gradient(165deg, rgba(18,38,70,.97), rgba(5,12,26,.99))}
+  /* Targeting brackets, the same device the cards carry. They sit inside the
+     frame: the chamfer clips this element too, so anything outside it is cut
+     away — and they go on the two square corners, since the other two are the
+     ones the chamfer takes. */
+  .ctx-modal::after{content:''; position:absolute; inset:7px; z-index:3; pointer-events:none;
+    background:
+      linear-gradient(#5fe8ff,#5fe8ff) 100% 0/22px 1px no-repeat,
+      linear-gradient(#5fe8ff,#5fe8ff) 100% 0/1px 22px no-repeat,
+      linear-gradient(#5fe8ff,#5fe8ff) 0 100%/22px 1px no-repeat,
+      linear-gradient(#5fe8ff,#5fe8ff) 0 100%/1px 22px no-repeat;
+    opacity:.55}
+  .ctx-modal > *{position:relative; z-index:1}
+  .ctx-head{display:flex; align-items:center; gap:10px; padding:15px 20px 13px; border-bottom:1px solid rgba(96,232,255,.28);
+    background:linear-gradient(180deg, rgba(96,232,255,.13), rgba(96,232,255,.02));
+    box-shadow:0 1px 0 rgba(96,232,255,.16)}
+  .ctx-title{font-family:var(--font-mono); font-weight:650; font-size:14px; letter-spacing:.16em; text-transform:uppercase;
+    color:#eaf9ff; text-shadow:0 0 14px rgba(96,232,255,.45)}
+  .ctx-x{margin-left:auto; background:none; border:1px solid rgba(96,232,255,.3); width:26px; height:26px; line-height:1;
+    color:var(--ink-2); cursor:pointer; font-size:13px; transition:all .15s ease}
+  .ctx-x:hover{color:#fff; border-color:rgba(96,232,255,.7); background:rgba(96,232,255,.12)}
+  .ctx-note{padding:13px 20px 0; color:var(--ink-3); font-size:12px; font-family:var(--font-mono); line-height:1.55}
+  .ctx-pre{margin:13px 20px; padding:14px 16px; overflow:auto; color:#cfe0f5;
+    font:12px/1.55 "JetBrains Mono",ui-monospace,monospace; white-space:pre-wrap; word-break:break-word; flex:1; min-height:120px;
+    border:1px solid rgba(96,232,255,.20); background:
+      linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px) 0 0/22px 22px,
+      linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px) 0 0/22px 22px,
+      rgba(4,11,24,.86);
+    box-shadow:inset 0 0 26px rgba(47,216,255,.07)}
+  .ctx-taskl{padding:0 20px; color:var(--cyan-soft); font-family:var(--font-mono); font-size:10.5px; letter-spacing:.18em; text-transform:uppercase}
+  .ctx-task{margin:8px 20px 0; padding:11px 13px; background:rgba(6,14,30,.72); border:1px solid rgba(96,232,255,.22);
+    color:var(--ink-0); font-size:13.5px; min-height:70px; resize:vertical; outline:none; font-family:inherit}
+  .ctx-task:focus{border-color:rgba(96,232,255,.6); box-shadow:0 0 0 3px rgba(47,216,255,.10), inset 0 0 20px rgba(47,216,255,.06)}
+  .ctx-actions{display:flex; gap:9px; align-items:center; padding:14px 20px 18px; flex-wrap:wrap}
   .ctx-actions .del{margin-left:auto}
+  .ctx-actions button{font-family:var(--font-mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; border-radius:0}
 
   /* task queue */
   .q-cols{display:grid; grid-template-columns:repeat(4,1fr); gap:12px}

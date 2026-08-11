@@ -1380,7 +1380,10 @@ function drawNode(ctx, n, t, dt) {
 
   // A node the active layer does not reach is pushed back, though never out of
   // sight — it is still part of the product, just not part of the answer.
-  const dim = n.dim * (n.heat != null && n.heat <= 0.001 ? 0.5 : 1);
+  // Out of the layer's reach is a step back, not a disappearance — the words on
+  // those cards still have to be readable, or the picture answers one question
+  // by destroying every other one.
+  const dim = n.dim * (n.heat != null && n.heat <= 0.001 ? 0.82 : 1);
   const foc = Math.max(n.hover, n.select);
 
   // The node's holographic breathing. Kept at the edge of noticeable: any
@@ -1461,7 +1464,11 @@ function drawNode(ctx, n, t, dt) {
   // they show through the rows of data and strike the text out. Some light
   // still gets through — a panel should stay glass rather than become card.
   chamferPath(ctx, x, y, w, h, ch1, [true, false, true, false]);
-  ctx.fillStyle = `rgba(3,11,20,${0.93 * pc * dim})`;
+  // Opaque, always. Dimming used to fade this out, which let the edges running
+  // beneath the card show straight through it — a dimmed card should be darker,
+  // not see-through. So the colour goes darker with dim while the fill stays solid.
+  const bd = Math.round(3 + 6 * dim), bg2 = Math.round(11 * (0.45 + 0.55 * dim)), bb = Math.round(20 * (0.5 + 0.5 * dim));
+  ctx.fillStyle = `rgba(${bd},${bg2},${bb},${0.985 * pc})`;
   ctx.fill();
 
   const body = ctx.createLinearGradient(0, y, 0, y + h);
@@ -2837,8 +2844,8 @@ function updateFocus(dt) {
     // Dim only siblings on the same level: the container the active node sits
     // in must not be dimmed, since it is what is showing it.
     const sameLevel = active && n.level === active.level;
-    let target = !active || !sameLevel ? 1 : (related.has(n) ? 1 : 0.26);
-    if (n.level !== activeLevel && !onPath.has(n)) target = Math.min(target, 0.24);
+    let target = !active || !sameLevel ? 1 : (related.has(n) ? 1 : 0.62);
+    if (n.level !== activeLevel && !onPath.has(n)) target = Math.min(target, 0.45);
     n.dim = approach(n.dim, target, 8, dt);
   }
 
