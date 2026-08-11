@@ -1467,14 +1467,17 @@ function drawNode(ctx, n, t, dt) {
   // Opaque, always. Dimming used to fade this out, which let the edges running
   // beneath the card show straight through it — a dimmed card should be darker,
   // not see-through. So the colour goes darker with dim while the fill stays solid.
-  const bd = Math.round(3 + 6 * dim), bg2 = Math.round(11 * (0.45 + 0.55 * dim)), bb = Math.round(20 * (0.5 + 0.5 * dim));
-  ctx.fillStyle = `rgba(${bd},${bg2},${bb},${0.985 * pc})`;
+  // Dark enough for light text to sit on. Everything laid over this — the hue
+  // wash, the sheen, the scanlines, the header band — adds brightness, and they
+  // add up: the card ended up bright enough to fight the words on it.
+  const bd = Math.round(2 + 3 * dim), bg2 = Math.round(6 + 3 * dim), bb = Math.round(12 + 5 * dim);
+  ctx.fillStyle = `rgba(${bd},${bg2},${bb},${0.99 * pc})`;
   ctx.fill();
 
   const body = ctx.createLinearGradient(0, y, 0, y + h);
-  body.addColorStop(0, rgba(col, (0.16 + foc * 0.10) * pc * alpha * fillK));
-  body.addColorStop(0.5, rgba(col, (0.055 + foc * 0.05) * pc * alpha * fillK));
-  body.addColorStop(1, rgba(col, (0.10 + foc * 0.07) * pc * alpha * fillK));
+  body.addColorStop(0, rgba(col, (0.075 + foc * 0.07) * pc * alpha * fillK));
+  body.addColorStop(0.5, rgba(col, (0.022 + foc * 0.035) * pc * alpha * fillK));
+  body.addColorStop(1, rgba(col, (0.045 + foc * 0.05) * pc * alpha * fillK));
   ctx.fillStyle = body;
   ctx.fill();
 
@@ -1488,7 +1491,7 @@ function drawNode(ctx, n, t, dt) {
     // card's own hue, and the reading is carried by a bar down the edge, which
     // has no text on it to ruin.
     chamferPath(ctx, x, y, w, h, ch1, [true, false, true, false]);
-    ctx.fillStyle = rgba(col, (0.03 + n.heat * 0.14) * pc * alpha);
+    ctx.fillStyle = rgba(col, (0.02 + n.heat * 0.085) * pc * alpha);
     ctx.fill();
     if (n.heat > 0.001) {
       ctx.save();
@@ -1507,7 +1510,7 @@ function drawNode(ctx, n, t, dt) {
   ctx.save();
   ctx.clip();
   const sheen = ctx.createLinearGradient(x, y, x + w * 0.4, y + h);
-  sheen.addColorStop(0, rgba(C.ice, 0.10 * pc * alpha * fillK));
+  sheen.addColorStop(0, rgba(C.ice, 0.045 * pc * alpha * fillK));
   sheen.addColorStop(0.4, rgba(C.ice, 0));
   ctx.fillStyle = sheen;
   ctx.fillRect(x, y, w, h);
@@ -1516,7 +1519,7 @@ function drawNode(ctx, n, t, dt) {
   if (s > 0.35) {
     const period = 4 * s;
     const off = ((-t * 22 * s) % period + period) % period;
-    ctx.fillStyle = rgba(col, 0.055 * pc * alpha * fillK);
+    ctx.fillStyle = rgba(col, 0.028 * pc * alpha * fillK);
     for (let yy = y + off; yy < y + h; yy += period) {
       ctx.fillRect(x, Math.round(yy), w, Math.max(1, s * 0.9));
     }
@@ -1597,7 +1600,7 @@ function drawNode(ctx, n, t, dt) {
 
     // The container's header stays put while its contents fade in.
     const headH = (n.headH || METRIC.headerH) * s;
-    ctx.fillStyle = rgba(col, 0.14 * pc * alpha);
+    ctx.fillStyle = rgba(col, 0.085 * pc * alpha);
     ctx.fillRect(x, y, w, headH);
     ctx.beginPath();
     ctx.moveTo(x, y + headH + 0.5);
@@ -1647,7 +1650,7 @@ function drawNode(ctx, n, t, dt) {
   const headH = (n.headH || METRIC.headerH) * s;
 
   // The header
-  ctx.fillStyle = rgba(col, 0.14 * pc * alpha);
+  ctx.fillStyle = rgba(col, 0.085 * pc * alpha);
   ctx.fillRect(x, y, w, headH);
   ctx.beginPath();
   ctx.moveTo(x, y + headH + 0.5);
@@ -2426,8 +2429,11 @@ function composite(t) {
     ch.x.globalAlpha = 1;
     ch.x.globalCompositeOperation = 'source-over';
 
+    // Bloom is added light, and it lands inside the cards as much as around
+    // them — a card's own frame lifts its interior, which is where the text is.
+    // Enough of it to keep the hologram, not enough to grey out the words.
     out.globalCompositeOperation = 'lighter';
-    out.globalAlpha = 0.62;
+    out.globalAlpha = 0.34;
     out.drawImage(ch.c, 0, 0, W, H);
     out.globalAlpha = 1;
     out.globalCompositeOperation = 'source-over';
