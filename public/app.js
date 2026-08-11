@@ -12,7 +12,7 @@ function openSharePopup(){
   const mem=loadTeamMem();
   const title=(modelData.index && modelData.index.project) || (selected.split('/').pop()) || 'Product map';
   let ov=document.getElementById('shareOverlay');
-  if(!ov){ ov=document.createElement('div'); ov.id='shareOverlay'; ov.className='ctx-overlay'; document.body.appendChild(ov); }
+  if(!ov){ ov=document.createElement('div'); ov.id='shareOverlay'; ov.className='ctx-overlay'; overlayHost().appendChild(ov); }
   ov.innerHTML=
     '<div class="ctx-modal share-modal">'+
       '<div class="ctx-head"><div class="ctx-title">Share this map</div><button class="ctx-x" title="Close (Esc)">✕</button></div>'+
@@ -52,7 +52,7 @@ function openSharePopup(){
         '<button class="del sh-close">Close</button>'+
       '</div>'+
     '</div>';
-  ov.classList.add('show');
+  mountOverlay(ov).classList.add('show');
   const close=()=>{ ov.classList.remove('show'); ov.innerHTML=''; };
   ov.querySelector('.ctx-x').addEventListener('click', close);
   ov.querySelector('.sh-close').addEventListener('click', close);
@@ -617,7 +617,7 @@ function renderHud(container, scene, seq){
         '<button class="dgm-b" data-a="back" title="One level up (Esc)">Back</button>'+
         '<button class="dgm-b" data-a="labels" title="Edge labels (L)">Labels</button>'+
         '<button class="dgm-b" data-a="bloom" title="Glow (B)">Glow</button>'+
-        '<span class="dgm-hint">click for context and to queue a task · a group opens in place, Esc goes back · drag to pan · wheel to zoom</span>'+
+        '<span class="dgm-hint">click anything for its context and to queue a task · a group also opens in place, Esc goes back · drag to pan · wheel to zoom</span>'+
         '<button class="dgm-b dgm-full" data-a="full" title="Fullscreen">⛶</button>'+
       '</div>'+
       '<div class="dgm-canvas hud-canvas"><canvas></canvas></div>'+
@@ -991,11 +991,25 @@ function srcLabel(){
   const s=((modelData&&modelData.shared)||[]).find(x=>x.name===modelSrc);
   return (s&&s.label)||modelSrc;
 }
+// In fullscreen the browser paints only the fullscreen element's subtree, so an
+// overlay parked on <body> is invisible exactly when someone is looking hardest
+// at the diagram. Every overlay is parented to whoever currently owns the screen.
+function overlayHost(){ return document.fullscreenElement || document.body; }
+function mountOverlay(ov){ const h=overlayHost(); if(ov.parentNode!==h) h.appendChild(ov); return ov; }
+// Entering or leaving fullscreen moves whatever is open along with it.
+document.addEventListener('fullscreenchange', ()=>{
+  const h=overlayHost();
+  for(const id of ['ctxOverlay','taskOverlay','addOverlay','pvOverlay','shareOverlay']){
+    const o=document.getElementById(id);
+    if(o && o.classList.contains('show') && o.parentNode!==h) h.appendChild(o);
+  }
+});
+
 function openContextPopup(kind,id){
   if(!modelData) return; const m=modelData.model;
   const ctx=gatherContext(kind,id,m); const title=ctxTitle(kind,id,m);
   let ov=document.getElementById('ctxOverlay');
-  if(!ov){ ov=document.createElement('div'); ov.id='ctxOverlay'; ov.className='ctx-overlay'; document.body.appendChild(ov); }
+  if(!ov){ ov=document.createElement('div'); ov.id='ctxOverlay'; ov.className='ctx-overlay'; overlayHost().appendChild(ov); }
   ov.innerHTML=
     '<div class="ctx-modal">'+
       '<div class="ctx-head"><div class="ctx-title">'+esc(title)+'</div><button class="ctx-x" title="Close (Esc)">✕</button></div>'+
@@ -1018,7 +1032,7 @@ function openContextPopup(kind,id){
         '<button class="del ctx-close">Close</button>'+
       '</div>'+
     '</div>';
-  ov.classList.add('show');
+  mountOverlay(ov).classList.add('show');
   // Expanding a reach group, and stepping from here to any object it named.
   ov.querySelectorAll('.of-r').forEach(b=>b.addEventListener('click',()=>{
     const k=b.dataset.k, box=ov.querySelector('.of-exp[data-k="'+k+'"]');
@@ -1247,7 +1261,7 @@ async function openTaskPopup(pathStr, col, file){
   const COLS={todo:['To do','#8aa0ff'], inprogress:['In progress','#ffb86b'], verify:['Verify','#c084fc'], done:['Done','#34f0a6']};
   const meta=COLS[col]||['Task','#2fd8ff'];
   let ov=document.getElementById('taskOverlay');
-  if(!ov){ ov=document.createElement('div'); ov.id='taskOverlay'; ov.className='ctx-overlay'; document.body.appendChild(ov); }
+  if(!ov){ ov=document.createElement('div'); ov.id='taskOverlay'; ov.className='ctx-overlay'; overlayHost().appendChild(ov); }
   ov.innerHTML=
     '<div class="ctx-modal">'+
       '<div class="ctx-head"><span class="q-badge" style="color:'+meta[1]+'; border-color:'+meta[1]+'">'+esc(meta[0])+'</span>'+
@@ -1258,7 +1272,7 @@ async function openTaskPopup(pathStr, col, file){
         '<button class="del tk-close">Close</button>'+
       '</div>'+
     '</div>';
-  ov.classList.add('show');
+  mountOverlay(ov).classList.add('show');
   const close=()=>{ ov.classList.remove('show'); ov.innerHTML=''; };
   ov.querySelector('.ctx-x').addEventListener('click', close);
   ov.querySelector('.tk-close').addEventListener('click', close);
@@ -1701,7 +1715,7 @@ async function addProject(bodyObj){
 }
 function openAddModal(){
   let ov=document.getElementById('addOverlay');
-  if(!ov){ ov=document.createElement('div'); ov.id='addOverlay'; ov.className='ctx-overlay'; document.body.appendChild(ov); }
+  if(!ov){ ov=document.createElement('div'); ov.id='addOverlay'; ov.className='ctx-overlay'; overlayHost().appendChild(ov); }
   ov.innerHTML=
     '<div class="ctx-modal" style="max-width:560px">'+
       '<div class="ctx-head"><div class="ctx-title">Add a project</div><button class="ctx-x" title="Close (Esc)">✕</button></div>'+
@@ -1714,7 +1728,7 @@ function openAddModal(){
         '<button class="del" id="addCancel">Cancel</button>'+
       '</div>'+
     '</div>';
-  ov.classList.add('show');
+  mountOverlay(ov).classList.add('show');
   const inp=ov.querySelector('#addPath');
   const close=()=>{ ov.classList.remove('show'); ov.innerHTML=''; };
   const go=async ()=>{
@@ -1918,7 +1932,7 @@ async function pvRenderPicked(d){
   try{ await copyToClipboard(text); copied=true; }catch{}
 
   let ov=document.getElementById('pvOverlay');
-  if(!ov){ ov=document.createElement('div'); ov.id='pvOverlay'; ov.className='ctx-overlay'; document.body.appendChild(ov); }
+  if(!ov){ ov=document.createElement('div'); ov.id='pvOverlay'; ov.className='ctx-overlay'; overlayHost().appendChild(ov); }
   ov.innerHTML=
     '<div class="ctx-modal">'+
       '<div class="ctx-head"><div class="ctx-title">'+esc(d.tag||'element')+(c.text?' — “'+esc(c.text.slice(0,60))+'”':'')+'</div>'+
@@ -1935,7 +1949,7 @@ async function pvRenderPicked(d){
         '<button class="del pv-close">Close</button>'+
       '</div>'+
     '</div>';
-  ov.classList.add('show');
+  mountOverlay(ov).classList.add('show');
   const close=()=>{ ov.classList.remove('show'); ov.innerHTML=''; };
   ov.querySelector('.ctx-x').addEventListener('click', close);
   ov.querySelector('.pv-close').addEventListener('click', close);

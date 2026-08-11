@@ -2627,16 +2627,16 @@ const endPointer = (ev) => {
     // last position the pointer was known to be at.
     const [lxu, lyu] = ev && ev.clientX != null ? localXY(ev) : [pointer.x, pointer.y];
     const n = nodeAt(lxu, lyu);
-    if (n && n.expanded) {
-      // The opened node itself was hit rather than its contents: close it.
-      collapseNode(n);
-    } else if (canOpen(n)) {
-      // The node has a layer beneath it: go in.
-      drillInto(n);
-    } else if (n) {
-      selected = n === selected ? null : n;
-      if (selected) lastSelected = selected;
-      if (SCENE.onNodeSelect) SCENE.onNodeSelect(selected);
+    if (n) {
+      // A click always answers "what is this" — that is what the panel beside
+      // the canvas is for, and it is the reason anyone clicks a diagram here.
+      // A group opens as well, so the two never compete for the same click:
+      // one hand goes to the context, the other to the level below it.
+      lastSelected = n;
+      if (n.expanded) collapseNode(n);
+      else if (canOpen(n)) drillInto(n);
+      else selected = n;
+      if (SCENE.onNodeSelect) SCENE.onNodeSelect(n);
     } else if (selected) {
       selected = null;
     } else {
