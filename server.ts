@@ -1796,6 +1796,48 @@ const HTML = /* html */ `<!doctype html>
   .sk-tile.done{border-color:rgba(52,240,166,.55)}
   .sk-tile.done .sk-art{color:var(--c-ok); filter:drop-shadow(0 0 18px rgba(52,240,166,.7))}
   .sk-tile.done .sk-go{color:var(--c-ok)}
+  /* ---- model navigation: six questions, then the views that settle each ---- */
+  .mgroups{display:flex; gap:6px; flex-wrap:wrap}
+  .mgroup{background:transparent; border:1px solid var(--line2); color:var(--dim); border-radius:0;
+    font-family:var(--font-mono); font-size:12px; letter-spacing:.04em; padding:7px 13px; cursor:pointer}
+  .mgroup:hover{color:var(--txt); border-color:rgba(96,232,255,.4)}
+  .mgroup.active{background:rgba(96,232,255,.13); border-color:rgba(96,232,255,.6); color:#fff}
+  .mghint{color:var(--ink-3); font-size:12.5px; line-height:1.5; margin:9px 0 2px; max-width:88ch}
+  .mtabs{display:flex; gap:6px; flex-wrap:wrap; margin-top:8px}
+
+  /* ---- ownership / confidence / intended-vs-done ---- */
+  .own-warn{margin:14px 0; padding:11px 14px; font-size:13px; line-height:1.55; color:var(--ink-1);
+    border-left:2px solid rgba(255,178,78,.6); background:rgba(255,178,78,.06)}
+  .own-warn b{color:var(--c-warn)}
+  .own-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(232px,1fr)); gap:10px; margin-top:14px}
+  .own-card{border:1px solid var(--line); background:rgba(10,18,36,.5); padding:12px 13px}
+  .own-card.none{border-color:rgba(255,178,78,.4); background:rgba(255,178,78,.05)}
+  .own-area{font-size:13.5px; color:#fff; margin-bottom:8px}
+  .own-row{display:flex; justify-content:space-between; gap:10px; font-size:12px; padding:3px 0; color:var(--ink-3)}
+  .own-row b{color:var(--ink-1); font-weight:500; text-align:right}
+  .conf-gaps{display:flex; flex-direction:column; gap:8px}
+  .conf-gap{border:1px solid var(--line); padding:10px 13px; background:rgba(10,18,36,.4)}
+  .conf-gap b{display:block; font-size:13px; color:var(--ink-0)}
+  .conf-gap span{display:block; font-size:12.5px; color:var(--ink-3); margin-top:3px}
+  .mm-list{display:flex; flex-direction:column; gap:10px}
+  .mm-row{border:1px solid var(--line); border-left:3px solid var(--line2); padding:12px 14px; background:rgba(10,18,36,.45)}
+  .mm-row.ok{border-left-color:var(--c-ok)}
+  .mm-row.off{border-left-color:var(--c-warn)}
+  .mm-row.unknown{border-left-color:var(--ink-3)}
+  .mm-t{font-size:13.5px; color:var(--ink-0); display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+  .mm-badge{font-family:var(--font-mono); font-size:10px; letter-spacing:.14em; text-transform:uppercase; padding:2px 7px; border:1px solid}
+  .mm-badge.ok{color:var(--c-ok); border-color:rgba(52,240,166,.45)}
+  .mm-badge.off{color:var(--c-warn); border-color:rgba(255,178,78,.5)}
+  .mm-note{font-size:12.5px; color:var(--ink-3); margin-top:5px}
+  .mm-line{display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-top:8px}
+  .mm-line>span{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3); min-width:170px}
+  .mm-chip{font-family:var(--font-mono); font-size:11px; padding:3px 8px; cursor:pointer; border-radius:0;
+    background:rgba(14,30,58,.6); border:1px solid var(--line2); color:var(--ink-1)}
+  .mm-chip.kept{border-color:rgba(52,240,166,.4)}
+  .mm-chip.missed{border-color:rgba(255,178,78,.5); color:var(--c-warn)}
+  .mm-chip.extra{border-color:rgba(255,92,110,.5); color:#ff8c9a}
+  .mm-chip:hover{background:rgba(47,216,255,.16); color:#fff}
+
   .skills-empty{color:var(--ink-3); font-size:13px}
 
   /* ---- MCP, explained where someone can find it ---------------------------

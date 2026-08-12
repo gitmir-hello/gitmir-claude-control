@@ -544,18 +544,25 @@ const viewAlive = (s) => s == null || s === modelViewSeq;
 let logicEntityId = null;
 let modelSrc = null;   // null = this project's own model; otherwise a teammate's name
 let mermaidReady = null;
-const MODEL_VIEWS = [
-  {key:'map', label:'Product map'},
-  {key:'impact', label:'Impact'},
-  {key:'journeys', label:'Journeys'},
-  {key:'logic', label:'Business logic'},
-  {key:'decisions', label:'Decisions'},
-  {key:'events', label:'Events'},
-  {key:'er', label:'Data (ER)'},
-  {key:'flow', label:'Data flow'},
-  {key:'timeline', label:'Timeline'},
-  {key:'overview', label:'Overview'},
+// Six questions, in the order someone asks them. Ten pills in a row is a list of
+// features; these are the things an enterprise reader actually arrives wanting to
+// settle, and the views underneath each one are how it gets settled.
+const MODEL_GROUPS = [
+  { key:'what',  label:'What it does',        hint:'The product in the words of the business, and what moves between its parts.',
+    views:[{key:'map',label:'Product map'},{key:'journeys',label:'Journeys'},{key:'er',label:'Data'},{key:'flow',label:'Data flow'},{key:'events',label:'Events'}] },
+  { key:'why',   label:'Why it works this way', hint:'The rules the product enforces, and the conditions behind each branch.',
+    views:[{key:'logic',label:'Lifecycles'},{key:'decisions',label:'Decisions'}] },
+  { key:'cost',  label:'What a change costs',  hint:'What a planned change reaches, and how much of the product that is.',
+    views:[{key:'impact',label:'Impact'}] },
+  { key:'who',   label:'Who answers for it',   hint:'Owning teams, who may change what, and the parts nobody has claimed.',
+    views:[{key:'ownership',label:'Ownership'}] },
+  { key:'trust', label:'How much to trust it', hint:'Where each answer came from, and which parts of the model to doubt.',
+    views:[{key:'confidence',label:'Confidence'}] },
+  { key:'done',  label:'What actually happened', hint:'The product changing, in the order it changed.',
+    views:[{key:'mismatch',label:'Intended vs done'},{key:'timeline',label:'Timeline'},{key:'overview',label:'Overview'}] },
 ];
+const MODEL_VIEWS = MODEL_GROUPS.flatMap(g=>g.views);
+const groupOfView = (k)=> (MODEL_GROUPS.find(g=>g.views.some(v=>v.key===k))||MODEL_GROUPS[0]).key;
 // Layers paint the product map with something other than its own structure: how much
 // each area has been changing, what a change there would cost, who to ask first.
 const MAP_LAYERS = [
@@ -934,13 +941,158 @@ function renderModelSrc(d){
 
 function renderModelNav(){
   const nav=document.getElementById('modelNav'); if(!nav) return;
+  const g=groupOfView(modelView);
+  const grp=MODEL_GROUPS.find(x=>x.key===g)||MODEL_GROUPS[0];
   nav.innerHTML='';
-  for(const v of MODEL_VIEWS){
+  const top=document.createElement('div'); top.className='mgroups';
+  for(const x of MODEL_GROUPS){
     const b=document.createElement('button');
-    b.className='mpill'+(modelView===v.key?' active':''); b.textContent=v.label;
-    b.addEventListener('click', ()=>{ modelView=v.key; renderModelNav(); renderModelView(); });
-    nav.appendChild(b);
+    b.className='mgroup'+(x.key===g?' active':''); b.textContent=x.label; b.title=x.hint;
+    b.addEventListener('click', ()=>{ modelView=x.views[0].key; renderModelNav(); renderModelView(); });
+    top.appendChild(b);
   }
+  nav.appendChild(top);
+  const hint=document.createElement('div'); hint.className='mghint'; hint.textContent=grp.hint;
+  nav.appendChild(hint);
+  // One view in a group needs no tab bar — a single tab is a label pretending to be a choice.
+  if(grp.views.length>1){
+    const row=document.createElement('div'); row.className='mtabs';
+    for(const v of grp.views){
+      const b=document.createElement('button');
+      b.className='mpill'+(modelView===v.key?' active':''); b.textContent=v.label;
+      b.addEventListener('click', ()=>{ modelView=v.key; renderModelNav(); renderModelView(); });
+      row.appendChild(b);
+    }
+    nav.appendChild(row);
+  }
+}
+
+// ---- Ownership: who answers for each part, and what nobody has claimed --------
+// Every fact here is already in the model and none of it was ever on screen: the
+// owner of an area, who may perform a transition, which role holds a state. The
+// blanks are the point — an area with no owner is the most expensive thing in an
+// enterprise codebase, and it currently looks exactly like every other area.
+function renderOwnership(view, m, seq){
+  const mods=m.modules||[];
+  if(!mods.length){ view.innerHTML='<div class="model-empty">No areas in the model.</div>'; return; }
+  const owned=mods.filter(x=>x.owner), orphan=mods.filter(x=>!x.owner);
+  const count=(id)=>['entities','serverFunctions','apiRoutes','frontendUnits','events','statusFlows']
+    .reduce((n,k)=>n+(m[k]||[]).filter(o=>moduleOf(o.id,m)===id).length,0);
+  let h='<div class="map-cap">Who answers for each part of the product — the team to route work to, and the person to ask before changing it.'+
+    '<span class="map-cap2">Owners are read from the model. The model reads them from CODEOWNERS, a team table, or an <code>@owner</code> tag; '+
+    'where none of those exist the area comes back blank, and a blank owner is not a small thing.</span></div>';
+  if(orphan.length){
+    h+='<div class="own-warn"><b>'+orphan.length+' of '+mods.length+' areas have no owner recorded.</b> '+
+      'Nobody is named for '+orphan.reduce((n,x)=>n+count(x.id),0)+' objects. These are the parts where a question has nowhere to go.</div>';
+  }
+  h+='<div class="own-grid">';
+  for(const x of owned.concat(orphan)){
+    const roles=new Set();
+    for(const fl of (m.statusFlows||[])) if(fl.moduleId===x.id||moduleOf(fl.id,m)===x.id){
+      for(const tr of (fl.transitions||[])) if(tr.byRole) roles.add(tr.byRole);
+      for(const st of (fl.states||[])) if(st.ownerRole) roles.add(st.ownerRole);
+    }
+    h+='<div class="own-card'+(x.owner?'':' none')+'">'+
+      '<div class="own-area">'+esc(x.name||x.id)+'</div>'+
+      '<div class="own-row"><span>Team</span><b>'+(x.owner?esc(x.owner):'— not recorded —')+'</b></div>'+
+      '<div class="own-row"><span>Objects</span><b>'+count(x.id)+'</b></div>'+
+      (roles.size?'<div class="own-row"><span>May change state</span><b>'+esc([...roles].join(' · '))+'</b></div>':'')+
+      '</div>';
+  }
+  h+='</div>';
+  if(seq!=null && !viewAlive(seq)) return;
+  view.innerHTML=h;
+}
+
+// ---- Confidence: which parts of this answer to doubt --------------------------
+// An enterprise will work with an imperfect model. It will not work with one that
+// cannot say which parts are imperfect.
+async function renderConfidence(view, m, seq){
+  const dims=[['modules','Areas'],['entities','Business objects'],['serverFunctions','Functions'],
+    ['apiRoutes','Endpoints'],['frontendUnits','Screens'],['events','Events'],
+    ['processes','Journeys'],['statusFlows','Lifecycles'],['reactions','Reactions']];
+  const ch=await loadChanges(false);
+  const tasks=(ch&&ch.tasks)||[];
+  const declared=tasks.filter(t=>t.declared).length;
+  const gaps=[];
+  const noDesc=[].concat(...dims.map(([k])=>(m[k]||[]).filter(o=>!o.description).map(o=>o.id)));
+  const entNoFlow=(m.entities||[]).filter(e=>!(m.statusFlows||[]).some(f=>f.entityId===e.id));
+  const rtNoFn=(m.apiRoutes||[]).filter(r=>!(m.serverFunctions||[]).some(f=>f.routeId===r.id));
+  const noOwner=(m.modules||[]).filter(x=>!x.owner);
+  if(noOwner.length) gaps.push([noOwner.length+' areas with no owner','Work and questions have nowhere to go']);
+  if(rtNoFn.length) gaps.push([rtNoFn.length+' endpoints with no function behind them','Either dead, or the model missed the handler']);
+  if(entNoFlow.length) gaps.push([entNoFlow.length+' objects with no lifecycle','Their state changes are invisible to impact and risk']);
+  if(noDesc.length) gaps.push([noDesc.length+' objects with no description','A name alone does not survive being read by someone new']);
+  if(tasks.length&&declared<tasks.length) gaps.push([(tasks.length-declared)+' of '+tasks.length+' tasks with inferred scope','Their risk was computed from mentions, not from a declared Touches: line']);
+
+  let h='<div class="map-cap">Where this model is solid and where it is guessing. Read it before quoting a number from any other view.'+
+    '<span class="map-cap2">Every object here was extracted from the code by the <b>gitmir-model</b> skill. Freshness is checked against the files on disk; '+
+    'scope is marked declared or inferred per task. Everything else on this page is an absence — something the model does not know, stated as such.</span></div>';
+  h+='<div class="own-grid">';
+  for(const [k,label] of dims){ const n=(m[k]||[]).length; if(!n) continue;
+    h+='<div class="own-card"><div class="own-area">'+esc(label)+'</div><div class="own-row"><span>Recorded</span><b>'+n+'</b></div></div>'; }
+  h+='</div>';
+  h+=gaps.length
+    ? '<div class="own-warn"><b>What the model does not know</b></div><div class="conf-gaps">'+
+      gaps.map(([what,why])=>'<div class="conf-gap"><b>'+esc(what)+'</b><span>'+esc(why)+'</span></div>').join('')+'</div>'
+    : '<div class="own-warn">No gaps found by these checks. That is not the same as complete.</div>';
+  if(seq!=null && !viewAlive(seq)) return;
+  view.innerHTML=h;
+}
+
+// ---- Intended vs done: did the work stay inside what was approved -------------
+// The task file says what it set out to change; the log says what it actually
+// touched. Both were already being collected and nobody was putting them side by
+// side — which is the difference between a diagram and change governance.
+async function renderMismatch(view, m, seq){
+  const ch=await loadChanges(false);
+  const tasks=((ch&&ch.tasks)||[]).filter(t=>t.col==='done');
+  const hist=(ch&&ch.history)||[];
+  if(!tasks.length){ view.innerHTML='<div class="model-empty">Nothing has reached <b>done</b> yet — there is nothing to compare.</div>'; return; }
+  const norm=s=>String(s||'').toLowerCase().replace(/[^a-zа-яёіїєґ0-9]+/gi,' ').trim();
+  const byTitle=new Map(); for(const h of hist) byTitle.set(norm(h.title), h);
+
+  let h='<div class="map-cap">What each finished task <b>set out to change</b>, against what it <b>actually touched</b>.'+
+    '<span class="map-cap2">The intent is the task\'s own <code>Touches:</code> line, written when the task was created. '+
+    'The outcome is what the run logged. Anything touched that was never declared is the interesting column: it is work that '+
+    'happened outside what was approved.</span></div><div class="mm-list">';
+  let compared=0, clean=0, noLog=0;
+  for(const t of tasks){
+    const log=byTitle.get(norm(t.title));
+    const intended=t.declared ? t.ids : [];
+    const done=(log&&log.touched)||[];
+    if(!log || !done.length){
+      noLog++;
+      h+='<div class="mm-row unknown"><div class="mm-t">'+esc(t.title)+'</div>'+
+        '<div class="mm-note">'+(log
+          ? 'The log recorded files, not model objects, so this cannot be compared.'
+          : 'No log entry for this task — nothing recorded what it did.')+'</div></div>';
+      continue;
+    }
+    compared++;
+    const iSet=new Set(intended), dSet=new Set(done);
+    const kept=intended.filter(i=>dSet.has(i));
+    const missed=intended.filter(i=>!dSet.has(i));
+    const extra=done.filter(i=>!iSet.has(i));
+    const ok=!missed.length && !extra.length;
+    if(ok) clean++;
+    const chips=(ids,cls)=>ids.map(i=>'<button class="mm-chip '+cls+'" data-id="'+esc(i)+'">'+esc(labelOf(i,m))+'</button>').join('');
+    h+='<div class="mm-row'+(ok?' ok':' off')+'">'+
+      '<div class="mm-t">'+esc(t.title)+(ok?'<span class="mm-badge ok">as approved</span>':'<span class="mm-badge off">differs</span>')+'</div>'+
+      (kept.length?'<div class="mm-line"><span>Did what it said</span>'+chips(kept,'kept')+'</div>':'')+
+      (missed.length?'<div class="mm-line"><span>Declared, never touched</span>'+chips(missed,'missed')+'</div>':'')+
+      (extra.length?'<div class="mm-line"><span>Touched, never declared</span>'+chips(extra,'extra')+'</div>':'')+
+      '</div>';
+  }
+  h+='</div>';
+  const head='<div class="own-warn"><b>'+compared+' of '+tasks.length+' finished tasks could be compared'+
+    (compared?(' — '+clean+' stayed inside what they declared'):'')+'.</b>'+
+    (noLog?' '+noLog+' could not be checked: the log did not record which model objects the run touched.':'')+'</div>';
+  if(seq!=null && !viewAlive(seq)) return;
+  view.innerHTML=h.replace('<div class="mm-list">', head+'<div class="mm-list">');
+  view.querySelectorAll('.mm-chip').forEach(b=>b.addEventListener('click',()=>{
+    const id=b.dataset.id; openContextPopup(kindOf(id), id);
+  }));
 }
 
 async function renderModelView(){
@@ -955,6 +1107,9 @@ async function renderModelView(){
   if(modelView==='timeline') return renderTimeline(view, m, seq);
   if(modelView==='decisions') return renderDecisions(view, m, seq);
   if(modelView==='events') return renderEvents(view, m, seq);
+  if(modelView==='ownership') return renderOwnership(view, m, seq);
+  if(modelView==='confidence') return renderConfidence(view, m, seq);
+  if(modelView==='mismatch') return renderMismatch(view, m, seq);
   view.innerHTML='';
   const box=document.createElement('div'); view.appendChild(box);
   if(modelView==='map'){

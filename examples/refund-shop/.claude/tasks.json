@@ -8,7 +8,11 @@
       "detail": "Wrote .gitmir/model/ from the (imagined) codebase: 3 areas, 3 entities, 4 functions.",
       "status": "done",
       "ts": "2026-08-05T09:15:00Z",
-      "files": ["src/orders/order.ts", "src/routes/orders.ts"]
+      "files": [
+        "src/orders/order.ts",
+        "src/routes/orders.ts"
+      ],
+      "touched": []
     },
     {
       "id": "t2",
@@ -16,8 +20,14 @@
       "detail": "POST /api/orders/:id/refund behind the support role.",
       "status": "done",
       "ts": "2026-08-06T11:20:00Z",
-      "files": ["src/orders/refund.ts", "src/routes/orders.ts"],
-      "touched": ["rt-order-refund", "sf-refund-order"]
+      "files": [
+        "src/orders/refund.ts",
+        "src/routes/orders.ts"
+      ],
+      "touched": [
+        "sf-refund-order",
+        "ent-order"
+      ]
     }
   ]
 }
