@@ -990,7 +990,24 @@ async function renderModelView(){
     return renderHud(d, scene, seq);
   }
   if(modelView==='er') return hudRenderSpec(box, graphER(m), m, {title:'DATA', subtitle:'BUSINESS OBJECTS AND WHAT LINKS THEM'}, seq);
-  if(modelView==='flow') return hudRenderSpec(box, graphFlow(m), m, {title:'DATA FLOW', subtitle:'WHERE DATA COMES FROM AND WHERE IT GOES'}, seq);
+  if(modelView==='flow'){
+    // Areas and what moves between them, not every object at once. The caption
+    // has to say how to read a line, because "Order" on an arrow is only obvious
+    // once you know the arrow points the way the data travels.
+    const cap=document.createElement('div'); cap.className='map-cap';
+    cap.innerHTML='Each block is an area of the product. <b>A line is data moving</b>, and it points the way the data '+
+      'travels — the label names what moves: an object being written into another area, an object being read out of the '+
+      'area that owns it, an event one area raises and another handles, or an endpoint answering a screen.'+
+      '<span class="map-cap2">Open an area to see the chain it runs: screen → endpoint → function → object. '+
+      'Everything at once was the old picture, and on a real product that is a hundred boxes with no shape to them.</span>';
+    box.appendChild(cap);
+    const d=document.createElement('div'); box.appendChild(d);
+    const scene=window.hudSceneDataFlow
+      ? hudSceneDataFlow(m, { onSelect:(id)=>{ if(id) openContextPopup(kindOf(id), id); } })
+      : null;
+    if(scene) return renderHud(d, scene, seq);
+    return hudRenderSpec(d, graphFlow(m), m, {title:'DATA FLOW', subtitle:'WHERE DATA COMES FROM AND WHERE IT GOES'}, seq);
+  }
   view.innerHTML='<div class="model-empty">No data for this diagram.</div>';
 }
 

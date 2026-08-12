@@ -432,3 +432,138 @@ function hudRenderSpec(container, spec, m, head, seq) {
     { onSelect: (id) => { if (id) openContextPopup(kindOf(id), id); } }, head);
   return renderHud(container, scene, seq);
 }
+
+/* -----------------------------------------------------------------------------
+ * Data flow — which business areas move data to which, and what moves.
+ *
+ * The flat version drew every screen, endpoint, function, object and event as
+ * peers of each other. On any real product that is a hundred nodes with no
+ * shape: true, unreadable, and useless for the question people bring to it,
+ * which is "what does my area send, and who depends on it".
+ *
+ * So the top level is areas, the lines carry the name of what actually moves,
+ * and the chain inside an area — screen to endpoint to function to object — is
+ * one click in.
+ * -------------------------------------------------------------------------- */
+function hudSceneDataFlow(m, hooks) {
+  const mods = m.modules || [];
+  const OTHER = '__other';
+  const modById = new Map(mods.map((x) => [x.id, x]));
+  const areaOf = (id) => {
+    const a = moduleOf(id, m);
+    return (a && modById.has(a)) ? a : OTHER;
+  };
+  const owner = fieldOwner(m);
+  const entById = new Map((m.entities || []).map((e) => [e.id, e]));
+  const evById = new Map((m.events || []).map((e) => [e.id, e]));
+  const rtById = new Map((m.apiRoutes || []).map((r) => [r.id, r]));
+  const fnById = new Map((m.serverFunctions || []).map((f) => [f.id, f]));
+
+  // What each area holds, so it can be opened.
+  const inArea = new Map();
+  const put = (id) => {
+    const a = areaOf(id);
+    if (!inArea.has(a)) inArea.set(a, []);
+    inArea.get(a).push(id);
+  };
+  for (const d of ['entities', 'serverFunctions', 'frontendUnits', 'apiRoutes', 'events']) {
+    for (const o of (m[d] || [])) put(o.id);
+  }
+  if (!inArea.size) return null;
+
+  // Movement between areas. A pair keeps the things that actually crossed it,
+  // named — "writes Order" says something "spine" never did.
+  const pair = new Map();
+  const move = (from, to, what) => {
+    if (!from || !to || from === to) return;
+    const k = from + '>' + to;
+    if (!pair.has(k)) pair.set(k, { from, to, what: new Set() });
+    if (what) pair.get(k).what.add(what);
+  };
+  for (const f of (m.serverFunctions || [])) {
+    const A = areaOf(f.id);
+    for (const fid of (f.writesFieldIds || [])) {
+      const e = entById.get(owner.get(fid));
+      if (e) move(A, areaOf(e.id), 'writes ' + (e.name || e.id));
+    }
+    for (const fid of (f.readsFieldIds || [])) {
+      const e = entById.get(owner.get(fid));
+      if (e) move(areaOf(e.id), A, (e.name || e.id));          // data travels from its owner
+    }
+    for (const id of (f.emitsEventIds || [])) {
+      const ev = evById.get(id); if (!ev) continue;
+      for (const g of (m.serverFunctions || [])) {
+        if ((g.subscribesEventIds || []).includes(id)) move(A, areaOf(g.id), ev.name || 'event');
+      }
+    }
+    // One area handing work to another is data moving too, and leaving it out
+    // left products whose areas only ever talk by calling each other looking as
+    // though nothing flowed between them at all.
+    for (const id of (f.callsFunctionIds || [])) {
+      const g = fnById.get(id); if (!g) continue;
+      move(A, areaOf(g.id), 'calls ' + (g.name || g.id));
+    }
+  }
+  for (const u of (m.frontendUnits || [])) {
+    const A = areaOf(u.id);
+    for (const rid of (u.consumesRouteIds || [])) {
+      const r = rtById.get(rid); if (!r) continue;
+      const fn = (m.serverFunctions || []).find((f) => f.routeId === rid);
+      move(areaOf(fn ? fn.id : r.id), A, r.path || r.name || 'api');   // the answer comes back to the screen
+    }
+  }
+
+  const sends = new Map(), gets = new Map();
+  for (const p of pair.values()) {
+    sends.set(p.from, (sends.get(p.from) || 0) + 1);
+    gets.set(p.to, (gets.get(p.to) || 0) + 1);
+  }
+
+  const nodes = [];
+  for (const [aid, ids] of inArea) {
+    const mod = modById.get(aid);
+    const byKind = {};
+    for (const id of ids) { const k = kindOf(id); byKind[k] = (byKind[k] || 0) + 1; }
+    const rows = [];
+    if (sends.get(aid)) rows.push(['SENDS TO', String(sends.get(aid)) + ' area(s)']);
+    if (gets.get(aid)) rows.push(['TAKES FROM', String(gets.get(aid)) + ' area(s)']);
+    if (byKind.entity) rows.push(['OBJECTS', String(byKind.entity)]);
+    if (byKind.route) rows.push(['ENDPOINTS', String(byKind.route)]);
+
+    // Inside: the chain this area runs — screen, endpoint, function, object.
+    const inside = new Set(ids);
+    const kids = ids.slice(0, 60).map((id) => hudObjectNode(id, m));
+    const kidEdges = [];
+    const link = (a, b, label) => { if (inside.has(a) && inside.has(b) && a !== b) kidEdges.push([a, b, label || '']); };
+    for (const u of (m.frontendUnits || [])) for (const rid of (u.consumesRouteIds || [])) link(u.id, rid, 'calls');
+    for (const f of (m.serverFunctions || [])) {
+      if (f.routeId) link(f.routeId, f.id, '');
+      for (const fid of (f.writesFieldIds || [])) { const e = owner.get(fid); if (e) link(f.id, e, 'writes'); }
+      for (const fid of (f.readsFieldIds || [])) { const e = owner.get(fid); if (e) link(e, f.id, 'reads'); }
+      for (const id of (f.emitsEventIds || [])) link(f.id, id, 'raises');
+      for (const id of (f.subscribesEventIds || [])) link(id, f.id, 'handles');
+      for (const id of (f.callsFunctionIds || [])) link(f.id, id, '');
+    }
+    nodes.push({
+      id: aid, modelId: aid === OTHER ? null : aid, kind: 'gm_area',
+      title: hudTitle(aid === OTHER ? 'Everything else' : ((mod || {}).name || aid)),
+      tag: (aid === OTHER ? 'AREA' : aid).slice(0, 14),
+      rows: rows.slice(0, 5),
+      detailText: (mod || {}).description || '',
+      children: kids.length ? { nodes: kids, edges: kidEdges.slice(0, 140) } : null,
+    });
+  }
+
+  const have = new Set(nodes.map((n) => n.id));
+  const edges = [];
+  for (const p of pair.values()) {
+    if (!have.has(p.from) || !have.has(p.to)) continue;
+    const what = [...p.what];
+    edges.push([p.from, p.to, what.length > 1 ? what[0] + ' +' + (what.length - 1) : (what[0] || '')]);
+  }
+  return hudScene({
+    title: 'DATA FLOW',
+    subtitle: 'WHICH AREA MOVES DATA TO WHICH — OPEN ONE FOR THE CHAIN INSIDE IT',
+    nodes, edges, m, hooks,
+  });
+}
