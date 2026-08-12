@@ -313,8 +313,11 @@ const METRIC = {
   tagTrack: 1.0,
   rowSize: 8.8,
   rowTrack: 0.7,
-  colGap: 108,
-  rowGap: 42,
+  // The gaps have to hold a label, not just keep the cards apart: a chip runs
+  // up to ~90px wide and 18px tall, and with less room than that the writing on
+  // the lines has nowhere to go but on top of a card.
+  colGap: 170,
+  rowGap: 66,
 };
 
 // Padding for a nested level inside an opened node.
@@ -322,8 +325,8 @@ const NEST = {
   padX: 26,
   padTop: 34,      // below the container's own header
   padBottom: 42,   // generous: bypass arcs dip below the panels
-  colGap: 74,      // inside a container, panels sit closer than at the top level
-  rowGap: 32,
+  colGap: 132,     // inside a container, panels sit closer than at the top level
+  rowGap: 54,
 };
 
 const root = { nodes: [], edges: [], cols: null, w: 0, h: 0, parent: null };
@@ -1314,7 +1317,7 @@ function drawEdge(ctx, e, t) {
     // on each other say less than one. Sitting on a card is survivable, since the
     // chip is opaque; sitting on another label is not, so that is the rule that
     // never bends.
-    const AT = [0.5, 0.4, 0.6, 0.3, 0.7, 0.22, 0.78, 0.15, 0.85];
+    const AT = [0.5, 0.44, 0.56, 0.38, 0.62, 0.32, 0.68, 0.26, 0.74, 0.2, 0.8, 0.14, 0.86];
     let mp = null;
     for (const at of AT) {
       const q = pointAtLen(e, at);
@@ -1367,6 +1370,10 @@ function boxHitsNode(x, y, w, h, skipA, skipB) {
   for (const n of allNodes) {
     if (n === skipA || n === skipB) continue;
     if (n.boot < 0.4 || n.dim < 0.15) continue;
+    // An opened container is a frame, not a surface. Counting its box as solid
+    // marked every point inside it as taken, so no label inside one could ever
+    // find a free spot and they all fell back to landing on the cards.
+    if (n.expanded || n.expandT > 0.5) continue;
     const c = worldToScreen(n.x, n.y);
     const s = cam.scale;
     const nx = c.x - (n.w / 2) * s, ny = c.y - (n.h / 2) * s;

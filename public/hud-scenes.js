@@ -312,7 +312,7 @@ function hudScene({ title, subtitle, nodes, edges, m, hooks }) {
     inspector: false,
     reticle: false,
     minimap: nodes.length > 6,
-    metric: { maxW: 250, colGap: 92, rowGap: 40 },
+    metric: { maxW: 250, colGap: 168, rowGap: 62 },
     viewInset: { top: 96, bottom: 74, left: 34, right: 34 },
 
     // A click has to be answerable with "which object of the product is this",
