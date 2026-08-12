@@ -1732,6 +1732,12 @@ const HTML = /* html */ `<!doctype html>
      A grid of plates, grouped by when you reach for them. The whole plate is the button —
      there is only one thing to do with a skill, so a separate Copy control would be a
      second target for the same action. */
+  /* Setup has two pages: the procedures, and wiring an editor to this model.
+     Stacked on one screen the second read as a footnote under the first. */
+  .setup-sub{display:flex; gap:8px; margin-top:26px; padding-top:22px; border-top:1px solid var(--glass-brd)}
+  .sub-pill{font-family:var(--font-mono); font-size:12px; letter-spacing:.08em; border-radius:0}
+  .sub-pane{padding-top:4px}
+  .sub-pane .skills-box, .sub-pane .mcp-box{margin-top:16px; padding-top:0; border-top:0}
   .skills-box{margin-top:26px; padding-top:22px; border-top:1px solid var(--glass-brd)}
   .skills-label{font-family:var(--font-mono); font-size:11px; letter-spacing:.22em; text-transform:uppercase;
     color:var(--cyan-soft); margin-bottom:20px}

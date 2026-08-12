@@ -291,6 +291,8 @@ function renderRail(){
 let taskTimer = null;
 let queueTimer = null;
 let activeTab = 'settings';
+// Which page of Setup is open — kept across re-renders, so it does not snap back.
+let setupSub = 'skills';
 function setTab(tab){
   activeTab = tab;
   document.querySelectorAll('.rl').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
@@ -325,15 +327,22 @@ function renderDetail(){
         '<button class="ghost" id="finderBtn">🗂 Finder</button>' +
         '<button class="del" id="delBtn">🗑 Remove</button>' +
       '</div>' +
-      '<div class="skills-box">' +
-        '<div class="skills-label">Skills — copy and paste into claude (⌘V + Enter)</div>' +
-        '<div class="skills-btns" id="skillsBtns"></div>' +
+      // Two ways of working, each with enough to say to need its own page: the
+      // procedures you hand Claude, and wiring your editor to this model. Stacked
+      // on one screen the second was a footnote under the first.
+      '<div class="setup-sub">' +
+        '<button class="mpill sub-pill active" data-sub="skills">Skills</button>' +
+        '<button class="mpill sub-pill" data-sub="mcp">Connect Local MCP</button>' +
       '</div>' +
-      // Nothing in here said MCP existed, so the only people who found it were
-      // the ones who read the repository. A tester asked how to "run a project
-      // through MCP" and whether the Impact diagram would show up there — which
-      // is the misunderstanding this block has to answer, not just the setup.
-      '<div class="mcp-box" id="mcpBox"></div>' +
+      '<div class="sub-pane" data-sub="skills">' +
+        '<div class="skills-box">' +
+          '<div class="skills-label">Copy one and paste it into claude (⌘V + Enter)</div>' +
+          '<div class="skills-btns" id="skillsBtns"></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="sub-pane" data-sub="mcp" style="display:none">' +
+        '<div class="mcp-box" id="mcpBox"></div>' +
+      '</div>' +
     '</div>' +
     '<div class="pane" data-pane="tasks">' +
       '<div class="tasks-head"><span class="t">What Claude did</span><span class="upd" id="taskUpd"></span></div>' +
@@ -416,6 +425,15 @@ function renderDetail(){
   wrap.querySelector('#modelRefresh').addEventListener('click', ()=>{ if(selected) loadModel(selected); });
   wrap.querySelector('#modelShare').addEventListener('click', openSharePopup);
   setTab(activeTab);
+  wrap.querySelectorAll('.sub-pill').forEach(b=>b.addEventListener('click',()=>{
+    setupSub = b.dataset.sub;
+    wrap.querySelectorAll('.sub-pill').forEach(x=>x.classList.toggle('active', x.dataset.sub===setupSub));
+    wrap.querySelectorAll('.sub-pane').forEach(x=>{ x.style.display = x.dataset.sub===setupSub ? '' : 'none'; });
+  }));
+  if(setupSub!=='skills'){
+    const b=wrap.querySelector('.sub-pill[data-sub="'+setupSub+'"]');
+    if(b) b.click();
+  }
   renderSkillButtons();
   renderMcpBox();
 
@@ -616,7 +634,7 @@ function renderMcpBox(){
   const add='claude mcp add gitmir -- node '+q(home+'/mcp.ts')+' --project '+q(proj);
   const check='cd '+q(home)+' && node mcp-check.ts '+q(proj)+' model';
   box.innerHTML=
-    '<div class="skills-label">Ask about this model from inside your editor — MCP</div>'+
+    '<div class="skills-label">Your editor, reading this model while it works</div>'+
     '<div class="mcp-what">The dashboard is where you <b>look</b> at the model. MCP is how your coding agent '+
       '<b>reads the same model while it works</b> — what an object is, what breaks if it changes, what a task '+
       'would touch — instead of re-reading your repository every session.</div>'+
@@ -633,8 +651,13 @@ function renderMcpBox(){
     '<div class="mcp-step"><span class="mcp-n">4</span>Not sure it connected? This prints exactly what the agent will see.'+
       '<code class="mcp-cmd" id="mcpChk">'+esc(check)+'</code>'+
       '<button class="ghost mcp-copy" data-c="chk">📋 Copy</button></div>'+
-    '<div class="mcp-note">You can still do it by hand: the <b>gitmir-model</b> skill above builds the model, '+
-      'and everything here answers from it. Without a model every MCP answer is "there is no model here yet".</div>';
+    '<div class="mcp-note"><b>If nothing happens.</b> Check the command actually registered: <code>claude mcp list</code> '+
+      'should show <code>gitmir</code> as connected. A client only reads its config at startup, so the editor has to be '+
+      'restarted after step 1. And a project with no model answers "there is no model here yet" to everything — that is '+
+      'not a broken connection, it is the model missing.</div>'+
+    '<div class="mcp-note">You can also do all of it by hand, from the <b>Skills</b> page: '+
+      '<b>gitmir-model</b> builds the model, <b>task-planner</b> writes work that carries its own checks. '+
+      'MCP changes who does the typing, not what gets done.</div>';
   box.querySelectorAll('.mcp-copy').forEach(b=>b.addEventListener('click',async()=>{
     try{ await navigator.clipboard.writeText(b.dataset.c==='add'?add:check); toast('Copied ✓'); }
     catch(e){ toast('Could not copy — select the line and press ⌘C'); }
