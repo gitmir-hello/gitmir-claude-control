@@ -503,6 +503,10 @@ function renderSkillButtons(){
           '<span class="sk-go">' + svgIcon('copy', 15) + '</span>' +
         '</span>' +
         '<span class="sk-body">' +
+          // The pain first, in the words someone arrives with. The name means
+          // nothing until you know which problem it is for, and the description
+          // is mechanics — useful once you have decided to read on.
+          (s.pain ? '<span class="sk-pain">' + esc(s.pain) + '</span>' : '') +
           '<span class="sk-name">' + esc(s.title || s.name) + '</span>' +
           (s.desc ? '<span class="sk-desc">' + esc(s.desc) + '</span>' : '') +
         '</span>';

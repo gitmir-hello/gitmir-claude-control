@@ -1220,7 +1220,11 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, { exists, index, model, brief, shared, stale, ingest, src: who || null });
     }
     if (req.method === 'GET' && url.pathname === '/api/skills') {
-      const skills = loadSkills().map((s) => ({ name: s.name, title: s.title || s.name, desc: s.desc || '' }));
+      // `pain` is the line the card leads with — the problem someone arrives with.
+      // Dropping it here is why the card kept showing only the name.
+      const skills = loadSkills().map((s) => ({
+        name: s.name, title: s.title || s.name, desc: s.desc || '', pain: (s as { pain?: string }).pain || '',
+      }));
       return sendJSON(res, 200, { skills });
     }
     if (req.method === 'GET' && url.pathname === '/api/skill') {
@@ -1779,8 +1783,12 @@ const HTML = /* html */ `<!doctype html>
     filter:drop-shadow(0 0 20px color-mix(in srgb, var(--tone) 75%, transparent))}
   .sk-go{position:absolute; top:10px; right:10px; color:var(--ink-3); transition:color .16s ease}
   .sk-tile:hover .sk-go{color:var(--tone)}
-  .sk-body{display:flex; flex-direction:column; gap:6px; padding:13px 15px 15px; min-width:0}
-  .sk-name{font-family:var(--font-mono); font-size:13px; font-weight:600; letter-spacing:.02em; color:#fff}
+  .sk-body{display:flex; flex-direction:column; gap:5px; padding:14px 15px 16px; min-width:0}
+  /* The problem someone arrives with, set large enough to be read first — the
+     skill's name means nothing until you know which problem it is for. */
+  .sk-pain{font-size:16px; line-height:1.32; font-weight:640; color:#fff; letter-spacing:-.01em}
+  .sk-name{font-family:var(--font-mono); font-size:11.5px; font-weight:500; letter-spacing:.06em;
+    text-transform:lowercase; color:var(--cyan-soft)}
   /* Eight, not three: the line that says what a skill is FOR was landing past the
      cut, so every card described its mechanics and none of them its point. */
   .sk-desc{font-size:12.5px; line-height:1.5; color:var(--ink-2);

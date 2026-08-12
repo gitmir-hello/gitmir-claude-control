@@ -3,7 +3,8 @@
     "name": "task-log",
     "title": "task-log",
     "desc": "Claude logs every task it completes to .claude/tasks.json — so you see at a glance what was done in a project, without asking.",
-    "file": "skills/task-log.md"
+    "file": "skills/task-log.md",
+    "pain": "You cannot say what was done last week without asking"
   },
   {
     "name": "gitmir-model",
@@ -11,25 +12,29 @@
     "desc": "The single source of truth for what this product does, read from the code and linked by stable ids. Everyone works against what the product IS, not what they remember — where most mistakes start. Business logic becomes readable without opening a file, and every diagram here is drawn from it.",
     "file": "skills/gitmir-model.md",
     "stripFrontmatter": true,
-    "prepend": "Build (or, if a model already exists, idempotently update it, keeping stable ids) the multidimensional object model of THIS project by following the specification below in full — including the mandatory standing rule it defines (install/refresh the 'GitMir model — source of truth' section in the project's CLAUDE.md). Write only inside .gitmir/ and that one CLAUDE.md section; do not modify application source.\n\n"
+    "prepend": "Build (or, if a model already exists, idempotently update it, keeping stable ids) the multidimensional object model of THIS project by following the specification below in full — including the mandatory standing rule it defines (install/refresh the 'GitMir model — source of truth' section in the project's CLAUDE.md). Write only inside .gitmir/ and that one CLAUDE.md section; do not modify application source.\n\n",
+    "pain": "Nobody holds the whole product in their head"
   },
   {
     "name": "model-ingest",
     "title": "model-ingest",
     "desc": "Builds the model from a source too big to read in one pass — a legacy codebase with dense coupling, a large spreadsheet, a data dump. It measures the source, cuts it into fragments that each fit in context, and turns every fragment into a queue task, so the model grows piece by piece instead of coming out shallow and half-invented.",
-    "file": "skills/model-ingest.md"
+    "file": "skills/model-ingest.md",
+    "pain": "The codebase is too big to read in one pass"
   },
   {
     "name": "model-navigate",
     "title": "model-navigate",
     "desc": "Answers architectural questions by walking the model's id links instead of reading the repository — resolve an entry point, expand by hops, follow inbound references to find what breaks, open only the files the model named, and state the path taken so it can be checked.",
-    "file": "skills/model-navigate.md"
+    "file": "skills/model-navigate.md",
+    "pain": "Every question means reading the repository again"
   },
   {
     "name": "context-distillation",
     "title": "context-distillation",
     "desc": "Distils a pile of docs, tickets or chat threads into a small, checkable brief in .gitmir/brief.json — the minimal context Claude needs, and the artifact people can confirm before anything is built.",
-    "file": "skills/context-distillation.md"
+    "file": "skills/context-distillation.md",
+    "pain": "The context is a pile of threads nobody can act on"
   },
   {
     "name": "product-docs-spec",
@@ -37,36 +42,42 @@
     "desc": "Turns raw input — a client's description, specs, a CSV, a design export, existing code — into a docs/ folder of 12 files that works as the actual build spec: data model with types, roles matrix, every screen, processes, API, invariants, and open questions with defaults. Written before any code, so the product gets built right the first time.",
     "file": "skills/product-docs-spec.md",
     "stripFrontmatter": true,
-    "prepend": "Build the docs/ specification for THIS project by following the specification below in full. Read every input available first — the client's description, any .md/.docx/.pdf specs, datasets, design or code exports, the existing repository — and ground every statement in them; never invent. Write only inside docs/ in this pass: no application code yet.\n\n"
+    "prepend": "Build the docs/ specification for THIS project by following the specification below in full. Read every input available first — the client's description, any .md/.docx/.pdf specs, datasets, design or code exports, the existing repository — and ground every statement in them; never invent. Write only inside docs/ in this pass: no application code yet.\n\n",
+    "pain": "A client's description is not something you can build from"
   },
   {
     "name": "task-planner",
     "title": "task-planner",
     "desc": "Turns a goal into small, self-contained task files in tasks/todo/ — each carrying the right model context AND the step-by-step checks that prove it works, so nothing is called done on faith.",
-    "file": "skills/task-planner.md"
+    "file": "skills/task-planner.md",
+    "pain": "Work arrives with no way to check it is done"
   },
   {
     "name": "task-runner",
     "title": "task-runner",
     "desc": "Works the whole task queue to empty, autonomously: todo → in progress → verify → done. It runs each task's checks for real, and when one fails it writes the fix task itself. Batch work without babysitting — and without silent breakage.",
-    "file": "skills/task-runner.md"
+    "file": "skills/task-runner.md",
+    "pain": "The queue only moves while somebody pushes it"
   },
   {
     "name": "app-audit",
     "title": "app-audit",
     "desc": "Walks a running app end to end — every page, every interactive element, every route — works out what a user can actually accomplish, then proves each use case by executing it. Failures become fix tasks with the exact repro. It refuses to touch production and never presses a destructive control on data that matters.",
-    "file": "skills/app-audit.md"
+    "file": "skills/app-audit.md",
+    "pain": "Nobody can say what actually works in the running app"
   },
   {
     "name": "legacy-maintenance",
     "title": "legacy-maintenance",
     "desc": "Change or maintain an existing legacy codebase without breaking the behaviour next to it — maps the blast radius from the model, then ships small reversible steps you can verify. For keeping old projects alive, not rewriting them.",
-    "file": "skills/legacy-maintenance.md"
+    "file": "skills/legacy-maintenance.md",
+    "pain": "Changing old code breaks the thing standing next to it"
   },
   {
     "name": "stack-port",
     "title": "stack-port",
     "desc": "Port an old, hand-written project onto a new stack with full feature parity — the old app is the spec, a parity ledger keeps anything from being silently dropped, and every slice is verified against the old behaviour, not just a green build.",
-    "file": "skills/stack-port.md"
+    "file": "skills/stack-port.md",
+    "pain": "A rewrite quietly loses features nobody wrote down"
   }
 ]
