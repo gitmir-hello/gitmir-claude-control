@@ -1403,6 +1403,7 @@ function graphProductMap(m, layer){
   const entById=new Map(ents.map(x=>[x.id,x]));
   const evById=new Map(ev.map(x=>[x.id,x]));
   const fnById=new Map(sf.map(x=>[x.id,x]));
+  const rtById=new Map(rt.map(r=>[r.id,r]));     // needed to name what a screen calls
   const rtOwner=new Map();                       // routeId -> module that answers it
   for(const f of sf) if(f.routeId) rtOwner.set(f.routeId, f.moduleId||null);
   for(const r of rt) if(!rtOwner.has(r.id)) rtOwner.set(r.id, r.moduleId||null);
@@ -1440,10 +1441,15 @@ function graphProductMap(m, layer){
 
   // One line per pair of areas, labelled with the strongest thing that passes along it.
   const link=new Map();
+  // A line between two areas keeps the strongest kind of thing crossing it AND
+  // the names of those things. It used to keep only the kind, so a screen calling
+  // another area's API came out as the bare word "uses" — true, and useless: the
+  // model knows it is GET /api/favorites, which is the part worth reading.
   const add=(from,to,kind,label,rank)=>{
     if(from===to || !bucket.has(from) || !bucket.has(to)) return;
     const k=from+'>'+to; const cur=link.get(k);
-    if(!cur || rank>cur.rank) link.set(k,{from,to,kind,label,rank});
+    if(!cur || rank>cur.rank) link.set(k,{from,to,kind,rank,what:new Set(label?[label]:[])});
+    else if(rank===cur.rank && label) cur.what.add(label);
   };
   for(const f of sf){
     const A=mod(f.moduleId);
@@ -1458,14 +1464,23 @@ function graphProductMap(m, layer){
       for(const g of sf) if((g.subscribesEventIds||[]).includes(id)) add(A, mod(g.moduleId), 'effect', evt.name||'event', 4);
     }
     for(const id of (f.callsFunctionIds||[])){
-      const g=fnById.get(id); if(g) add(A, mod(g.moduleId), 'spine', 'calls', 1);
+      const g=fnById.get(id); if(g) add(A, mod(g.moduleId), 'spine', 'calls '+(g.name||g.id), 1);
     }
   }
   // screens of one area talking to another area's API
   for(const u of fe){ const A=mod(u.moduleId);
-    for(const rid of (u.consumesRouteIds||[])) if(rtOwner.has(rid)) add(A, mod(rtOwner.get(rid)), 'spine', 'uses', 2);
+    for(const rid of (u.consumesRouteIds||[])) if(rtOwner.has(rid)){
+      const r=rtById.get(rid);
+      add(A, mod(rtOwner.get(rid)), 'spine', r ? ((r.method?r.method.toUpperCase()+' ':'')+(r.path||r.name||'api')) : 'api', 2);
+    }
   }
-  for(const e of link.values()) edges.push({from:e.from, to:e.to, kind:e.kind, label:e.label});
+  for(const e of link.values()){
+    const what=[...e.what];
+    // One name plus a count: three endpoints crossing the same pair is worth
+    // knowing, and printing all three is a paragraph on a line.
+    const label = what.length ? (what[0] + (what.length>1 ? '  +'+(what.length-1) : '')) : '';
+    edges.push({from:e.from, to:e.to, kind:e.kind, label});
+  }
   return {direction:'RIGHT', nodes, edges};
 }
 

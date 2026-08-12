@@ -303,7 +303,11 @@ function hudScene({ title, subtitle, nodes, edges, m, hooks }) {
     title, subtitle,
     ticker: hooks.ticker || '',
     nodes, edges,
-    labels: true,
+    // On a small graph every line can carry its name at once. Past a dozen there
+    // is no room for thirty chips and they end up on each other and on the cards,
+    // so the default flips: point at a card and its own lines say what they carry.
+    // The Labels button (and L) turns them all on regardless.
+    labels: nodes.length <= 9,
     kinds: HUD_PALETTE,
     // A working panel does not need a clock, a frame counter, or a second copy
     // of the hint already printed on the toolbar above it.
