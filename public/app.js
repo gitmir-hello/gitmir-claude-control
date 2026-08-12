@@ -530,9 +530,80 @@ async function copySkill(name, title){
 }
 
 /* ---------- model (.gitmir) visualization ---------- */
+// ---- what every view has to say about itself --------------------------------
+// A diagram nobody can name is a shop window. Each view states three things in
+// the same place, in the same order: what it is, what it lets you decide, and
+// how to work it. Written once here so no view can quietly ship without them.
+const VIEW_HEAD = {
+  map:        ['The product as its parts',
+               'Start any conversation here: what the product is made of, and what crosses between the parts.',
+               'Hover a card for its controls. OPEN goes inside an area, CONTEXT gives you its context and a task.'],
+  journeys:   ['One path a person walks',
+               'What a user actually does, step by step, and what runs under each step. Breaking one of these is what someone notices.',
+               'Pick a journey above. Each step names the screen, endpoint or function behind it.'],
+  er:         ['Business objects and what links them',
+               'The nouns your product is about, and which of them reference which. Where a change to one object lands.',
+               'Click an object for its fields, who writes it and who reads it.'],
+  flow:       ['Where data moves between areas',
+               'Which area sends data to which, and what moves — an object written, an event raised, an endpoint answered.',
+               'Open an area to see the chain it runs: screen, endpoint, function, object.'],
+  events:     ['What raises a signal and what reacts',
+               'The places where one part of the product sets another in motion without calling it directly. The links that surprise people.',
+               'Click an event to see everything that raises it and everything that handles it.'],
+  logic:      ['When an object changes state',
+               'The rules the product enforces on one object over its life, and what fires on each transition.',
+               'Pick an object above. Open a transition to see the effects it triggers.'],
+  decisions:  ['Every branch and the condition on it',
+               'The points where the product decides, written as the condition it actually checks. Where a policy lives.',
+               'Pick a lifecycle. Each branch shows its condition and who may take it.'],
+  impact:     ['What a planned change reaches',
+               'Before anyone writes code: what a task touches, how much of the product that is, and whether anything sensitive is in reach.',
+               'Pick a task, or estimate a change by hand. Every number shows the arithmetic under it.'],
+  ownership:  ['Who answers for each part',
+               'The team to route work to, the person to ask before changing it, and the parts nobody has claimed.',
+               'Owners come from the model. A blank owner is a finding, not a formatting problem.'],
+  confidence: ['Where this model is guessing',
+               'Which parts of every other view to trust, and which to doubt. Read it before quoting a number.',
+               'Each gap is work: something the model does not know about your product yet.'],
+  mismatch:   ['What was approved against what was done',
+               'Whether finished work stayed inside the scope it declared. Work outside that scope is the thing worth catching.',
+               'Click any object to open it. "Touched, never declared" is where to look first.'],
+  timeline:   ['The product changing, in order',
+               'What has been done and when, with what each piece of work touched.',
+               'Click a chip to open that object and see everything else that has touched it.'],
+  overview:   ['The model at a glance',
+               'How much of the product is recorded, dimension by dimension.',
+               'Thin numbers here mean the model has not learned that part yet.'],
+};
+function viewHead(key){
+  const h=VIEW_HEAD[key]; if(!h) return '';
+  return '<div class="vhead">'+
+    '<div class="vh-t">'+esc(h[0])+'</div>'+
+    '<div class="vh-g"><span>What it gives you</span>'+esc(h[1])+'</div>'+
+    '<div class="vh-h"><span>How to use it</span>'+esc(h[2])+'</div>'+
+  '</div>';
+}
+
+// One subject at a time. Twelve journeys stacked down a 17,000-pixel page is a
+// shop window: nothing can be compared, nothing can be found, and twelve canvases
+// animate at once. Pick one.
+function subjectPicker(items, currentId, onPick){
+  const box=document.createElement('div'); box.className='ent-picker';
+  for(const it of items){
+    const b=document.createElement('button');
+    b.className='epill'+(it.id===currentId?' active':'');
+    b.textContent=it.label; if(it.title) b.title=it.title;
+    b.addEventListener('click', ()=>onPick(it.id));
+    box.appendChild(b);
+  }
+  return box;
+}
+
 let modelData = null;
 let modelFor=null;   // which project modelData belongs to
 let modelView = 'map';
+let journeyPick = null;   // one journey on screen at a time, not all twelve
+let decisionPick = null;
 // Every view switch bumps this. Laying a diagram out is async, so without it a slow
 // view keeps appending into the pane after someone has already moved to another one —
 // which reads as "the new view is broken" when it was overwritten a second later.
@@ -978,7 +1049,7 @@ function renderOwnership(view, m, seq){
   const owned=mods.filter(x=>x.owner), orphan=mods.filter(x=>!x.owner);
   const count=(id)=>['entities','serverFunctions','apiRoutes','frontendUnits','events','statusFlows']
     .reduce((n,k)=>n+(m[k]||[]).filter(o=>moduleOf(o.id,m)===id).length,0);
-  let h='<div class="map-cap">Who answers for each part of the product — the team to route work to, and the person to ask before changing it.'+
+  let h=viewHead('ownership')+'<div class="map-cap">'+
     '<span class="map-cap2">Owners are read from the model. The model reads them from CODEOWNERS, a team table, or an <code>@owner</code> tag; '+
     'where none of those exist the area comes back blank, and a blank owner is not a small thing.</span></div>';
   if(orphan.length){
@@ -1025,7 +1096,7 @@ async function renderConfidence(view, m, seq){
   if(noDesc.length) gaps.push([noDesc.length+' objects with no description','A name alone does not survive being read by someone new']);
   if(tasks.length&&declared<tasks.length) gaps.push([(tasks.length-declared)+' of '+tasks.length+' tasks with inferred scope','Their risk was computed from mentions, not from a declared Touches: line']);
 
-  let h='<div class="map-cap">Where this model is solid and where it is guessing. Read it before quoting a number from any other view.'+
+  let h=viewHead('confidence')+'<div class="map-cap">'+
     '<span class="map-cap2">Every object here was extracted from the code by the <b>gitmir-model</b> skill. Freshness is checked against the files on disk; '+
     'scope is marked declared or inferred per task. Everything else on this page is an absence — something the model does not know, stated as such.</span></div>';
   h+='<div class="own-grid">';
@@ -1052,42 +1123,51 @@ async function renderMismatch(view, m, seq){
   const norm=s=>String(s||'').toLowerCase().replace(/[^a-zа-яёіїєґ0-9]+/gi,' ').trim();
   const byTitle=new Map(); for(const h of hist) byTitle.set(norm(h.title), h);
 
-  let h='<div class="map-cap">What each finished task <b>set out to change</b>, against what it <b>actually touched</b>.'+
+  let h=viewHead('mismatch')+'<div class="map-cap">'+
     '<span class="map-cap2">The intent is the task\'s own <code>Touches:</code> line, written when the task was created. '+
     'The outcome is what the run logged. Anything touched that was never declared is the interesting column: it is work that '+
     'happened outside what was approved.</span></div><div class="mm-list">';
-  let compared=0, clean=0, noLog=0;
+  // A task nobody logged is not a finding — it is a hole in the record, and one
+  // hole reads the same as eighty-seven. Rows are for work that could actually be
+  // compared; the rest collapses into a single line that says what to do about it.
+  let clean=0;
+  const rows=[]; const unchecked=[];
   for(const t of tasks){
     const log=byTitle.get(norm(t.title));
     const intended=t.declared ? t.ids : [];
     const done=(log&&log.touched)||[];
-    if(!log || !done.length){
-      noLog++;
-      h+='<div class="mm-row unknown"><div class="mm-t">'+esc(t.title)+'</div>'+
-        '<div class="mm-note">'+(log
-          ? 'The log recorded files, not model objects, so this cannot be compared.'
-          : 'No log entry for this task — nothing recorded what it did.')+'</div></div>';
-      continue;
-    }
-    compared++;
+    if(!log || !done.length){ unchecked.push({title:t.title, hasLog:!!log}); continue; }
     const iSet=new Set(intended), dSet=new Set(done);
     const kept=intended.filter(i=>dSet.has(i));
     const missed=intended.filter(i=>!dSet.has(i));
     const extra=done.filter(i=>!iSet.has(i));
     const ok=!missed.length && !extra.length;
     if(ok) clean++;
-    const chips=(ids,cls)=>ids.map(i=>'<button class="mm-chip '+cls+'" data-id="'+esc(i)+'">'+esc(labelOf(i,m))+'</button>').join('');
-    h+='<div class="mm-row'+(ok?' ok':' off')+'">'+
-      '<div class="mm-t">'+esc(t.title)+(ok?'<span class="mm-badge ok">as approved</span>':'<span class="mm-badge off">differs</span>')+'</div>'+
-      (kept.length?'<div class="mm-line"><span>Did what it said</span>'+chips(kept,'kept')+'</div>':'')+
-      (missed.length?'<div class="mm-line"><span>Declared, never touched</span>'+chips(missed,'missed')+'</div>':'')+
-      (extra.length?'<div class="mm-line"><span>Touched, never declared</span>'+chips(extra,'extra')+'</div>':'')+
+    rows.push({t, kept, missed, extra, ok});
+  }
+  const compared=rows.length;
+  // Work that left its declared scope is the reason this view exists; it goes first.
+  rows.sort((a,b)=> (a.ok?1:0)-(b.ok?1:0) || b.extra.length-a.extra.length);
+  const chips=(ids,cls)=>ids.map(i=>'<button class="mm-chip '+cls+'" data-id="'+esc(i)+'">'+esc(labelOf(i,m))+'</button>').join('');
+  for(const r of rows){
+    h+='<div class="mm-row'+(r.ok?' ok':' off')+'">'+
+      '<div class="mm-t">'+esc(r.t.title)+(r.ok?'<span class="mm-badge ok">as approved</span>':'<span class="mm-badge off">differs</span>')+'</div>'+
+      (r.kept.length?'<div class="mm-line"><span>Did what it said</span>'+chips(r.kept,'kept')+'</div>':'')+
+      (r.missed.length?'<div class="mm-line"><span>Declared, never touched</span>'+chips(r.missed,'missed')+'</div>':'')+
+      (r.extra.length?'<div class="mm-line"><span>Touched, never declared</span>'+chips(r.extra,'extra')+'</div>':'')+
       '</div>';
+  }
+  if(unchecked.length){
+    h+='<details class="mm-un"><summary><b>'+unchecked.length+'</b> finished task'+(unchecked.length>1?'s':'')+
+      ' could not be checked — nothing recorded which model objects the run touched.'+
+      ' <span class="mm-fix">The <b>task-log</b> skill writes that line; without it a finished task leaves no evidence.</span></summary>'+
+      '<div class="mm-unlist">'+unchecked.map(u=>'<span class="mm-unrow'+(u.hasLog?' filesonly':'')+'">'+esc(u.title)+
+        (u.hasLog?'<i>files logged, not objects</i>':'')+'</span>').join('')+'</div></details>';
   }
   h+='</div>';
   const head='<div class="own-warn"><b>'+compared+' of '+tasks.length+' finished tasks could be compared'+
     (compared?(' — '+clean+' stayed inside what they declared'):'')+'.</b>'+
-    (noLog?' '+noLog+' could not be checked: the log did not record which model objects the run touched.':'')+'</div>';
+    (compared? '' : ' Nothing can be compared until runs record what they touched.')+'</div>';
   if(seq!=null && !viewAlive(seq)) return;
   view.innerHTML=h.replace('<div class="mm-list">', head+'<div class="mm-list">');
   view.querySelectorAll('.mm-chip').forEach(b=>b.addEventListener('click',()=>{
@@ -1116,6 +1196,7 @@ async function renderModelView(){
     // This is the view shown to a client, so say what the picture means in their words.
     const layerData = mapLayer==='none' ? null : await mapLayerData(m);
     box.appendChild(mapLayerBar(layerData));
+    box.insertAdjacentHTML('beforeend', viewHead('map'));
     const cap=document.createElement('div'); cap.className='map-cap';
     // No apostrophes in here on purpose: this string is emitted from a template literal.
     const structure='Each block is an area of the product — what it owns (◆) and how much of it there is. '+
@@ -1144,11 +1225,14 @@ async function renderModelView(){
       : null;
     return renderHud(d, scene, seq);
   }
-  if(modelView==='er') return hudRenderSpec(box, graphER(m), m, {title:'DATA', subtitle:'BUSINESS OBJECTS AND WHAT LINKS THEM'}, seq);
+  if(modelView==='er'){ box.innerHTML=viewHead('er');
+    const d=document.createElement('div'); box.appendChild(d);
+    return hudRenderSpec(d, graphER(m), m, {title:'DATA', subtitle:'BUSINESS OBJECTS AND WHAT LINKS THEM'}, seq); }
   if(modelView==='flow'){
     // Areas and what moves between them, not every object at once. The caption
     // has to say how to read a line, because "Order" on an arrow is only obvious
     // once you know the arrow points the way the data travels.
+    box.insertAdjacentHTML('beforeend', viewHead('flow'));
     const cap=document.createElement('div'); cap.className='map-cap';
     cap.innerHTML='Each block is an area of the product. <b>A line is data moving</b>, and it points the way the data '+
       'travels — the label names what moves: an object being written into another area, an object being read out of the '+
@@ -1538,7 +1622,7 @@ function renderOverview(view, d, seq){
   const dims=[['modules','Modules'],['entities','Entities'],['serverUnits','Server units'],
     ['serverFunctions','Functions'],['apiRoutes','API routes'],['frontendUnits','Frontend'],
     ['events','Events'],['processes','Processes'],['statusFlows','Status flows'],['reactions','Reactions']];
-  let html='<div class="ov-grid">';
+  let html=viewHead('overview')+'<div class="ov-grid">';
   for(const [k,label] of dims){ html+='<div class="ov-card"><div class="ov-n">'+((m[k]||[]).length)+'</div><div class="ov-l">'+label+'</div></div>'; }
   html+='</div>';
   const mods=m.modules||[];
@@ -1692,33 +1776,30 @@ function graphFlow(m){
 async function renderProcesses(view, m, seq){
   const procs=m.processes||[];
   if(!procs.length){ view.innerHTML='<div class="model-empty">No business processes in the model.</div>'; return; }
-  view.innerHTML='';
   const journeys=procs.filter(isJourney), internal=procs.filter(p=>!isJourney(p));
-  const mine=modelReq;
-  for(const [group,list,hint,empty] of [
-    ['User journeys', journeys, 'A person moves through these. If one breaks, they see it.',
-      'None — no process in this model starts from a screen or is marked as customer- or staff-facing.'],
-    ['Internal flows', internal, 'Machinery — triggered by an event, a schedule or another service.',
-      'None — every flow in this model starts from a screen, so they are all journeys.'],
-  ]){
-    // Both headings always show. A section that quietly disappears reads as something
-    // that failed to load; a section that says why it is empty is an answer.
-    const head=document.createElement('div'); head.className='jr-group';
-    head.innerHTML='<div class="jr-group-t">'+esc(group)+'</div><div class="jr-group-h">'+esc(list.length?hint:empty)+'</div>';
-    view.appendChild(head);
-    if(!list.length) continue;
-    for(const p of list){
-      if(mine!==modelReq || !viewAlive(seq) || !view.isConnected) return;
-      const block=document.createElement('div'); block.className='proc-block';
-      block.innerHTML='<div class="proc-title">'+esc(p.name||p.id)+
-          '<span class="jr-trig">'+esc(p.triggerKind||'')+(p.audience?' · '+esc(p.audience):'')+'</span></div>'+
-        (p.description?'<div class="proc-desc">'+esc(p.description)+'</div>':'')+
-        journeyStepsHtml(p, m)+
-        '<div class="proc-diagram"></div>';
-      view.appendChild(block);
-      hudRenderSpec(block.querySelector('.proc-diagram'), graphProcess(p, m), m, {title:String(p.name||'JOURNEY').toUpperCase(), subtitle:'THE PATH A PERSON WALKS'});
-    }
-  }
+  const order=journeys.concat(internal);
+  if(!journeyPick || !order.some(p=>p.id===journeyPick)) journeyPick=order[0].id;
+  const p=order.find(x=>x.id===journeyPick);
+
+  view.innerHTML=viewHead('journeys');
+  // Journeys first, machinery after, and the difference said out loud: a person
+  // walks the first kind and notices when it breaks.
+  const items=order.map(x=>({ id:x.id, label:x.name||x.id,
+    title:(isJourney(x)?'A person walks this':'Machinery — triggered by an event or a schedule')+(x.description?' · '+x.description:'') }));
+  view.appendChild(subjectPicker(items, journeyPick, (id)=>{ journeyPick=id; renderProcesses(view, m); }));
+
+  const kind=isJourney(p)?'A person walks this — if it breaks, they see it':'Machinery — nobody walks it, but its effects are real';
+  const block=document.createElement('div'); block.className='proc-block';
+  block.innerHTML='<div class="proc-title">'+esc(p.name||p.id)+
+      '<span class="jr-trig">'+esc(p.triggerKind||'')+(p.audience?' · '+esc(p.audience):'')+'</span></div>'+
+    '<div class="proc-kind">'+esc(kind)+'</div>'+
+    (p.description?'<div class="proc-desc">'+esc(p.description)+'</div>':'')+
+    journeyStepsHtml(p, m)+
+    '<div class="proc-diagram"></div>';
+  view.appendChild(block);
+  if(seq!=null && !viewAlive(seq)) return;
+  hudRenderSpec(block.querySelector('.proc-diagram'), graphProcess(p, m), m,
+    {title:String(p.name||'JOURNEY').toUpperCase(), subtitle:'THE PATH A PERSON WALKS — STEP BY STEP'}, seq);
 }
 
 // One row per step: what it is, where it lives, and what it moves.
@@ -1768,7 +1849,7 @@ async function renderLogic(view, m, seq){
   if(!logicEntityId || !ents.some(e=>e.id===logicEntityId)){
     const wf=ents.find(e=>hasFlow(e.id)); logicEntityId=(wf||ents[0]).id;
   }
-  view.innerHTML='';
+  view.innerHTML=viewHead('logic');
   const picker=document.createElement('div'); picker.className='ent-picker';
   for(const e of ents){
     const b=document.createElement('button');
@@ -1814,46 +1895,21 @@ async function renderEntityLogic(container, entId, m){
   secP.innerHTML='<div class="logic-sec-t">▶ Processes involving this entity</div>';
   container.appendChild(secP);
   if(!relProcs.length){ const d=document.createElement('div'); d.className='model-empty'; d.style.padding='6px 0'; d.textContent='No processes involve this entity.'; secP.appendChild(d); }
-  else for(const p of relProcs){
-    const b=document.createElement('div'); b.className='proc-block';
-    b.innerHTML='<div class="proc-title">'+esc(p.name)+'</div>'+(p.description?'<div class="proc-desc">'+esc(p.description)+'</div>':'')+'<div class="proc-diagram"></div>';
-    secP.appendChild(b);
-    hudRenderSpec(b.querySelector('.proc-diagram'), graphProcess(p, m, entId), m, {title:String(p.name||'JOURNEY').toUpperCase(), subtitle:'THE PATH A PERSON WALKS'});
-  }
-
-  // 3) operations
-  const ops=(m.serverFunctions||[]).filter(fnTouches);
-  const secO=document.createElement('div'); secO.className='logic-sec';
-  let ot='<div class="logic-sec-t">⚙ Operations on this entity</div>';
-  if(!ops.length) ot+='<div class="model-empty" style="padding:6px 0">No functions read/write this entity.</div>';
-  else{
-    const rtById=new Map((m.apiRoutes||[]).map(r=>[r.id,r]));
-    const evById=new Map((m.events||[]).map(ev=>[ev.id,ev]));
-    ot+='<table class="op-table"><thead><tr><th>Function</th><th>Type</th><th>R/W</th><th>Route</th><th>Events</th></tr></thead><tbody>';
-    for(const f of ops){
-      const reads=(f.readsFieldIds||[]).some(fid=>owner.get(fid)===entId);
-      const writes=(f.writesFieldIds||[]).some(fid=>owner.get(fid)===entId);
-      const rw=(reads?'<span class="rw r">R</span>':'')+(writes?'<span class="rw w">W</span>':'');
-      const rt=f.routeId&&rtById.get(f.routeId); const rtl=rt?(rt.method+' '+rt.path):'';
-      const evs=(f.emitsEventIds||[]).map(id=>evById.get(id)?evById.get(id).name:id).join(', ');
-      ot+='<tr><td><b>'+esc(f.name)+'</b></td><td>'+esc(f.operation||'')+'</td><td>'+rw+'</td><td><code>'+esc(rtl)+'</code></td><td>'+esc(evs)+'</td></tr>';
+  else {
+    // One view, one question. Drawing every journey again here made the page
+    // seven thousand pixels tall and answered a question this view is not for;
+    // the journeys have their own view, and this hands you over to it.
+    const list=document.createElement('div'); list.className='logic-procs';
+    for(const p of relProcs){
+      const b=document.createElement('button'); b.className='logic-proc';
+      b.innerHTML='<span class="lp-n">'+esc(p.name)+'</span>'+
+        '<span class="lp-s">'+((p.steps||[]).length)+' steps</span>'+
+        (p.description?'<span class="lp-d">'+esc(p.description)+'</span>':'');
+      b.title='Open this journey';
+      b.addEventListener('click', ()=>{ journeyPick=p.id; modelView='journeys'; renderModelNav(); renderModelView(); });
+      list.appendChild(b);
     }
-    ot+='</tbody></table>';
-  }
-  secO.innerHTML=ot; container.appendChild(secO);
-
-  // 4) reactions
-  const rx=(m.reactions||[]).filter(r=> (r.trigger&&r.trigger.entityId===entId) || (r.effects||[]).some(ef=>ef.entityId===entId));
-  if(rx.length){
-    const secR=document.createElement('div'); secR.className='logic-sec';
-    let rt='<div class="logic-sec-t">⚡ Reactions (side effects)</div>';
-    for(const r of rx){
-      const eff=(r.effects||[]).map(ef=>effLabel(ef,m)).join('; ');
-      rt+='<div class="rx-row"><b>'+esc(r.name)+'</b>'+
-        (r.trigger?'<span class="rx-trig">on change of '+esc(entName(r.trigger.entityId,m))+(r.trigger.fieldName?'.'+esc(r.trigger.fieldName):'')+'</span>':'')+
-        (eff?'<div class="rx-eff">→ '+esc(eff)+'</div>':'')+'</div>';
-    }
-    secR.innerHTML=rt; container.appendChild(secR);
+    secP.appendChild(list);
   }
 }
 
@@ -2498,7 +2554,7 @@ async function renderImpact(view, m, seq){
              br, risk:riskOf(br,m) };
   };
 
-  let html='<div class="imp-wrap"><div class="imp-list">';
+  let html=viewHead('impact')+'<div class="imp-wrap"><div class="imp-list">';
   html+='<div class="imp-list-h">'+withIds.length+' task(s) that name part of the model</div>';
   html+='<button class="imp-item adhoc'+(impactPick==='__adhoc'?' on':'')+'" data-f="__adhoc">'+
     '<span class="imp-col">what if</span><span class="imp-t">Estimate a change by hand</span></button>';
@@ -2688,8 +2744,8 @@ async function renderTimeline(view, m, seq){
   rest.sort((a,b)=> (a.n||0)-(b.n||0));
   const ordered=done.concat(rest);
 
-  let h='<div class="tl-head">Every task that named part of the model, oldest first. '+
-    'The bar under each one is what it touched — click a chip to open that object.</div><div class="tl">';
+  let h=viewHead('timeline')+'<div class="tl-head">Finished work sits on the date it was done; '+
+    'what is still ahead sits in the order it will run.</div><div class="tl">';
   for(const it of ordered){
     // Done work is placed in time; work still ahead is placed in the order it will run.
     const when = it.at ? esc(String(it.at).slice(0,10)) : (it.n?('#'+String(it.n).padStart(3,'0')):'—');
@@ -2745,11 +2801,11 @@ function graphEvents(m){
 
 async function renderEvents(view, m, seq){
   const evs=m.events||[];
-  if(!evs.length){ view.innerHTML='<div class="model-empty">No domain events in the model.</div>'; return; }
+  if(!evs.length){ view.innerHTML=viewHead('events')+'<div class="model-empty">No domain events recorded. If parts of the product do set each other in motion without calling directly, the model has not learned that yet.</div>'; return; }
   const fns=(m.serverFunctions||[]).concat(m.frontendUnits||[]);
   const orphan=evs.filter(ev=>!fns.some(f=>(f.emitsEventIds||[]).includes(ev.id))
                             && !fns.some(f=>(f.subscribesEventIds||[]).includes(ev.id)));
-  view.innerHTML='';
+  view.innerHTML=viewHead('events');
   const cap=document.createElement('div'); cap.className='map-cap';
   cap.innerHTML='Follow a chain left to right: something raises an event, a handler reacts, and that handler raises the next one. '+
     'A long chain is where one change travels furthest.'+
@@ -2796,39 +2852,32 @@ async function renderDecisions(view, m, seq){
   const flows=(m.statusFlows||[]).filter(fl=>(fl.transitions||[]).some(t=>(t.condition||'').trim()));
   const rx=(m.reactions||[]).filter(r=>r.trigger&&(r.trigger.change||r.trigger.fieldName));
   if(!flows.length && !rx.length){
-    view.innerHTML='<div class="model-empty">No decision points in the model. They come from <code>condition</code> on a status-flow transition and from reaction triggers — if the product does branch and none are recorded, the model is missing them.</div>';
+    view.innerHTML=viewHead('decisions')+'<div class="model-empty">No decision points recorded. They come from a <code>condition</code> on a lifecycle transition and from reaction triggers — if the product does branch and none are here, the model has not learned them yet.</div>';
     return;
   }
-  view.innerHTML='';
-  const cap=document.createElement('div'); cap.className='map-cap';
-  cap.innerHTML='Every place the product decides something. The angle-ended node is the condition — a rhombus cannot hold a line of code without becoming unreadable — and the arrow out of it is what happens when it holds.'+
-    '<span class="map-cap2">Read these with whoever owns the rules: a wrong condition here is a wrong rule in production.</span>';
-  view.appendChild(cap);
-  const mine=modelReq;
-  for(const fl of flows){
-    if(mine!==modelReq || !viewAlive(seq) || !view.isConnected) return;
-    const ent=objById(fl.entityId,m);
+  if(!decisionPick || !flows.some(f=>f.id===decisionPick)) decisionPick=(flows[0]||{}).id;
+  view.innerHTML=viewHead('decisions');
+  if(flows.length){
+    view.appendChild(subjectPicker(flows.map(f=>({id:f.id,label:f.name||f.id,title:f.description||''})),
+      decisionPick, (id)=>{ decisionPick=id; renderDecisions(view, m); }));
+    const fl=flows.find(f=>f.id===decisionPick);
     const block=document.createElement('div'); block.className='proc-block';
-    block.innerHTML='<div class="proc-title">'+esc(fl.name||fl.id)+
-        '<span class="jr-trig">'+esc(ent?(ent.name||ent.id):'')+(fl.fieldName?' · '+esc(fl.fieldName):'')+'</span></div>'+
+    block.innerHTML='<div class="proc-title">'+esc(fl.name||fl.id)+'</div>'+
+      (fl.description?'<div class="proc-desc">'+esc(fl.description)+'</div>':'')+
       '<div class="proc-diagram"></div>';
     view.appendChild(block);
-    hudRenderSpec(block.querySelector('.proc-diagram'), graphDecisions(fl, m), m, {title:'DECISIONS', subtitle:'EVERY BRANCH AND THE CONDITION ON IT'});
+    if(seq!=null && !viewAlive(seq)) return;
+    hudRenderSpec(block.querySelector('.proc-diagram'), graphDecisions(fl, m), m,
+      {title:'DECISIONS — '+String(fl.name||'').toUpperCase(), subtitle:'EVERY BRANCH AND THE CONDITION ON IT'}, seq);
   }
   if(rx.length){
-    const box=document.createElement('div'); box.className='logic-sec';
-    let h='<div class="logic-sec-t">⚡ Rules that fire on a change</div>';
-    for(const r of rx){
-      h+='<div class="rx-row"><b>'+esc(r.name||r.id)+'</b>'+
-        '<span class="rx-trig">when '+esc(labelOf(r.trigger.entityId,m))+(r.trigger.fieldName?'.'+esc(r.trigger.fieldName):'')+
-        (r.trigger.change?' '+esc(r.trigger.change):' changes')+'</span>'+
-        '<div class="rx-eff">→ '+esc((r.effects||[]).map(ef=>effLabel(ef,m)).join('; '))+'</div></div>';
-    }
-    box.innerHTML=h; view.appendChild(box);
+    const r=document.createElement('div'); r.className='jr-group';
+    r.innerHTML='<div class="jr-group-t">Reactions</div><div class="jr-group-h">'+rx.length+
+      ' rule(s) that fire on a change rather than on a branch — a decision the product makes without anyone asking.</div>';
+    view.appendChild(r);
   }
 }
 
-/* ---------------- Layers over the product map ---------------- */
 function mapLayerBar(data){
   const bar=document.createElement('div'); bar.className='lay-bar';
   // The legend is written by whatever computed the layer, so it can say what it

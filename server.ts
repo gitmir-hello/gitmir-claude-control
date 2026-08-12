@@ -1796,6 +1796,34 @@ const HTML = /* html */ `<!doctype html>
   .sk-tile.done{border-color:rgba(52,240,166,.55)}
   .sk-tile.done .sk-art{color:var(--c-ok); filter:drop-shadow(0 0 18px rgba(52,240,166,.7))}
   .sk-tile.done .sk-go{color:var(--c-ok)}
+  /* ---- what a view says about itself -------------------------------------
+     Three lines in the same place on every view: what it is, what it lets you
+     decide, how to work it. A diagram nobody can name is a shop window. */
+  .vhead{margin:2px 0 16px; padding:14px 16px; border:1px solid var(--line);
+    border-left:2px solid rgba(96,232,255,.55); background:rgba(10,20,40,.45)}
+  .vh-t{font-size:16px; font-weight:640; color:#fff; letter-spacing:-.01em; margin-bottom:9px}
+  .vh-g, .vh-h{display:grid; grid-template-columns:132px 1fr; gap:12px; align-items:start;
+    font-size:13px; line-height:1.55; color:var(--ink-1); padding:3px 0}
+  .vh-g span, .vh-h span{font-family:var(--font-mono); font-size:10px; letter-spacing:.16em;
+    text-transform:uppercase; color:var(--cyan-soft); padding-top:3px}
+  .vh-h{color:var(--ink-2)}
+  .proc-kind{font-size:12.5px; color:var(--ink-3); margin:2px 0 6px}
+  .mm-un{border:1px solid var(--line); background:rgba(10,18,36,.4); padding:11px 14px; margin-top:10px}
+  .mm-un summary{cursor:pointer; font-size:13px; color:var(--ink-2); line-height:1.6}
+  .mm-un summary::marker{color:var(--ink-3)}
+  .mm-fix{color:var(--ink-3)}
+  .mm-unlist{display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; padding-top:10px; border-top:1px solid var(--line)}
+  .mm-unrow{font-size:12px; color:var(--ink-3); border:1px solid var(--line); padding:3px 8px}
+  .mm-unrow i{font-style:normal; color:var(--ink-4, #5b7089); margin-left:7px; font-size:11px}
+  .logic-procs{display:flex; flex-direction:column; gap:7px; margin-top:8px}
+  .logic-proc{display:grid; grid-template-columns:1fr auto; gap:4px 12px; text-align:left; cursor:pointer;
+    border:1px solid var(--line); background:rgba(10,18,36,.45); padding:10px 13px; border-radius:0}
+  .logic-proc:hover{border-color:rgba(96,232,255,.45); background:rgba(47,216,255,.07)}
+  .lp-n{font-size:13.5px; color:var(--ink-0)}
+  .lp-s{font-family:var(--font-mono); font-size:11px; color:var(--ink-3)}
+  .lp-d{grid-column:1/-1; font-size:12.5px; color:var(--ink-3); line-height:1.5}
+  @media (max-width:720px){ .vh-g, .vh-h{grid-template-columns:1fr; gap:2px} }
+
   /* ---- model navigation: six questions, then the views that settle each ---- */
   .mgroups{display:flex; gap:6px; flex-wrap:wrap}
   .mgroup{background:transparent; border:1px solid var(--line2); color:var(--dim); border-radius:0;
