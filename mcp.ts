@@ -681,7 +681,10 @@ function skillDefs(): SkillDef[] {
     let desc = '';
     const fm = /^---\n([\s\S]*?)\n---/.exec(head);
     if (fm) {
-      const d = /^description:\s*(?:>-?\s*\n([\s\S]*?)(?=\n\S|$)|(.*))/m.exec(fm[1]);
+      // A folded block runs until a line that starts back at column 0. The old
+      // pattern ended it at `$`, which with /m is the end of the FIRST line — so
+      // every multi-line description was cut to its opening clause.
+      const d = /^description:\s*(?:>-?[^\n]*\n((?:[ \t]+[^\n]*\n?)+)|([^\n]*))/m.exec(fm[1]);
       if (d) desc = (d[1] || d[2] || '').split(/\r?\n/).map((s) => s.trim()).join(' ').trim();
     }
     if (!desc) {

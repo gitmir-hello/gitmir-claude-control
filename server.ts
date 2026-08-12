@@ -1775,8 +1775,10 @@ const HTML = /* html */ `<!doctype html>
   .sk-tile:hover .sk-go{color:var(--tone)}
   .sk-body{display:flex; flex-direction:column; gap:6px; padding:13px 15px 15px; min-width:0}
   .sk-name{font-family:var(--font-mono); font-size:13px; font-weight:600; letter-spacing:.02em; color:#fff}
+  /* Eight, not three: the line that says what a skill is FOR was landing past the
+     cut, so every card described its mechanics and none of them its point. */
   .sk-desc{font-size:12.5px; line-height:1.5; color:var(--ink-2);
-    display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden}
+    display:-webkit-box; -webkit-line-clamp:8; -webkit-box-orient:vertical; overflow:hidden}
   .sk-tile.done{border-color:rgba(52,240,166,.55)}
   .sk-tile.done .sk-art{color:var(--c-ok); filter:drop-shadow(0 0 18px rgba(52,240,166,.7))}
   .sk-tile.done .sk-go{color:var(--c-ok)}

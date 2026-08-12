@@ -8,7 +8,7 @@
   {
     "name": "gitmir-model",
     "title": "gitmir-model",
-    "desc": "Builds a living, id-linked model of your product in .gitmir/model/ (data, server logic, API, frontend, events, processes, lifecycles). Claude — and you — grasp the whole product without re-reading the code.",
+    "desc": "The single source of truth for what this product does, read from the code and linked by stable ids. Everyone works against what the product IS, not what they remember — where most mistakes start. Business logic becomes readable without opening a file, and every diagram here is drawn from it.",
     "file": "skills/gitmir-model.md",
     "stripFrontmatter": true,
     "prepend": "Build (or, if a model already exists, idempotently update it, keeping stable ids) the multidimensional object model of THIS project by following the specification below in full — including the mandatory standing rule it defines (install/refresh the 'GitMir model — source of truth' section in the project's CLAUDE.md). Write only inside .gitmir/ and that one CLAUDE.md section; do not modify application source.\n\n"

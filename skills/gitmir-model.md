@@ -1,11 +1,17 @@
 ---
 name: gitmir-model
 description: >-
-  Build and maintain GitMir's multidimensional object-information model of the
-  product this codebase implements, written as id-linked JSON into the project's
-  local .gitmir/model/ folder. Use when the user asks to "build the GitMir
-  model", "map this codebase", "generate the .gitmir model", "create the
-  information model", or wants a living blueprint of what the software IS —
+  Build and maintain the single source of truth for what this product does: an
+  object model read out of the code itself and written as id-linked JSON into the
+  project's local .gitmir/model/ folder. It is what lets everyone — the agent, the
+  developer, whoever asked for the feature — work against what the product IS
+  rather than what they remember, which is where most of the mistakes come from.
+  It makes the business logic legible without opening a file, and every diagram in
+  the dashboard is drawn from it: the product map, impact and blast radius,
+  journeys, lifecycles, decisions, events, data and its flow. Use when the user
+  asks to "build the GitMir model", "map this codebase", "generate the .gitmir
+  model", "create the information model", or wants a living blueprint of what the
+  software IS —
   its data, server logic, API surface, frontend, events, business processes,
   state machines and reactions — cross-linked by stable ids. Run it on a fresh
   repo to create the model, and re-run it after changes to keep it current. It also
