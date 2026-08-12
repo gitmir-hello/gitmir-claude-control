@@ -30,6 +30,9 @@ examples/refund-shop, which ships with this repository.
   tools             the tools, and what each admits about its own behaviour
   prompts           the skills, served as prompts
   prompt <name>     fetch one skill's text
+  setup             prepare a project: dashboard entry, task queue, what is missing
+  skills            the written procedures and when to use one
+  skill <name>      one procedure in full
   model [dimension] what is this product
   nav <id>          what is this object, and what breaks if it changes
   impact <what>     what a change reaches: ids separated by commas, OR a task file name
@@ -184,6 +187,9 @@ switch (cmd) {
     console.log('\n  ...\n');
     break;
   }
+  case 'setup':  head('Setting the project up');    show(await call('gitmir_setup', {})); break;
+  case 'skills': head('The procedures on offer');   show(await call('gitmir_skills', {})); break;
+  case 'skill':  head('Procedure: ' + arg);         show(await call('gitmir_skill', { name: arg })); break;
   case 'model':  head('The product model');        show(await call('gitmir_model', arg ? { dimension: arg } : {})); break;
   case 'nav':    head('Object: ' + arg);           show(await call('gitmir_navigate', { id: arg })); break;
   case 'impact': head('What it would reach: ' + arg);

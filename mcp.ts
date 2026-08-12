@@ -163,7 +163,10 @@ type Tool = {
   description: string;
   inputSchema: Record<string, unknown>;
   annotations: ToolAnnotations;
-  run: (args: Record<string, unknown>, project: string) => { text: string; isError?: boolean };
+  // Async is allowed: setting a project up asks a running dashboard to add it,
+  // and that is a network call.
+  run: (args: Record<string, unknown>, project: string) =>
+    { text: string; isError?: boolean } | Promise<{ text: string; isError?: boolean }>;
 };
 
 // The spec's optional behaviour hints. Clients are told to treat annotations from an
@@ -356,6 +359,98 @@ const TOOLS: Tool[] = [
   },
 
   {
+    // Setting a project up is what everyone hits first, and every step of it was
+    // something the person had to know to ask for: add the folder to the
+    // dashboard, make the queue, build the model. An agent can do all of it — it
+    // just needed a tool to call, since prompts only fire when a person types a
+    // slash command.
+    name: 'gitmir_setup',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    title: 'Set this project up for GitMir',
+    description:
+      'Prepare a project to be worked on with GitMir: put it on the dashboard, create the task ' +
+      'queue folders, and report what is still missing — above all whether the product model ' +
+      'exists. Call this the first time you touch a project, or whenever another tool answers ' +
+      '"there is no model here". Creates only folders and a list entry; it never edits code.',
+    inputSchema: { type: 'object', properties: { ...PROJECT_ARG }, required: [] },
+    async run(_args: Record<string, unknown>, project: string) {
+      const lines: string[] = [];
+      lines.push(`Project: ${project}`);
+      lines.push('');
+
+      lines.push(`Dashboard: ${await registerWithDashboard(project)}`);
+
+      const made: string[] = [];
+      for (const col of COLUMNS) {
+        const d = path.join(project, 'tasks', col);
+        if (!fs.existsSync(d)) { try { fs.mkdirSync(d, { recursive: true }); made.push(col); } catch {} }
+      }
+      lines.push(made.length ? `Task queue: created tasks/${made.join(', tasks/')}` : 'Task queue: already there');
+
+      const { exists } = readModel(project);
+      lines.push('');
+      if (exists) {
+        lines.push('Model: built. Every other tool here will answer from it.');
+        lines.push('');
+        lines.push('Next, if you want the rest of the workflow: gitmir_skill("task-planner") writes tasks that');
+        lines.push('carry their own checks, and gitmir_skill("task-log") keeps the record of what was done.');
+      } else {
+        lines.push('Model: MISSING — this is the one thing that has to happen before anything else works.');
+        lines.push('');
+        lines.push('Do it now: call gitmir_skill("gitmir-model") and follow what it returns against this');
+        lines.push('project. It reads the repository once and writes .gitmir/model/. After that the');
+        lines.push('dashboard draws it and every tool here can answer from it.');
+      }
+      return { text: lines.join('\n') };
+    },
+  },
+  {
+    name: 'gitmir_skills',
+    annotations: READS,
+    title: 'The GitMir skills and when to use one',
+    description:
+      'List the GitMir skills — the written procedures for building the model, planning work that ' +
+      'carries its own checks, running the queue, auditing a running app, and working on inherited ' +
+      'code. Call this when you are about to do one of those things, then fetch the one you need ' +
+      'with gitmir_skill and follow it. Returns names and what each is for, not the text.',
+    inputSchema: { type: 'object', properties: { ...PROJECT_ARG }, required: [] },
+    run(_args: Record<string, unknown>, _project: string) {
+      const defs = skillDefs();
+      if (!defs.length) return { text: 'No skills found in this installation.', isError: true };
+      const out = ['GitMir skills. Fetch one with gitmir_skill("<name>") and follow it.', ''];
+      for (const d of defs) out.push(`${d.name}\n    ${d.description}`);
+      out.push('');
+      out.push('Start with gitmir-model if this project has no model yet — nothing else here works without it.');
+      return { text: out.join('\n') };
+    },
+  },
+  {
+    name: 'gitmir_skill',
+    annotations: READS,
+    title: 'The full text of one skill',
+    description:
+      'Return one GitMir skill in full, so you can follow it yourself. Use it after gitmir_skills, ' +
+      'or straight away when you already know which one you need — gitmir-model to build the model, ' +
+      'task-planner to plan, task-runner to work the queue. The text is the instruction: read it and ' +
+      'carry it out against this project.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...PROJECT_ARG,
+        name: { type: 'string', description: 'Skill name, e.g. "gitmir-model".' },
+      },
+      required: ['name'],
+    },
+    run(args: Record<string, unknown>, project: string) {
+      const want = String(args.name || '').trim().replace(/\.md$/, '');
+      const def = skillDefs().find((d) => d.name === want);
+      if (!def) {
+        return { text: `No skill called "${want}". Call gitmir_skills for the list.`, isError: true };
+      }
+      return { text: `Follow these instructions for the project at ${project}.\n\n---\n\n${skillText(def)}` };
+    },
+  },
+  {
     name: 'gitmir_queue',
     annotations: READS,
     title: 'Planned work and its risk',
@@ -538,6 +633,40 @@ const TOOLS: Tool[] = [
 
 type SkillDef = { name: string; title: string; description: string; file: string };
 
+/**
+ * Put this project on the dashboard's list. The dashboard owns projects.json,
+ * so if it is running we ask it rather than writing under it; only when nothing
+ * answers do we edit the file ourselves. Either way it is idempotent — a project
+ * already on the list is left exactly as it is.
+ */
+async function registerWithDashboard(projectPath: string): Promise<string> {
+  const port = Number(process.env.GITMIR_PORT || 4599) || 4599;
+  const body = JSON.stringify({ path: projectPath });
+  try {
+    const res = await fetch(`http://localhost:${port}/api/add`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: `http://localhost:${port}` },
+      body,
+      signal: AbortSignal.timeout(1200),
+    });
+    if (res.ok) return `added to the running dashboard on port ${port}`;
+    return `the dashboard answered ${res.status}; it may already be on the list`;
+  } catch {
+    // Nothing listening: write the list ourselves so it is there when it starts.
+    const file = path.join(import.meta.dirname, 'projects.json');
+    let list: { name: string; path: string; description: string }[] = [];
+    try { const raw = JSON.parse(fs.readFileSync(file, 'utf8')); if (Array.isArray(raw)) list = raw; } catch {}
+    if (list.some((p) => p && p.path === projectPath)) return 'already on the dashboard list';
+    list.push({ name: path.basename(projectPath), path: projectPath, description: '' });
+    try {
+      fs.writeFileSync(file, JSON.stringify(list, null, 2));
+      return 'written to the dashboard list — it will be there when you start it';
+    } catch (e) {
+      return `could not write the dashboard list: ${(e as Error).message}`;
+    }
+  }
+}
+
 function skillDefs(): SkillDef[] {
   const dir = path.join(import.meta.dirname, 'skills');
   let files: string[] = [];
@@ -583,7 +712,10 @@ function log(...a: unknown[]): void { process.stderr.write(a.map(String).join(' 
 function result(id: unknown, res: unknown) { write({ jsonrpc: '2.0', id, result: res }); }
 function fail(id: unknown, code: number, message: string) { write({ jsonrpc: '2.0', id, error: { code, message } }); }
 
-function handle(msg: any): void {
+// Async because one tool asks a running dashboard to add the project, and that
+// is a network call. Replies still go out in whatever order they finish — every
+// reply carries its request's id, which is what the protocol matches on.
+async function handle(msg: any): Promise<void> {
   const { id, method, params } = msg || {};
   const isRequest = id !== undefined && id !== null;
 
@@ -602,7 +734,11 @@ function handle(msg: any): void {
           'its own code and linked by stable ids. Prefer these tools over reading files when the ' +
           'question is about the product rather than a specific line: what something is, what ' +
           'depends on it, what a change would reach, and how risky it is. Every answer states how ' +
-          'fresh the model is; if it says STALE, say so rather than presenting it as current.',
+          'fresh the model is; if it says STALE, say so rather than presenting it as current. ' +
+          'If a tool answers that there is no model here, call gitmir_setup: it puts the project on ' +
+          'the dashboard, makes the task queue, and tells you what is missing. The written procedures ' +
+          'are gitmir_skills and gitmir_skill — fetch one and follow it yourself rather than asking ' +
+          'the user to paste anything.',
       });
     }
     case 'notifications/initialized':
@@ -653,7 +789,7 @@ function handle(msg: any): void {
         if (!st || !st.isDirectory()) {
           return result(id, { content: [{ type: 'text', text: `Not a directory: ${project}` }], isError: true });
         }
-        const out = tool.run(args, project);
+        const out = await tool.run(args, project);
         return result(id, { content: [{ type: 'text', text: out.text }], isError: !!out.isError });
       } catch (e: unknown) {
         log('tool failed:', name, e instanceof Error ? e.stack : String(e));
@@ -683,7 +819,7 @@ process.stdin.on('data', (chunk: string) => {
       write({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } });
       continue;
     }
-    try { handle(msg); } catch (e) {
+    try { handle(msg).catch((e) => log('handler failed:', e)); } catch (e) {
       log('handler crashed:', e instanceof Error ? e.stack : String(e));
       if (msg && msg.id !== undefined && msg.id !== null) fail(msg.id, -32603, 'Internal error');
     }

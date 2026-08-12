@@ -13,7 +13,9 @@ On your machine, as a subprocess your editor starts. It speaks
 [stdio](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports) —
 JSON-RPC over stdin and stdout.
 
-- **No port, no network.** Nothing is served, nothing is uploaded.
+- **No port, nothing uploaded.** The server listens on nothing. The one exception
+  to "no network" is `gitmir_setup`, which asks a dashboard running on this machine
+  to add the folder — and writes the list itself when nothing answers.
 - **The dashboard does not need to be running.** They are two programs reading the
   same files.
 - **ide.gitmir.com is not involved.** It stores no business logic by design, so
@@ -68,6 +70,8 @@ Three of its commands write: `new`, `approve`, `withdraw`. The rest only read.
 
 | Tool | Answers |
 |---|---|
+| `gitmir_setup` | Prepares a project: puts it on the dashboard, creates the task queue, and says what is still missing. Call it the first time you touch a project, or whenever another tool says there is no model. |
+| `gitmir_skills` · `gitmir_skill` | The written procedures and their full text. Prompts only fire when a person types a slash command; these are tools, so the agent can fetch a procedure and follow it on its own. |
 | `gitmir_model` | What is this product? Areas, business objects, functions, endpoints, screens, events, processes, lifecycles. Summary by default; pass `dimension` or `q` for detail. |
 | `gitmir_navigate` | What is this one thing, and what breaks if it changes? Walks the id links both ways — inbound is the direction that gets forgotten. |
 | `gitmir_impact` | What would this change reach, and how risky is it? Takes `ids`, or a `task` file name from the queue. Returns the downstream objects, the areas, the user journeys, and the risk with its arithmetic. |
@@ -79,6 +83,22 @@ Every answer opens with how fresh the model is. If the code has moved since the 
 was built, the answer says **STALE** and names the file that moved most recently — the
 dashboard shows that as an amber banner, and in your editor there is no banner, so it
 travels in the text instead.
+
+## Setting a project up without doing it by hand
+
+Connect the server, then tell your agent *set this project up with GitMir*. It
+calls `gitmir_setup`, which registers the folder with the dashboard — asking a
+running one over its own API, or writing the list itself if nothing answers —
+creates `tasks/todo|inprogress|verify|done`, and reports what is left. If the
+model is missing it says so and points at `gitmir_skill("gitmir-model")`, which
+hands back the procedure in full for the agent to carry out.
+
+That is the whole reason those two are tools rather than prompts. A prompt is
+user-controlled: it appears as a slash command and waits to be typed. A tool is
+model-controlled, so the agent can reach for the procedure the moment it finds
+it needs one.
+
+`gitmir_setup` only ever creates folders and a list entry. It never touches code.
 
 ## It needs a model
 
@@ -114,7 +134,8 @@ than no hint at all.
 
 | Tool | read-only | destructive | idempotent | open world |
 |---|---|---|---|---|
-| `gitmir_model` · `gitmir_navigate` · `gitmir_impact` · `gitmir_queue` | yes | no | yes | no |
+| `gitmir_model` · `gitmir_navigate` · `gitmir_impact` · `gitmir_queue` · `gitmir_skills` · `gitmir_skill` | yes | no | yes | no |
+| `gitmir_setup` | no | no | **yes** | no |
 | `gitmir_create_task` | no | no | **no** | no |
 | `gitmir_approve` | no | **yes** | no | no |
 

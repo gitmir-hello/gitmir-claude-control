@@ -625,13 +625,16 @@ function renderMcpBox(){
     '<div class="mcp-step"><span class="mcp-n">1</span>Run this once, in a terminal. It registers this project with Claude Code.'+
       '<code class="mcp-cmd" id="mcpAdd">'+esc(add)+'</code>'+
       '<button class="ghost mcp-copy" data-c="add">📋 Copy</button></div>'+
-    '<div class="mcp-step"><span class="mcp-n">2</span>Restart your editor, then ask it something only the model knows — '+
+    '<div class="mcp-step"><span class="mcp-n">2</span>Restart your editor and say: <i>set this project up with GitMir</i>. '+
+      'It adds the folder here, makes the task queue, and builds the model itself — the procedures are tools it can '+
+      'call, so nothing has to be pasted by hand.</div>'+
+    '<div class="mcp-step"><span class="mcp-n">3</span>Then ask it something only the model knows — '+
       '<i>what breaks if I change the order status?</i> It will answer from here.</div>'+
-    '<div class="mcp-step"><span class="mcp-n">3</span>Not sure it connected? This prints exactly what the agent will see.'+
+    '<div class="mcp-step"><span class="mcp-n">4</span>Not sure it connected? This prints exactly what the agent will see.'+
       '<code class="mcp-cmd" id="mcpChk">'+esc(check)+'</code>'+
       '<button class="ghost mcp-copy" data-c="chk">📋 Copy</button></div>'+
-    '<div class="mcp-note">Needs a model in this project first — build it with the <b>gitmir-model</b> skill above. '+
-      'Without one every MCP answer is "there is no model here yet".</div>';
+    '<div class="mcp-note">You can still do it by hand: the <b>gitmir-model</b> skill above builds the model, '+
+      'and everything here answers from it. Without a model every MCP answer is "there is no model here yet".</div>';
   box.querySelectorAll('.mcp-copy').forEach(b=>b.addEventListener('click',async()=>{
     try{ await navigator.clipboard.writeText(b.dataset.c==='add'?add:check); toast('Copied ✓'); }
     catch(e){ toast('Could not copy — select the line and press ⌘C'); }
