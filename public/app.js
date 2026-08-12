@@ -329,6 +329,11 @@ function renderDetail(){
         '<div class="skills-label">Skills — copy and paste into claude (⌘V + Enter)</div>' +
         '<div class="skills-btns" id="skillsBtns"></div>' +
       '</div>' +
+      // Nothing in here said MCP existed, so the only people who found it were
+      // the ones who read the repository. A tester asked how to "run a project
+      // through MCP" and whether the Impact diagram would show up there — which
+      // is the misunderstanding this block has to answer, not just the setup.
+      '<div class="mcp-box" id="mcpBox"></div>' +
     '</div>' +
     '<div class="pane" data-pane="tasks">' +
       '<div class="tasks-head"><span class="t">What Claude did</span><span class="upd" id="taskUpd"></span></div>' +
@@ -412,6 +417,7 @@ function renderDetail(){
   wrap.querySelector('#modelShare').addEventListener('click', openSharePopup);
   setTab(activeTab);
   renderSkillButtons();
+  renderMcpBox();
 
   refreshTasks(p.path);
   taskTimer = setInterval(()=>{ if(selected) refreshTasks(selected); }, 4000);
@@ -422,6 +428,7 @@ let SKILLS = [];
 async function loadSkillsList(){
   try{ SKILLS = (await (await fetch('/api/skills')).json()).skills || []; }catch{ SKILLS = []; }
   renderSkillButtons();
+  renderMcpBox();
 }
 // Skills grouped by WHEN you reach for them, not alphabetically. Eleven flat buttons is a
 // list to read; four small groups is a decision you can make at a glance.
@@ -596,6 +603,40 @@ function wrapPx(s, px, cw){
 // Card height for a node that shows a title plus N description lines.
 const subH = (n) => 50 + Math.max(0, n - 1) * SUB_LH;
 
+
+// ---- MCP: what it is, and the exact line that connects it -------------------
+// The command carries this install's own path and the selected project's path,
+// because the two things people get wrong are where mcp.ts lives and which
+// folder they are asking about.
+function renderMcpBox(){
+  const box=document.getElementById('mcpBox'); if(!box) return;
+  const home=window.__GITMIR_HOME__||'/path/to/gitmir-claude-control';
+  const proj=selected||'/path/to/your/project';
+  const q=s=>'"'+String(s).replace(/"/g,'\\"')+'"';
+  const add='claude mcp add gitmir -- node '+q(home+'/mcp.ts')+' --project '+q(proj);
+  const check='cd '+q(home)+' && node mcp-check.ts '+q(proj)+' model';
+  box.innerHTML=
+    '<div class="skills-label">Ask about this model from inside your editor — MCP</div>'+
+    '<div class="mcp-what">The dashboard is where you <b>look</b> at the model. MCP is how your coding agent '+
+      '<b>reads the same model while it works</b> — what an object is, what breaks if it changes, what a task '+
+      'would touch — instead of re-reading your repository every session.</div>'+
+    '<div class="mcp-not">It has no screen of its own. <b>The diagrams stay here</b> — Impact, the product map, '+
+      'journeys. MCP answers in text, to the agent, in the editor you already work in.</div>'+
+    '<div class="mcp-step"><span class="mcp-n">1</span>Run this once, in a terminal. It registers this project with Claude Code.'+
+      '<code class="mcp-cmd" id="mcpAdd">'+esc(add)+'</code>'+
+      '<button class="ghost mcp-copy" data-c="add">📋 Copy</button></div>'+
+    '<div class="mcp-step"><span class="mcp-n">2</span>Restart your editor, then ask it something only the model knows — '+
+      '<i>what breaks if I change the order status?</i> It will answer from here.</div>'+
+    '<div class="mcp-step"><span class="mcp-n">3</span>Not sure it connected? This prints exactly what the agent will see.'+
+      '<code class="mcp-cmd" id="mcpChk">'+esc(check)+'</code>'+
+      '<button class="ghost mcp-copy" data-c="chk">📋 Copy</button></div>'+
+    '<div class="mcp-note">Needs a model in this project first — build it with the <b>gitmir-model</b> skill above. '+
+      'Without one every MCP answer is "there is no model here yet".</div>';
+  box.querySelectorAll('.mcp-copy').forEach(b=>b.addEventListener('click',async()=>{
+    try{ await navigator.clipboard.writeText(b.dataset.c==='add'?add:check); toast('Copied ✓'); }
+    catch(e){ toast('Could not copy — select the line and press ⌘C'); }
+  }));
+}
 
 // ---- the HUD renderer, mounted into the same frame the other diagrams use ----
 // Only one lives at a time: the canvas runs an animation loop, and a superseded

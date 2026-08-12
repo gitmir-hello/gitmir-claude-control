@@ -1782,6 +1782,28 @@ const HTML = /* html */ `<!doctype html>
   .sk-tile.done .sk-go{color:var(--c-ok)}
   .skills-empty{color:var(--ink-3); font-size:13px}
 
+  /* ---- MCP, explained where someone can find it ---------------------------
+     This lived only in the repository's docs, so the only people who knew it
+     existed were the ones who read them. */
+  .mcp-box{margin-top:26px; padding-top:20px; border-top:1px solid var(--line)}
+  .mcp-what{font-size:13px; line-height:1.6; color:var(--ink-1); margin:8px 0 10px; max-width:78ch}
+  .mcp-what b{color:#fff}
+  .mcp-not{font-size:12.5px; line-height:1.55; color:var(--ink-2); margin-bottom:16px; max-width:78ch;
+    padding:9px 12px; border-left:2px solid rgba(255,178,78,.55); background:rgba(255,178,78,.05)}
+  .mcp-not b{color:var(--c-warn)}
+  .mcp-step{position:relative; padding:0 0 14px 30px; font-size:13px; line-height:1.55; color:var(--ink-1); max-width:82ch}
+  .mcp-step i{color:var(--ink-2)}
+  .mcp-n{position:absolute; left:0; top:0; width:19px; height:19px; display:grid; place-items:center;
+    font-family:var(--font-mono); font-size:10.5px; color:var(--cyan-soft);
+    border:1px solid rgba(96,232,255,.4); background:rgba(96,232,255,.08)}
+  .mcp-cmd{display:block; margin:8px 0 6px; padding:10px 12px; font-family:var(--font-mono); font-size:11.5px;
+    line-height:1.5; color:#cfe0f5; word-break:break-all; user-select:all;
+    border:1px solid rgba(96,232,255,.22); background:rgba(4,11,24,.86);
+    box-shadow:inset 0 0 22px rgba(47,216,255,.06)}
+  .mcp-copy{font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase}
+  .mcp-note{margin-top:6px; font-size:12px; line-height:1.55; color:var(--ink-3); max-width:78ch}
+  .mcp-note b{color:var(--ink-1)}
+
   /* ---- layers over the product map ---- */
   .lay-bar{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:0 0 14px}
   .lay-l{font-family:var(--font-mono); font-size:10px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-3)}
@@ -2448,6 +2470,7 @@ const HTML = /* html */ `<!doctype html>
 
   <div class="toast" id="toast"></div>
 
+<script>window.__GITMIR_HOME__ = ${JSON.stringify(import.meta.dirname)};</script>
 <script src="/impact.js"></script>
 <script src="/hud.js"></script>
 <script src="/hud-scenes.js"></script>
