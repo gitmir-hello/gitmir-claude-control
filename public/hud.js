@@ -1298,24 +1298,82 @@ function drawEdge(ctx, e, t) {
   ctx.fill();
   ctx.restore();
 
-  // The edge label in the middle, only when zoomed in enough to read it.
-  const labelZoom = FLAGS.labels ? 0.5 : 0.72;
+  // The edge label. Two things were wrong with it: 7.5 screen pixels, which is
+  // present rather than readable, and always at the exact middle of the line —
+  // which on a laid-out graph lands on a card about as often as not, so it
+  // either vanished under one or sat across its text.
+  const labelZoom = FLAGS.labels ? 0.42 : 0.72;
   if (e.label && cam.scale > labelZoom && (focus > 0.02 || FLAGS.labels)) {
-    const m = pointAtLen(e, 0.5);
-    const mp = worldToScreen(m.x, m.y);
-    const a = (FLAGS.labels ? 0.62 : 0.30) + focus * 0.38;
-    const size = 7.5;
-    const tw = textWidth(e.label, size, 500, 1.1);
-    ctx.fillStyle = `rgba(2,10,18,${0.88 * a * dim})`;
-    ctx.fillRect(mp.x - tw / 2 - 4, mp.y - 6, tw + 8, 12);
-    ctx.strokeStyle = rgba(cb, 0.35 * a * dim);
+    const a = (FLAGS.labels ? 0.72 : 0.34) + focus * 0.28;
+    const size = 10.5;
+    const tw = textWidth(e.label, size, 600, 0.5);
+    const hw = tw / 2 + 6, hh = 9;
+
+    // Somewhere along the line that is clear of the cards and of the labels
+    // already placed. Two labels on the same spot is mush — three "reads" stacked
+    // on each other say less than one. Sitting on a card is survivable, since the
+    // chip is opaque; sitting on another label is not, so that is the rule that
+    // never bends.
+    const AT = [0.5, 0.4, 0.6, 0.3, 0.7, 0.22, 0.78, 0.15, 0.85];
+    let mp = null;
+    for (const at of AT) {
+      const q = pointAtLen(e, at);
+      const s = worldToScreen(q.x, q.y);
+      if (!boxHitsLabel(s.x - hw, s.y - hh, hw * 2, hh * 2)
+          && !boxHitsNode(s.x - hw, s.y - hh, hw * 2, hh * 2, e.a, e.b)) { mp = s; break; }
+    }
+    if (!mp) {
+      for (const at of AT) {
+        const q = pointAtLen(e, at);
+        const s = worldToScreen(q.x, q.y);
+        if (!boxHitsLabel(s.x - hw, s.y - hh, hw * 2, hh * 2)) { mp = s; break; }
+      }
+    }
+    if (!mp) return;                    // nowhere free of other labels: say nothing
+    // Queued, not drawn: panels are painted after the edges, so a label drawn
+    // here would end up underneath one.
+    edgeLabels.push({ x: mp.x, y: mp.y, hw, hh, size, text: e.label, a: a * dim, cb });
+  }
+}
+
+// Edge labels, held back until the panels are down.
+const edgeLabels = [];
+function boxHitsLabel(x, y, w, h) {
+  for (const L of edgeLabels) {
+    if (x < L.x + L.hw && x + w > L.x - L.hw && y < L.y + L.hh && y + h > L.y - L.hh) return true;
+  }
+  return false;
+}
+function flushEdgeLabels(ctx) {
+  for (const L of edgeLabels) {
+    ctx.fillStyle = `rgba(3,9,17,${0.97 * Math.min(1, L.a + 0.25)})`;
+    ctx.fillRect(L.x - L.hw, L.y - L.hh, L.hw * 2, L.hh * 2);
+    ctx.strokeStyle = rgba(L.cb, 0.5 * L.a);
     ctx.lineWidth = 1;
-    ctx.strokeRect(mp.x - tw / 2 - 4.5, mp.y - 6.5, tw + 9, 13);
-    drawText(ctx, e.label, mp.x, mp.y, {
-      size, weight: 500, tracking: 1.1, align: 'center',
-      color: rgba(C.ice, 0.9 * a * dim),
+    ctx.strokeRect(L.x - L.hw + 0.5, L.y - L.hh + 0.5, L.hw * 2 - 1, L.hh * 2 - 1);
+    drawText(ctx, L.text, L.x, L.y, {
+      size: L.size, weight: 600, tracking: 0.5, align: 'center',
+      color: rgba(C.ice, Math.min(1, 0.95 * L.a + 0.2)),
     });
   }
+  edgeLabels.length = 0;
+}
+
+/**
+ * Does this screen-space box land on a card? The two the edge belongs to do not
+ * count — a label near its own ends is exactly where it should be.
+ */
+function boxHitsNode(x, y, w, h, skipA, skipB) {
+  for (const n of allNodes) {
+    if (n === skipA || n === skipB) continue;
+    if (n.boot < 0.4 || n.dim < 0.15) continue;
+    const c = worldToScreen(n.x, n.y);
+    const s = cam.scale;
+    const nx = c.x - (n.w / 2) * s, ny = c.y - (n.h / 2) * s;
+    const nw = n.w * s, nh = n.h * s;
+    if (x < nx + nw && x + w > nx && y < ny + nh && y + h > ny) return true;
+  }
+  return false;
 }
 
 /** Data packets: glowing segments that run along the edges. */
@@ -3058,6 +3116,9 @@ function drawLevel(ctx, level, t, dt) {
     drawNode(ctx, n, t, dt);
   }
   if (deferred) drawNode(ctx, deferred, t, dt);
+
+  // Now that the panels are down, the labels go on top of them.
+  flushEdgeLabels(ctx);
 }
 
 let lastTime = 0;

@@ -60,9 +60,24 @@ const HUD_KINDS_LABEL = {
   serverUnit: 'gm_function', module: 'gm_area',
 };
 
-/** Titles are not cut: the renderer wraps them and the card grows to fit. */
+/**
+ * Titles are not cut — the renderer wraps them and the card grows to fit — but
+ * they do get their word boundaries back first.
+ *
+ * The model stores the real identifier, which is right: `registerCustomer` is
+ * what the thing is called in the code and how anyone finds it again. Uppercase
+ * it whole, though, and the one clue to where the words divide is gone:
+ * REGISTERCUSTOMER. So the casing is turned into spaces before the case is.
+ */
 function hudTitle(s) {
-  return String(s == null ? '' : s).toUpperCase();
+  let v = String(s == null ? '' : s);
+  if (!/\s/.test(v)) {
+    v = v.replace(/([a-z0-9])([A-Z])/g, '$1 $2')        // registerCustomer
+         .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')     // parseHTMLResponse
+         .replace(/_+/g, ' ');                          // register_customer
+    if (v.indexOf('/') === -1) v = v.replace(/-+/g, ' ');  // mobile-menu, but not a route
+  }
+  return v.replace(/\s+/g, ' ').trim().toUpperCase();
 }
 
 /** Short type word for a model object, in the words the dashboard already uses. */
