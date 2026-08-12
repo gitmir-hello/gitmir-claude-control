@@ -1153,7 +1153,13 @@ function openContextPopup(kind,id){
   const origin= modelSrc
     ? '> NOTE: this context describes the model shared by '+srcLabel()+' (a snapshot in .gitmir/shared/'+modelSrc+'/), NOT this project\'s own .gitmir/model.\n\n'
     : '';
-  const taskBody=(t)=> origin+'> '+CTXPRE+'\n\n## Task\n'+t+'\n\n## Context (from the .gitmir model)\n'+ctx+'\n';
+  // The click already knows which object this task is about, so the task says so
+  // in the one line every other surface reads. Without it the file came out with
+  // its scope INFERRED — guessed from whichever ids the prose happens to mention —
+  // even though the id was in hand the whole time. That line is what makes the
+  // task's impact and risk computable before anyone runs it.
+  const touches = (!SHARE && id) ? 'Touches: '+id+'\n\n' : '';
+  const taskBody=(t)=> origin+touches+'> '+CTXPRE+'\n\n## Task\n'+t+'\n\n## Context (from the .gitmir model)\n'+ctx+'\n';
   if(!SHARE) ov.querySelector('.ctx-create').addEventListener('click', async ()=>{
     const t=ta.value.trim(); if(!t){ toast('Type the task first', true); ta.focus(); return; }
     const content='# '+title+' — '+t.split('\n')[0].slice(0,80)+'\n\n'+taskBody(t);
