@@ -89,6 +89,7 @@ function impactForBrowser(): string {
 
 import { MODEL_ID, idList, parseTouches, modelIdSet } from './lib/read.js';
 import { createTask, setApproval, COLUMNS } from './lib/write.js';
+import { modelVersions, modelAt, diffModels } from './lib/history.js';
 
 // ---------- model ids carried by tasks ----------
 
@@ -1083,6 +1084,26 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 404, { error: 'not found' });
       }
     }
+    // How the product changed. The versions are the project's own git history of
+    // .gitmir/model — we store nothing, which is why this works on a repository
+    // that has been running for a year before it ever saw this dashboard.
+    if (req.method === 'GET' && url.pathname === '/api/history') {
+      const p = url.searchParams.get('path') || '';
+      if (!p) return sendJSON(res, 400, { error: 'no path' });
+      return sendJSON(res, 200, await modelVersions(p, 80));
+    }
+    if (req.method === 'GET' && url.pathname === '/api/history/diff') {
+      const p = url.searchParams.get('path') || '';
+      const from = url.searchParams.get('from') || '';
+      const to = url.searchParams.get('to') || '';
+      if (!p) return sendJSON(res, 400, { error: 'no path' });
+      // A sha is hex. Anything else could arrive at git as an option rather than a
+      // revision, and `git show --upload-pack=...` is not a thing to allow.
+      const hex = /^[0-9a-f]{7,40}$/;
+      if (!hex.test(from) || !hex.test(to)) return sendJSON(res, 400, { error: 'bad revision' });
+      const [a, b] = await Promise.all([modelAt(p, from), modelAt(p, to)]);
+      return sendJSON(res, 200, { ok: true, diff: diffModels(a, b) });
+    }
     if (req.method === 'GET' && url.pathname === '/api/model') {
       const p = url.searchParams.get('path') || '';
       // `src` selects whose model to read: the project's own, or a teammate's
@@ -1808,6 +1829,54 @@ const HTML = /* html */ `<!doctype html>
     text-transform:uppercase; color:var(--cyan-soft); padding-top:3px}
   .vh-h{color:var(--ink-2)}
   .proc-kind{font-size:12.5px; color:var(--ink-3); margin:2px 0 6px}
+  .hs-bar{display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; margin:12px 0 14px}
+  .hs-bar label{display:flex; flex-direction:column; gap:5px; font-family:var(--font-mono); font-size:10.5px;
+    letter-spacing:.09em; text-transform:uppercase; color:var(--ink-3)}
+  .hs-sel{background:rgba(10,18,36,.8); color:var(--ink-1); border:1px solid var(--line); border-radius:0;
+    padding:7px 10px; font-family:var(--font-mono); font-size:11.5px; min-width:330px; max-width:46vw}
+  .hs-sel:focus{outline:none; border-color:rgba(96,232,255,.5)}
+  .hs-n{font-family:var(--font-mono); font-size:11px; color:var(--ink-3); padding-bottom:8px}
+  .hs-sum{display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px}
+  .hs-k{flex:1 1 150px; border:1px solid var(--line); background:rgba(10,18,36,.45); padding:12px 14px}
+  .hs-k b{display:block; font-size:22px; color:var(--ink-0); font-variant-numeric:tabular-nums}
+  .hs-k span{font-size:11.5px; color:var(--ink-3)}
+  .hs-k.bad{border-color:rgba(255,138,96,.4)} .hs-k.bad b{color:#ffab84}
+  .hs-lost{display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 4px}
+  .hs-more{font-family:var(--font-mono); font-size:11px; color:var(--ink-3); align-self:center}
+  .hs-sec{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--ink-3); margin:18px 0 8px; padding-bottom:6px; border-bottom:1px solid var(--line)}
+  .hs-lc{border:1px solid var(--line); background:rgba(10,18,36,.45); padding:11px 14px; margin-bottom:7px}
+  .hs-lct{font-size:13.5px; color:var(--ink-0); margin-bottom:6px}
+  .hs-line{display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:5px}
+  .hs-line>span{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.07em; text-transform:uppercase;
+    color:var(--ink-3); min-width:132px}
+  .hs-st{font-family:var(--font-mono); font-size:11px; padding:2px 7px; border:1px solid var(--line); color:var(--ink-2)}
+  .hs-st.hs-a{border-color:rgba(96,232,255,.35); color:#8fe8ff}
+  .hs-st.hs-r{border-color:rgba(255,138,96,.35); color:#ffab84}
+  .hs-dims{display:grid; grid-template-columns:repeat(auto-fill,minmax(178px,1fr)); gap:8px}
+  .hs-dim{border:1px solid var(--line); background:rgba(10,18,36,.45); padding:10px 13px}
+  .hs-dn{font-size:12.5px; color:var(--ink-2)}
+  .hs-dv{font-family:var(--font-mono); font-size:14px; color:var(--ink-1); margin:3px 0 4px; font-variant-numeric:tabular-nums}
+  .hs-dd{display:flex; gap:9px; font-family:var(--font-mono); font-size:11px}
+  .hs-dd span{background:none; padding:0; height:auto; border:none; box-shadow:none; font-weight:400}
+  .hs-dd .hs-a{color:#8fe8ff} .hs-dd .hs-r{color:#ffab84} .hs-dd .hs-ren-n{color:var(--ink-3)}
+  .hs-lkc{color:var(--ink-3); font-size:11px}
+  .hs-lkn{font-family:var(--font-mono); font-size:10.5px; color:var(--ink-3)}
+  .hs-kind{font-style:normal; font-family:var(--font-mono); font-size:9.5px; letter-spacing:.06em;
+    text-transform:uppercase; color:var(--ink-3); margin-left:7px; opacity:.75}
+  .hs-lks{display:flex; flex-direction:column; gap:4px}
+  .hs-lk{display:flex; align-items:center; gap:8px; flex-wrap:wrap; border-left:2px solid var(--line);
+    padding:5px 11px; background:rgba(10,18,36,.4)}
+  .hs-lk.hs-a{border-left-color:rgba(96,232,255,.5)} .hs-lk.hs-r{border-left-color:rgba(255,138,96,.5)}
+  .hs-lkid{cursor:pointer; background:none; border:none; padding:0; font-size:12.5px; color:var(--ink-1); border-radius:0}
+  .hs-lkid:hover{color:#8fe8ff; text-decoration:underline}
+  .hs-lkk{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.07em; text-transform:uppercase; color:var(--ink-3)}
+  .hs-lk.hs-r .hs-lkid{color:var(--ink-3); text-decoration:line-through}
+  .hs-ren{display:flex; flex-direction:column; gap:5px}
+  .hs-rn{text-align:left; cursor:pointer; border:1px solid var(--line); background:rgba(10,18,36,.45);
+    padding:7px 12px; border-radius:0; font-size:12.5px; color:var(--ink-2)}
+  .hs-rn:hover{border-color:rgba(96,232,255,.45)}
+  .hs-rn s{color:var(--ink-3)} .hs-rn b{color:var(--ink-0); font-weight:400}
   .mm-un{border:1px solid var(--line); background:rgba(10,18,36,.4); padding:11px 14px; margin-top:10px}
   .mm-un summary{cursor:pointer; font-size:13px; color:var(--ink-2); line-height:1.6}
   .mm-un summary::marker{color:var(--ink-3)}

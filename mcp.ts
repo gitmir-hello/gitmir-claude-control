@@ -26,6 +26,7 @@ import path from 'node:path';
 import { readModel, modelStaleness, modelIdSet, readTasks } from './lib/read.js';
 import { createTask, setApproval, COLUMNS } from './lib/write.js';
 import { blastRadius, riskOf, kindOf, labelOf, moduleOf, objById, isJourney } from './lib/impact.js';
+import { modelVersions, modelAt, diffModels } from './lib/history.js';
 
 const PROTOCOL = '2025-06-18';           // the version this server implements
 const SUPPORTED = new Set([PROTOCOL, '2025-03-26', '2024-11-05']);
@@ -186,6 +187,14 @@ type ToolAnnotations = {
 
 // Reading the model: no writes, and the world is closed — the only thing touched is
 // this machine's own .gitmir/ folder. Repeating a read changes nothing.
+// The words the product is described in — the same ones the dashboard prints, so
+// an answer read in the editor and an answer read on screen name things alike.
+const DIM_WORD: Record<string, string> = {
+  modules: 'areas', entities: 'business objects', serverUnits: 'server units',
+  serverFunctions: 'functions', apiRoutes: 'endpoints', frontendUnits: 'screens',
+  events: 'events', processes: 'journeys', statusFlows: 'lifecycles', reactions: 'reactions',
+};
+
 const READS: ToolAnnotations = {
   readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false,
 };
@@ -485,6 +494,116 @@ const TOOLS: Tool[] = [
         }
         L.push(`[${t.col}] ${t.file}\n  ${t.title}${tail ? '\n' + tail : ''}${t.approved ? `\n  approved: ${t.approved}` : ''}`);
       }
+      return { text: L.join('\n') };
+    },
+  },
+
+  {
+    name: 'gitmir_history',
+    annotations: READS,
+    title: 'How the product changed',
+    description:
+      'What the product gained, lost and renamed over a period. Call this when the user asks ' +
+      'what changed in the last week or month, what a rebuild of the model did, whether ' +
+      'something was lost, or how the business logic has drifted. Reads the versions of ' +
+      '.gitmir/model that the project\'s own git history already holds — nothing is stored for ' +
+      'it, so a repository that ran for a year before it ever saw GitMir still has them. With ' +
+      'no arguments it compares the newest version against the one closest to 30 days back.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...PROJECT_ARG,
+        days: { type: 'number', description: 'How far back to compare, in days. Default 30.' },
+        from: { type: 'string', description: 'Compare from this commit sha instead of a period.' },
+        to: { type: 'string', description: 'Compare to this commit sha instead of the newest version.' },
+        list: { type: 'boolean', description: 'Just list the versions, with their dates and what each commit was doing.' },
+      },
+    },
+    async run(args: Record<string, unknown>, project: string) {
+      const h = await modelVersions(project, 80);
+      if (!h.ok || !h.versions.length) {
+        // Each reason is a different thing to go and do, so name the real one.
+        const why = h.why === 'not-a-repo'
+          ? `${project} is not a git repository, so the model has no versions. History comes from the repository, not from GitMir.`
+          : h.why === 'ignored'
+            ? '.gitmir/model is ignored by git. Commit it and every rebuild becomes a version that can be compared — that is the whole mechanism.'
+            : 'The model has never been committed. Commit .gitmir/model and each rebuild lands as a version, dated, next to the work that caused it.';
+        return { text: why, isError: true };
+      }
+      const vs = h.versions;
+      if (args.list === true) {
+        return { text: [`${vs.length} versions of the model, newest first:`, '',
+          ...vs.map((v) => `${v.date}  ${v.short}  ${v.author}\n  ${v.subject}`)].join('\n') };
+      }
+      if (vs.length < 2) {
+        return { text: 'The model has been committed once. A second commit is what makes a comparison possible.', isError: true };
+      }
+      const hex = /^[0-9a-f]{7,40}$/;
+      const to = typeof args.to === 'string' && hex.test(args.to) ? args.to : vs[0].sha;
+      const days = typeof args.days === 'number' && args.days > 0 ? args.days : 30;
+      const cut = Date.parse(vs[0].date) - days * 864e5;
+      // A project whose whole history is shorter than the period gets all of it, rather
+      // than an arbitrary version in the middle and a comparison of nothing.
+      const from = typeof args.from === 'string' && hex.test(args.from)
+        ? args.from
+        : (vs.find((v) => Date.parse(v.date) <= cut) || vs[vs.length - 1]).sha;
+      if (from === to) return { text: 'Both sides are the same version — there is nothing to compare.', isError: true };
+
+      const [a, b] = await Promise.all([modelAt(project, from), modelAt(project, to)]);
+      const d = diffModels(a, b);
+      const vFrom = vs.find((v) => v.sha === from), vTo = vs.find((v) => v.sha === to);
+      const T = d.totals;
+      const L: string[] = [];
+      L.push(`The product between ${vFrom ? vFrom.date : from.slice(0, 7)} and ${vTo ? vTo.date : to.slice(0, 7)}:`);
+      L.push('');
+      L.push(`  ${T.added} object(s) gained, ${T.removed} no longer in the model, ${T.renamed} renamed`);
+      L.push(`  ${T.linksAdded} connection(s) added, ${T.linksRemoved} removed`);
+      if (d.lost.length) {
+        L.push('');
+        L.push(`THINGS THE PRODUCT USED TO HAVE AND NO LONGER DOES (${d.lost.length}):`);
+        for (const o of d.lost) L.push(`  ${o.name} — ${DIM_WORD[o.dim] || o.dim}`);
+        L.push('  Either the work finished, or a rebuild lost them. Making that call is the point.');
+      }
+      // A count with nothing under it cannot be checked. Everything removed gets
+      // named, whether or not it was one of the kinds worth raising an alarm over.
+      const lostIds = new Set(d.lost.map((o) => o.id));
+      const goneRest = d.objects.removed.filter((o) => !lostIds.has(o.id));
+      if (goneRest.length) {
+        L.push('');
+        L.push(`ALSO NO LONGER IN THE MODEL (${goneRest.length}):`);
+        for (const o of goneRest.slice(0, 40)) L.push(`  ${o.name} — ${DIM_WORD[o.dim] || o.dim}`);
+        if (goneRest.length > 40) L.push(`  …and ${goneRest.length - 40} more`);
+      }
+      if (d.lifecycles.length) {
+        L.push('');
+        L.push('RULES THAT CHANGED:');
+        for (const l of d.lifecycles) {
+          const bits: string[] = [];
+          if (l.statesAdded.length) bits.push(`states added: ${l.statesAdded.join(', ')}`);
+          if (l.statesRemoved.length) bits.push(`states gone: ${l.statesRemoved.join(', ')}`);
+          if (l.transAdded.length) bits.push(`transitions added: ${l.transAdded.join(', ')}`);
+          if (l.transRemoved.length) bits.push(`transitions gone: ${l.transRemoved.join(', ')}`);
+          L.push(`  ${l.name}: ${bits.join(' · ')}`);
+        }
+      }
+      const dims = d.perDimension.filter((x) => x.added || x.removed || x.renamed);
+      if (dims.length) {
+        L.push('');
+        L.push('WHERE IT MOVED:');
+        for (const x of dims) L.push(`  ${DIM_WORD[x.dim] || x.dim}: ${x.was} -> ${x.now}` +
+          ` (${[x.added ? `+${x.added}` : '', x.removed ? `-${x.removed}` : '', x.renamed ? `${x.renamed} renamed` : ''].filter(Boolean).join(' ')})`);
+      }
+      if (d.objects.renamed.length) {
+        L.push('');
+        L.push('RENAMED — same object, new words:');
+        for (const o of d.objects.renamed.slice(0, 30)) L.push(`  ${o.from} -> ${o.to}`);
+      }
+      if (!T.added && !T.removed && !T.renamed && !T.linksAdded && !T.linksRemoved) {
+        L.push('');
+        L.push('Nothing changed in the model between those two versions.');
+      }
+      L.push('');
+      L.push(`Compared ${from.slice(0, 7)} against ${to.slice(0, 7)}; ${vs.length} versions exist, oldest ${vs[vs.length - 1].date}.`);
       return { text: L.join('\n') };
     },
   },

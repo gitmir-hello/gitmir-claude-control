@@ -568,6 +568,9 @@ const VIEW_HEAD = {
   mismatch:   ['What was approved against what was done',
                'Whether finished work stayed inside the scope it declared. Work outside that scope is the thing worth catching.',
                'Click any object to open it. "Touched, never declared" is where to look first.'],
+  changed:    ['How the product changed between two dates',
+               'What the product gained, lost and renamed over a period — read from the versions of the model your repository already has.',
+               'Pick two versions. Anything under "no longer in the model" is either finished work or a rebuild that lost its grip.'],
   timeline:   ['The product changing, in order',
                'What has been done and when, with what each piece of work touched.',
                'Click a chip to open that object and see everything else that has touched it.'],
@@ -630,8 +633,18 @@ const MODEL_GROUPS = [
   { key:'trust', label:'How much to trust it', hint:'Where each answer came from, and which parts of the model to doubt.',
     views:[{key:'confidence',label:'Confidence'}] },
   { key:'done',  label:'What actually happened', hint:'The product changing, in the order it changed.',
-    views:[{key:'mismatch',label:'Intended vs done'},{key:'timeline',label:'Timeline'},{key:'overview',label:'Overview'}] },
+    views:[{key:'changed',label:'What changed'},{key:'mismatch',label:'Intended vs done'},{key:'timeline',label:'Timeline'},{key:'overview',label:'Overview'}] },
 ];
+// The words the product is described in. One list, because the same dimension
+// under two names in two tabs reads as two different things.
+const DIM_LABEL = { modules:'Areas', entities:'Business objects', serverUnits:'Server units',
+  serverFunctions:'Functions', apiRoutes:'Endpoints', frontendUnits:'Screens', events:'Events',
+  processes:'Journeys', statusFlows:'Lifecycles', reactions:'Reactions' };
+const DIM_ORDER = Object.keys(DIM_LABEL);
+// The singular of each, for labelling one object rather than a group of them.
+const DIM_ONE = { modules:'area', entities:'object', serverUnits:'unit', serverFunctions:'function',
+  apiRoutes:'endpoint', frontendUnits:'screen', events:'event', processes:'journey',
+  statusFlows:'lifecycle', reactions:'reaction' };
 const MODEL_VIEWS = MODEL_GROUPS.flatMap(g=>g.views);
 const groupOfView = (k)=> (MODEL_GROUPS.find(g=>g.views.some(v=>v.key===k))||MODEL_GROUPS[0]).key;
 // Layers paint the product map with something other than its own structure: how much
@@ -1079,9 +1092,7 @@ function renderOwnership(view, m, seq){
 // An enterprise will work with an imperfect model. It will not work with one that
 // cannot say which parts are imperfect.
 async function renderConfidence(view, m, seq){
-  const dims=[['modules','Areas'],['entities','Business objects'],['serverFunctions','Functions'],
-    ['apiRoutes','Endpoints'],['frontendUnits','Screens'],['events','Events'],
-    ['processes','Journeys'],['statusFlows','Lifecycles'],['reactions','Reactions']];
+  const dims=DIM_ORDER.filter(k=>k!=='serverUnits').map(k=>[k,DIM_LABEL[k]]);
   const ch=await loadChanges(false);
   const tasks=(ch&&ch.tasks)||[];
   const declared=tasks.filter(t=>t.declared).length;
@@ -1115,6 +1126,168 @@ async function renderConfidence(view, m, seq){
 // The task file says what it set out to change; the log says what it actually
 // touched. Both were already being collected and nobody was putting them side by
 // side — which is the difference between a diagram and change governance.
+// How the product changed between two versions of the model.
+//
+// The versions are the project's own git history of .gitmir/model — nothing is
+// stored here for it. That is why this works on a repository that ran for a year
+// before it ever saw this dashboard: the record was already being kept.
+let histCache=null, histFrom=null, histTo=null;
+async function renderChanged(view, m, seq){
+  if(modelSrc){ view.innerHTML=viewHead('changed')+'<div class="model-empty">A shared model is one snapshot. Its history lives in the repository it came from.</div>'; return; }
+  view.innerHTML=viewHead('changed')+'<div class="model-empty">Reading the versions…</div>';
+  if(!histCache || histCache.path!==selected){
+    const r=await fetch('/api/history?path='+encodeURIComponent(selected)).then(x=>x.json()).catch(()=>null);
+    histCache = r ? {path:selected, ...r} : {path:selected, ok:false, why:'git-failed', versions:[]};
+    histFrom=histTo=null;
+  }
+  if(seq!=null && !viewAlive(seq)) return;
+  const H=histCache;
+  if(!H.ok || H.versions.length<2){
+    // Every reason is a different thing to go and do, so name the actual one.
+    const why = H.why==='not-a-repo' ? 'This project is not in git, so there are no versions to compare. History comes from the repository, not from us.'
+      : H.why==='ignored'            ? '<code>.gitmir/model</code> is in <code>.gitignore</code>. Commit the model and every rebuild becomes a version you can compare — that is the whole mechanism.'
+      : H.versions.length===1        ? 'The model has been committed once. The second commit is what makes a comparison possible.'
+      :                                'The model has never been committed. Commit <code>.gitmir/model</code> and each rebuild lands as a version, dated, next to the work that caused it.';
+    view.innerHTML=viewHead('changed')+'<div class="model-empty">'+why+'</div>';
+    return;
+  }
+  const vs=H.versions;
+  if(!histTo || !vs.some(v=>v.sha===histTo)) histTo=vs[0].sha;
+  // A month is the period people actually ask about, so open on it rather than on
+  // two adjacent rebuilds, which usually differ by nothing worth reading.
+  if(!histFrom || !vs.some(v=>v.sha===histFrom)){
+    const cut=Date.parse(vs[0].date)-30*864e5;
+    const older=vs.find(v=>Date.parse(v.date)<=cut);
+    // A project whose whole history is shorter than the period gets all of it.
+    // Landing on an arbitrary rebuild in the middle opens the view on "nothing
+    // changed", which is true and useless.
+    histFrom=(older||vs[vs.length-1]).sha;
+  }
+  const pick=(which)=>vs.map(v=>'<option value="'+esc(v.sha)+'"'+
+      ((which==='from'?histFrom:histTo)===v.sha?' selected':'')+'>'+
+      esc(v.date+'  ·  '+v.short+'  ·  '+(v.subject||'').slice(0,54))+'</option>').join('');
+  let h=viewHead('changed')+
+    '<div class="hs-bar"><label>From<select class="hs-sel" data-w="from">'+pick('from')+'</select></label>'+
+    '<label>To<select class="hs-sel" data-w="to">'+pick('to')+'</select></label>'+
+    '<span class="hs-n">'+vs.length+' versions of this model, from '+esc(vs[vs.length-1].date)+'</span></div>'+
+    '<div class="hs-body"><div class="model-empty">Comparing…</div></div>';
+  view.innerHTML=h;
+  view.querySelectorAll('.hs-sel').forEach(s=>s.addEventListener('change',()=>{
+    if(s.dataset.w==='from') histFrom=s.value; else histTo=s.value;
+    renderChanged(view, m, seq);
+  }));
+  if(histFrom===histTo){
+    view.querySelector('.hs-body').innerHTML='<div class="model-empty">Same version on both sides — pick two.</div>';
+    return;
+  }
+  const d=await fetch('/api/history/diff?path='+encodeURIComponent(selected)+
+    '&from='+encodeURIComponent(histFrom)+'&to='+encodeURIComponent(histTo)).then(x=>x.json()).catch(()=>null);
+  if(seq!=null && !viewAlive(seq)) return;
+  const body=view.querySelector('.hs-body'); if(!body) return;
+  if(!d || !d.ok){ body.innerHTML='<div class="model-empty">Could not read one of those versions.</div>'; return; }
+  const diff=d.diff, T=diff.totals;
+  const iFrom=vs.findIndex(v=>v.sha===histFrom), iTo=vs.findIndex(v=>v.sha===histTo);
+  const span=Math.abs(iFrom-iTo);
+  // The same name can belong to a function and to the endpoint in front of it.
+  // Two identical chips side by side read as a duplicate rather than as two things.
+  const chips=(list,cls)=>list.map(o=>'<button class="mm-chip '+cls+'" data-id="'+esc(o.id)+'">'+
+    esc(o.name||o.id)+'<i class="hs-kind">'+esc(DIM_ONE[o.dim]||o.dim)+'</i></button>').join('');
+  let b='';
+  const sgn=(n,s)=> n ? s+n : '0';
+  b+='<div class="hs-sum">'+
+     '<div class="hs-k"><b>'+sgn(T.added,'+')+'</b><span>objects gained</span></div>'+
+     '<div class="hs-k'+(T.removed?' bad':'')+'"><b>'+sgn(T.removed,'−')+'</b><span>no longer in the model</span></div>'+
+     '<div class="hs-k"><b>'+T.renamed+'</b><span>renamed</span></div>'+
+     '<div class="hs-k"><b>'+sgn(T.linksAdded,'+')+' / '+sgn(T.linksRemoved,'−')+'</b><span>links between objects</span></div>'+
+     '<div class="hs-k"><b>'+span+'</b><span>rebuild'+(span===1?'':'s')+' apart</span></div></div>';
+  // A removal is the finding. Everything else is a product growing; this is a
+  // product that used to say it did something and no longer does.
+  if(diff.lost.length){
+    b+='<div class="own-warn"><b>'+diff.lost.length+' thing'+(diff.lost.length>1?'s':'')+
+      ' the product used to have and no longer does.</b> Either the work finished, or a rebuild lost it — '+
+      'which is exactly the judgement nobody could make before.</div><div class="hs-lost">'+chips(diff.lost,'missed')+'</div>';
+  }
+  // A count with nothing under it is a number to trust or not, with no way to
+  // decide. Everything removed gets named, whether or not it was the important kind.
+  const lostIds=new Set(diff.lost.map(o=>o.id));
+  const goneRest=diff.objects.removed.filter(o=>!lostIds.has(o.id));
+  if(goneRest.length){
+    b+='<div class="hs-sec">Also no longer in the model</div><div class="hs-lost">'+
+      chips(goneRest.slice(0,60),'missed')+
+      (goneRest.length>60?'<span class="hs-more">+'+(goneRest.length-60)+' more</span>':'')+'</div>';
+  }
+  if(diff.lifecycles.length){
+    b+='<div class="hs-sec">Rules that changed</div>';
+    for(const l of diff.lifecycles){
+      const part=(label,arr,cls)=>arr.length?'<div class="hs-line"><span>'+label+'</span>'+
+        arr.map(x=>'<code class="hs-st '+cls+'">'+esc(x.replace('>',' → '))+'</code>').join('')+'</div>':'';
+      b+='<div class="hs-lc"><div class="hs-lct">'+esc(l.name||l.id)+'</div>'+
+        part('States added',l.statesAdded,'hs-a')+part('States gone',l.statesRemoved,'hs-r')+
+        part('Transitions added',l.transAdded,'hs-a')+part('Transitions gone',l.transRemoved,'hs-r')+'</div>';
+    }
+  }
+  const dims=diff.perDimension.filter(x=>x.added||x.removed||x.renamed);
+  if(dims.length){
+    b+='<div class="hs-sec">Where it moved</div><div class="hs-dims">';
+    for(const x of dims){
+      b+='<div class="hs-dim"><div class="hs-dn">'+esc(DIM_LABEL[x.dim]||x.dim)+'</div>'+
+        '<div class="hs-dv">'+x.was+' → <b>'+x.now+'</b></div>'+
+        '<div class="hs-dd">'+(x.added?'<span class="hs-a">+'+x.added+'</span>':'')+
+        (x.removed?'<span class="hs-r">−'+x.removed+'</span>':'')+
+        (x.renamed?'<span class="hs-ren-n">'+x.renamed+' renamed</span>':'')+'</div></div>';
+    }
+    b+='</div>';
+  }
+  if(diff.objects.renamed.length){
+    b+='<div class="hs-sec">Renamed — same object, new words</div><div class="hs-ren">'+
+      diff.objects.renamed.slice(0,40).map(o=>'<button class="hs-rn" data-id="'+esc(o.id)+'">'+
+        '<s>'+esc(o.from)+'</s> → <b>'+esc(o.to)+'</b></button>').join('')+'</div>';
+  }
+  if(diff.objects.added.length){
+    b+='<div class="hs-sec">New in the product</div><div class="hs-lost">'+
+      chips(diff.objects.added.slice(0,60),'kept')+
+      (diff.objects.added.length>60?'<span class="hs-more">+'+(diff.objects.added.length-60)+' more</span>':'')+'</div>';
+  }
+  // A link is the product saying it does something: this screen calls that
+  // endpoint, this function writes that object. Objects staying put while the
+  // links move is exactly how business logic drifts without anyone noticing.
+  const lk=diff.links.removed.length+diff.links.added.length;
+  if(lk){
+    // One function leaving takes every field it wrote with it — twenty rows that
+    // say one thing. Same source, same kind: one row, and the count carries the size.
+    const fold=(list)=>{
+      const by=new Map();
+      for(const l of list){
+        const k=l.from+'\u001f'+l.kind;
+        if(!by.has(k)) by.set(k,{from:l.from, fromName:l.fromName, kind:l.kind, to:[]});
+        by.get(k).to.push(l);
+      }
+      return [...by.values()];
+    };
+    const row=(g,cls)=>{
+      const ends = g.to.length<=3
+        ? g.to.map(x=>'<button class="hs-lkid" data-id="'+esc(x.to)+'">'+esc(x.toName||x.to)+'</button>').join('<span class="hs-lkc">·</span>')
+        : '<button class="hs-lkid" data-id="'+esc(g.to[0].to)+'">'+esc(g.to[0].toName||g.to[0].to)+'</button>'+
+          '<span class="hs-lkn">and '+(g.to.length-1)+' more</span>';
+      return '<div class="hs-lk '+cls+'"><button class="hs-lkid" data-id="'+esc(g.from)+'">'+esc(g.fromName||g.from)+'</button>'+
+        '<span class="hs-lkk">'+esc(g.kind)+'</span>'+ends+'</div>';
+    };
+    const gone=fold(diff.links.removed), got=fold(diff.links.added);
+    b+='<div class="hs-sec">Connections that changed</div><div class="hs-lks">'+
+      gone.slice(0,25).map(g=>row(g,'hs-r')).join('')+
+      got.slice(0,25).map(g=>row(g,'hs-a')).join('')+'</div>'+
+      ((gone.length>25||got.length>25)?'<div class="hs-more">'+
+        (Math.max(0,gone.length-25)+Math.max(0,got.length-25))+' more sources not shown</div>':'');
+  }
+  if(!T.added && !T.removed && !T.renamed && !T.linksAdded && !T.linksRemoved){
+    b+='<div class="model-empty">Nothing changed in the model between these two versions.</div>';
+  }
+  body.innerHTML=b;
+  body.querySelectorAll('.mm-chip,.hs-rn,.hs-lkid').forEach(x=>x.addEventListener('click',()=>{
+    const id=x.dataset.id; if(kindOf(id)) openContextPopup(kindOf(id), id);
+  }));
+}
+
 async function renderMismatch(view, m, seq){
   const ch=await loadChanges(false);
   const tasks=((ch&&ch.tasks)||[]).filter(t=>t.col==='done');
@@ -1190,6 +1363,7 @@ async function renderModelView(){
   if(modelView==='ownership') return renderOwnership(view, m, seq);
   if(modelView==='confidence') return renderConfidence(view, m, seq);
   if(modelView==='mismatch') return renderMismatch(view, m, seq);
+  if(modelView==='changed') return renderChanged(view, m, seq);
   view.innerHTML='';
   const box=document.createElement('div'); view.appendChild(box);
   if(modelView==='map'){
@@ -1619,9 +1793,7 @@ async function openTaskPopup(pathStr, col, file){
 // ----- overview -----
 function renderOverview(view, d, seq){
   const m=d.model;
-  const dims=[['modules','Modules'],['entities','Entities'],['serverUnits','Server units'],
-    ['serverFunctions','Functions'],['apiRoutes','API routes'],['frontendUnits','Frontend'],
-    ['events','Events'],['processes','Processes'],['statusFlows','Status flows'],['reactions','Reactions']];
+  const dims=DIM_ORDER.map(k=>[k,DIM_LABEL[k]]);
   let html=viewHead('overview')+'<div class="ov-grid">';
   for(const [k,label] of dims){ html+='<div class="ov-card"><div class="ov-n">'+((m[k]||[]).length)+'</div><div class="ov-l">'+label+'</div></div>'; }
   html+='</div>';

@@ -126,7 +126,8 @@ reach becomes the `## Verify` steps**, and a task moves to `done` only when they
 
 `mcp.ts` serves the model over [MCP](https://modelcontextprotocol.io), so Claude Code,
 Cursor, or anything else that speaks it can ask what something is, what breaks if it
-changes, what a task would touch, and queue or approve work — without leaving the editor.
+changes, what a task would touch, what changed in the product last month, and queue or
+approve work — without leaving the editor.
 
 ```json
 { "mcpServers": { "gitmir": {
@@ -152,13 +153,21 @@ node mcp-check.ts examples/refund-shop impact 010-partial-refund.md
 
 ## The rest of the dashboard
 
-| | |
+The Model section is arranged by the question you arrived with, not by the shape of the
+data. Every view opens by saying what it is, what it gives you, and how to use it.
+
+| The question | What answers it |
 |---|---|
-| **Product map** | the product as areas a client would recognise, with layers for **Heat**, **Risk**, **Ownership** and **This change** |
-| **Journeys · Business logic · Decisions · Events · Data** | the paths people walk, entity lifecycles, every branch and its condition, event chains, and where data moves |
-| **Queue** | `todo → in progress → verify → done`, each card carrying its risk and its approval |
-| **Timeline** | the product changing, in the order it changed |
-| **Preview** | open any URL, click an element, get a prompt naming it and the files it probably lives in |
+| **What does it do?** | the product map, the journeys people walk, the business objects, where data moves between areas, and what raises a signal |
+| **Why does it work this way?** | the lifecycle of each object, and every branch with the condition it actually checks |
+| **What would a change cost?** | what a task reaches, how much of the product that is, and whether anything sensitive is in it |
+| **Who answers for it?** | the owning team per area — and the areas nobody has claimed, drawn as the gap they are |
+| **How much should I trust it?** | where the model is solid, where it is guessing, and what it does not know yet |
+| **What actually happened?** | what changed between two dates, whether finished work stayed inside the scope it declared, and the record in order |
+
+Alongside it: **Queue** (`todo → in progress → verify → done`, each card carrying its risk
+and its approval) and **Preview** (open any URL, click an element, get a prompt naming it
+and the files it probably lives in).
 
 Every diagram opens. An area holds its objects, a transition holds what it fires — so the
 top level stays a size you can take in, and the detail is one click inside it rather than a

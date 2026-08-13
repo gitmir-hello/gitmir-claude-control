@@ -58,6 +58,7 @@ node mcp-check.ts examples/refund-shop init      # handshake — version, name, 
 node mcp-check.ts examples/refund-shop tools     # the tools and their behaviour hints
 node mcp-check.ts examples/refund-shop model     # what this product is
 node mcp-check.ts examples/refund-shop impact 010-partial-refund.md
+node mcp-check.ts examples/refund-shop history
 node mcp-check.ts                                # every command
 ```
 
@@ -76,6 +77,7 @@ Three of its commands write: `new`, `approve`, `withdraw`. The rest only read.
 | `gitmir_navigate` | What is this one thing, and what breaks if it changes? Walks the id links both ways — inbound is the direction that gets forgotten. |
 | `gitmir_impact` | What would this change reach, and how risky is it? Takes `ids`, or a `task` file name from the queue. Returns the downstream objects, the areas, the user journeys, and the risk with its arithmetic. |
 | `gitmir_queue` | What work is planned, what does each task touch, what is approved? |
+| `gitmir_history` | How has the product changed? Compares two versions of the model and names what was gained, lost and renamed. Reads the versions your repository already holds — nothing is stored for it. |
 | `gitmir_create_task` | Turn a finding into queued work. Refuses to write a task with no `verify` steps — a requirement you cannot check is a wish, not a task — and shows the impact of what it just wrote. |
 | `gitmir_approve` | Record that a task is approved to run, or withdraw it. Writes the `Approved:` line that travels with the task. |
 
@@ -99,6 +101,19 @@ model-controlled, so the agent can reach for the procedure the moment it finds
 it needs one.
 
 `gitmir_setup` only ever creates folders and a list entry. It never touches code.
+
+## Where the history comes from
+
+`gitmir_history` answers "what changed last month" from the versions of
+`.gitmir/model` in your project's own git log. Nothing is stored for it, and that
+is the point: a repository that ran for a year before it ever saw GitMir already
+has the record, dated, attached to the commit message that says what was being
+done at the time.
+
+The consequence is a requirement: **commit `.gitmir/model`**. A project that
+ignores it has one version — the current one — and no way to see a rebuild
+quietly drop an entity. The tool says which of those two situations you are in
+rather than returning an empty answer.
 
 ## It needs a model
 
@@ -134,7 +149,7 @@ than no hint at all.
 
 | Tool | read-only | destructive | idempotent | open world |
 |---|---|---|---|---|
-| `gitmir_model` · `gitmir_navigate` · `gitmir_impact` · `gitmir_queue` · `gitmir_skills` · `gitmir_skill` | yes | no | yes | no |
+| `gitmir_model` · `gitmir_navigate` · `gitmir_impact` · `gitmir_queue` · `gitmir_history` · `gitmir_skills` · `gitmir_skill` | yes | no | yes | no |
 | `gitmir_setup` | no | no | **yes** | no |
 | `gitmir_create_task` | no | no | **no** | no |
 | `gitmir_approve` | no | **yes** | no | no |
@@ -152,5 +167,5 @@ the only thing any tool touches is this machine's own `.gitmir/` and `tasks/` fo
   text. The consumer here is a model reading prose, and the arithmetic it needs is in
   the prose already; a second serialization would double the payload to serve client
   code that does not exist yet.
-- **No pagination cursors.** Six tools and eleven prompts fit in one response. A
+- **No pagination cursors.** Ten tools and eleven prompts fit in one response. A
   `cursor` is accepted and ignored rather than rejected, so a paginating client works.

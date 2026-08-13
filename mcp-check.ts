@@ -37,6 +37,8 @@ examples/refund-shop, which ships with this repository.
   nav <id>          what is this object, and what breaks if it changes
   impact <what>     what a change reaches: ids separated by commas, OR a task file name
   queue             the planned work
+  history           how the product changed over the last 30 days
+  versions          every version of the model this project has
   new <title>       write a task (with proper verify steps)
   newbad <title>    try to write a task with NO verify steps — the server must refuse
   approve <column> <file>     approve a task
@@ -196,6 +198,8 @@ switch (cmd) {
     show(await call('gitmir_impact', arg.endsWith('.md') ? { task: arg } : { ids: arg.split(/[,\s]+/).filter(Boolean) }));
     break;
   case 'queue':    head('The queue');                       show(await call('gitmir_queue', {})); break;
+  case 'history':  head('How the product changed');           show(await call('gitmir_history', arg ? { days: Number(arg) } : {})); break;
+  case 'versions': head('Versions of the model');             show(await call('gitmir_history', { list: true })); break;
   case 'new':      head('Writing a task: ' + arg);          show(await call('gitmir_create_task', GOOD(arg))); break;
   case 'newbad':   head('A task with no checks (expect a refusal)'); show(await call('gitmir_create_task', BAD(arg))); break;
   case 'approve':  head('Approving');                       show(await call('gitmir_approve', { column: argv[2], file: argv[3] })); break;
