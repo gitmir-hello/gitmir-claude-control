@@ -683,14 +683,63 @@ function placeLevel(level, cols, snap) {
   const gapX = level.gapX || METRIC.colGap;
   const gapY = level.gapY || METRIC.rowGap;
 
-  let x = 0;
-  const colX = [];
+  const colW = [];
   for (let c = 0; c < cols.length; c++) {
-    const list = cols[c] || [];
-    const cw = list.reduce((m, n) => Math.max(m, n.w), METRIC.minW);
-    colX[c] = x + cw / 2;
-    x += cw + gapX;
+    colW[c] = (cols[c] || []).reduce((m, n) => Math.max(m, n.w), METRIC.minW);
   }
+
+  // --- folding a long run into bands.
+  //
+  // A product whose areas form a chain — content feeds broadcast feeds devices —
+  // lays out as one row six columns wide. Fitted to a window that picture scales
+  // down to the floor and leaves the lower half empty: six words in a field of
+  // grid, which is what the reader gets to look at. Fold the run instead. The
+  // reading stays left to right, it carries on below, and the cards keep a size
+  // somebody can read. Only at the top level: inside an opened container the
+  // panel sets the width, not the window.
+  let perBand = cols.length;
+  if (!level.parent && cols.length >= 4) {
+    const totalW = colW.reduce((s, w) => s + w + gapX, 0) - gapX;
+    const avail = Math.max(320, (cssW || 1400) - 180);
+    // Below this a card is a coloured tile with a name on it; folding buys back
+    // the scale that keeps its rows readable.
+    const READABLE = 0.82;
+    if (totalW * READABLE > avail) {
+      // How many columns fit across at a readable scale. The first run is the
+      // answer: every band after it gets the same count, and the last one is
+      // simply shorter.
+      const budget = avail / READABLE;
+      let per = 0, run = 0;
+      for (let c = 0; c < cols.length; c++) {
+        const next = run ? run + gapX + colW[c] : colW[c];
+        if (run && next > budget) break;
+        run = next; per++;
+      }
+      perBand = Math.max(2, Math.min(cols.length, per));
+    }
+  }
+
+  // Column x within its band, and the band's own vertical offset.
+  const colX = [], bandOf = [];
+  const bandH = [];
+  for (let c = 0; c < cols.length; c++) bandOf[c] = Math.floor(c / perBand);
+  for (let b = 0; b <= bandOf[cols.length - 1]; b++) {
+    let x = 0, h = 0;
+    for (let c = b * perBand; c < Math.min(cols.length, (b + 1) * perBand); c++) {
+      colX[c] = x + colW[c] / 2;
+      x += colW[c] + gapX;
+      const list = cols[c] || [];
+      let total = 0;
+      for (const n of list) total += n.h + gapY;
+      h = Math.max(h, total - gapY);
+    }
+    bandH[b] = h;
+  }
+  // Bands are separated by more than a row gap: the eye has to know it reached the
+  // end of one and started the next, and a plain row gap reads as the same run.
+  const bandY = [];
+  let yAcc = 0;
+  for (let b = 0; b < bandH.length; b++) { bandY[b] = yAcc + bandH[b] / 2; yAcc += bandH[b] + gapY * 2.2; }
 
   for (let c = 0; c < cols.length; c++) {
     const list = cols[c];
@@ -698,7 +747,7 @@ function placeLevel(level, cols, snap) {
     let total = 0;
     for (const n of list) total += n.h + gapY;
     total -= gapY;
-    let y = -total / 2;
+    let y = bandY[bandOf[c]] - total / 2;
     for (const n of list) {
       n.ltx = colX[c];
       n.lty = y + n.h / 2;
@@ -1309,7 +1358,19 @@ function drawEdge(ctx, e, t) {
   if (e.label && cam.scale > labelZoom && (focus > 0.02 || FLAGS.labels)) {
     const a = (FLAGS.labels ? 0.72 : 0.34) + focus * 0.28;
     const size = 10.5;
-    const tw = textWidth(e.label, size, 600, 0.5);
+    // "POST /api/v1/media/:id/broadcast" is wider than the gap between two
+    // neighbouring cards, so at full length it can only ever be printed across
+    // one of them. Cut it to what the gap holds — a shortened label still names
+    // the thing, a label lying over a card's rows destroys both.
+    const gap = Math.abs(worldToScreen(e.b.x, e.b.y).x - worldToScreen(e.a.x, e.a.y).x)
+      - (e.a.w + e.b.w) / 2 * cam.scale;
+    const room = Math.max(64, gap - 14);
+    let label = e.label;
+    if (textWidth(label, size, 600, 0.5) > room) {
+      while (label.length > 6 && textWidth(label + '…', size, 600, 0.5) > room) label = label.slice(0, -1);
+      label = label.length > 6 ? label + '…' : e.label;   // too tight to shorten usefully
+    }
+    const tw = textWidth(label, size, 600, 0.5);
     const hw = tw / 2 + 6, hh = 9;
 
     // Somewhere along the line that is clear of the cards and of the labels
@@ -1323,19 +1384,33 @@ function drawEdge(ctx, e, t) {
       const q = pointAtLen(e, at);
       const s = worldToScreen(q.x, q.y);
       if (!boxHitsLabel(s.x - hw, s.y - hh, hw * 2, hh * 2)
-          && !boxHitsNode(s.x - hw, s.y - hh, hw * 2, hh * 2, e.a, e.b)) { mp = s; break; }
+          && !boxHitsNode(s.x - hw, s.y - hh, hw * 2, hh * 2)) { mp = s; break; }
     }
+    // An edge that spans several layers passes over every card between its ends,
+    // so on a flat chain no point along the line is ever clear. Step off the line
+    // instead: the band above and below it is empty, and a label a few pixels off
+    // its own edge still reads as belonging to it.
     if (!mp) {
-      for (const at of AT) {
+      const OFF = [-1, 1].flatMap((s) => [hh * 2.4, hh * 4.2, hh * 6].map((d) => s * d));
+      outer:
+      for (const at of [0.5, 0.38, 0.62, 0.28, 0.72]) {
         const q = pointAtLen(e, at);
         const s = worldToScreen(q.x, q.y);
-        if (!boxHitsLabel(s.x - hw, s.y - hh, hw * 2, hh * 2)) { mp = s; break; }
+        for (const dy of OFF) {
+          if (!boxHitsLabel(s.x - hw, s.y + dy - hh, hw * 2, hh * 2)
+              && !boxHitsNode(s.x - hw, s.y + dy - hh, hw * 2, hh * 2)) {
+            mp = { x: s.x, y: s.y + dy }; break outer;
+          }
+        }
       }
     }
-    if (!mp) return;                    // nowhere free of other labels: say nothing
+    // Nowhere clear at all. Saying nothing beats printing it across a card: the
+    // card's own name is the more useful of the two, and one unreadable word on
+    // top of another is worse than either alone.
+    if (!mp) return;
     // Queued, not drawn: panels are painted after the edges, so a label drawn
     // here would end up underneath one.
-    edgeLabels.push({ x: mp.x, y: mp.y, hw, hh, size, text: e.label, a: a * dim, cb });
+    edgeLabels.push({ x: mp.x, y: mp.y, hw, hh, size, text: label, a: a * dim, cb });
   }
 }
 
@@ -1349,7 +1424,9 @@ function boxHitsLabel(x, y, w, h) {
 }
 function flushEdgeLabels(ctx) {
   for (const L of edgeLabels) {
-    ctx.fillStyle = `rgba(3,9,17,${0.97 * Math.min(1, L.a + 0.25)})`;
+    // Opaque, always. The alpha belongs to the text: a backing that fades lets the
+    // card underneath print through, which is exactly the mush this is here to stop.
+    ctx.fillStyle = 'rgba(3,9,17,0.97)';
     ctx.fillRect(L.x - L.hw, L.y - L.hh, L.hw * 2, L.hh * 2);
     ctx.strokeStyle = rgba(L.cb, 0.5 * L.a);
     ctx.lineWidth = 1;

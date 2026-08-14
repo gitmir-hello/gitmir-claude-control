@@ -1495,11 +1495,7 @@ async function renderModelView(){
     box.insertAdjacentHTML('beforeend', viewHead('map'));
     const cap=document.createElement('div'); cap.className='map-cap';
     // No apostrophes in here on purpose: this string is emitted from a template literal.
-    const structure='Each block is an area of the product — what it owns (◆) and how much of it there is. '+
-      'A line means one area touches another: <b>writes X</b> — it changes data owned by that area · '+
-      '<b>uses</b> — its screens call that area · <b>calls</b> — it triggers logic over there · '+
-      'a named signal is an event one area raises and another reacts to. '+
-      '<b>Click an area to open it</b> and see the objects, screens and endpoints inside — Esc goes back.';
+    const structure='A line means one area touches another: <b>writes X</b> — it changes data owned by that area \u00b7 <b>uses</b> — its screens call that area \u00b7 <b>calls</b> — it triggers logic over there \u00b7 a named signal is an event one area raises and another reacts to.';
     // With a layer on, the layer is what the picture now means. Leaving the structure
     // paragraph in the prominent slot and demoting the layer to a grey line in the
     // toolbar inverts that — readers looked at the big text, saw it describe the plain
@@ -1509,8 +1505,7 @@ async function renderModelView(){
       cap.innerHTML='<b>'+esc(name)+'</b> — '+esc(layerData.legend)+
         '<span class="map-cap2">The blocks and lines are unchanged: '+structure+'</span>';
     } else {
-      cap.innerHTML=structure+
-        '<span class="map-cap2">Read it together with whoever asked for the product: if a line is missing or points the wrong way, the understanding is wrong — and that is far cheaper to find now than after it is built.</span>';
+      cap.innerHTML=structure;
     }
     box.appendChild(cap);
     const d=document.createElement('div'); box.appendChild(d);
@@ -1530,11 +1525,9 @@ async function renderModelView(){
     // once you know the arrow points the way the data travels.
     box.insertAdjacentHTML('beforeend', viewHead('flow'));
     const cap=document.createElement('div'); cap.className='map-cap';
-    cap.innerHTML='Each block is an area of the product. <b>A line is data moving</b>, and it points the way the data '+
-      'travels — the label names what moves: an object being written into another area, an object being read out of the '+
-      'area that owns it, an event one area raises and another handles, or an endpoint answering a screen.'+
-      '<span class="map-cap2">Open an area to see the chain it runs: screen → endpoint → function → object. '+
-      'Everything at once was the old picture, and on a real product that is a hundred boxes with no shape to them.</span>';
+    cap.innerHTML='<b>A line is data moving</b>, and it points the way it travels — the label names what moves: '+
+      'an object written into another area, an object read out of the area that owns it, an event one area raises '+
+      'and another handles, or an endpoint answering a screen.';
     box.appendChild(cap);
     const d=document.createElement('div'); box.appendChild(d);
     const scene=window.hudSceneDataFlow
