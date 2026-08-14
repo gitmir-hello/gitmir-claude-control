@@ -37,6 +37,9 @@ examples/refund-shop, which ships with this repository.
   nav <id>          what is this object, and what breaks if it changes
   impact <what>     what a change reaches: ids separated by commas, OR a task file name
   queue             the planned work
+  flag              record a finding (writes into the project)
+  findings          where the code disagrees with the product
+  accept <id>       record a decision to live with one
   history           how the product changed over the last 30 days
   versions          every version of the model this project has
   new <title>       write a task (with proper verify steps)
@@ -198,6 +201,17 @@ switch (cmd) {
     show(await call('gitmir_impact', arg.endsWith('.md') ? { task: arg } : { ids: arg.split(/[,\s]+/).filter(Boolean) }));
     break;
   case 'queue':    head('The queue');                       show(await call('gitmir_queue', {})); break;
+  case 'flag':     head('Recording a finding');
+    show(await call('gitmir_flag', {
+      rule: 'A refund must never exceed what was actually paid for the order.',
+      actual: 'refundOrder subtracts the requested amount without checking it against the order total.',
+      consequence: 'A partial refund larger than the payment leaves the shop owing money.',
+      source: 'mcp-check, to prove the write path works — delete it afterwards',
+      touches: ['sf-refund-order'], kind: 'contradicts-spec', severity: 'high', readFrom: ['src/refund.ts'],
+    })); break;
+  case 'findings': head('Where the code disagrees with the product'); show(await call('gitmir_findings', { status: arg || 'open' })); break;
+  case 'accept':   head('Deciding to live with one');
+    show(await call('gitmir_accept_finding', { id: argv[2], status: 'accepted', by: 'mcp-check', why: 'Proving the decision path records a name and a reason.' })); break;
   case 'history':  head('How the product changed');           show(await call('gitmir_history', arg ? { days: Number(arg) } : {})); break;
   case 'versions': head('Versions of the model');             show(await call('gitmir_history', { list: true })); break;
   case 'new':      head('Writing a task: ' + arg);          show(await call('gitmir_create_task', GOOD(arg))); break;

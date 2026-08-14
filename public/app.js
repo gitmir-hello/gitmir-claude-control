@@ -568,6 +568,9 @@ const VIEW_HEAD = {
   mismatch:   ['What was approved against what was done',
                'Whether finished work stayed inside the scope it declared. Work outside that scope is the thing worth catching.',
                'Click any object to open it. "Touched, never declared" is where to look first.'],
+  spec:       ['Where the code does not do what the product says',
+               'Every known deviation between the written rules and the running code, on the objects it sits on — so a change that touches one cannot be planned in ignorance of it.',
+               'Accepting one records who decided and why. That is the difference between a product with known limits and a product with surprises.'],
   changed:    ['How the product changed between two dates',
                'What the product gained, lost and renamed over a period — read from the versions of the model your repository already has.',
                'Pick two versions. Anything under "no longer in the model" is either finished work or a rebuild that lost its grip.'],
@@ -603,6 +606,20 @@ function subjectPicker(items, currentId, onPick){
 }
 
 let modelData = null;
+// Where the code does not do what the product says. Held next to the model rather
+// than inside it: the model is rebuilt from code and would throw these away.
+let findingsData = { findings: [], summary: null };
+async function loadFindings(pathStr){
+  if(!pathStr){ findingsData={findings:[],summary:null}; if(window.hudSetFindings) window.hudSetFindings([]); return; }
+  try{
+    const r=await fetch('/api/findings?path='+encodeURIComponent(pathStr));
+    findingsData=await r.json();
+  }catch{ findingsData={findings:[],summary:null}; }
+  if(!Array.isArray(findingsData.findings)) findingsData.findings=[];
+  // Every diagram reads the same registry, so a mark cannot appear on one and not another.
+  if(window.hudSetFindings) window.hudSetFindings(findingsData.findings);
+}
+const findingsOnId = (id)=> (findingsData.findings||[]).filter(f=>(f.touches||[]).includes(id));
 let modelFor=null;   // which project modelData belongs to
 let modelView = 'map';
 let journeyPick = null;   // one journey on screen at a time, not all twelve
@@ -633,7 +650,7 @@ const MODEL_GROUPS = [
   { key:'trust', label:'How much to trust it', hint:'Where each answer came from, and which parts of the model to doubt.',
     views:[{key:'confidence',label:'Confidence'}] },
   { key:'done',  label:'What actually happened', hint:'The product changing, in the order it changed.',
-    views:[{key:'changed',label:'What changed'},{key:'mismatch',label:'Intended vs done'},{key:'timeline',label:'Timeline'},{key:'overview',label:'Overview'}] },
+    views:[{key:'spec',label:'Spec vs code'},{key:'changed',label:'What changed'},{key:'mismatch',label:'Intended vs done'},{key:'timeline',label:'Timeline'},{key:'overview',label:'Overview'}] },
 ];
 // The words the product is described in. One list, because the same dimension
 // under two names in two tabs reads as two different things.
@@ -831,6 +848,9 @@ async function loadModel(pathStr){
   // back to our own model rather than showing an empty pane for a missing source.
   if(modelSrc && !(d.shared||[]).some(s=>s.name===modelSrc)){ modelSrc=null; return loadModel(pathStr); }
   modelData=d; modelFor=pathStr;
+  // A shared model is somebody else's snapshot; their findings are about their
+  // copy of the code and would be claims about a repository we cannot see.
+  await loadFindings(modelSrc ? null : pathStr);
   renderModelSrc(d);
   renderModelStale(d);
   renderIngest(d);   // after stale: a running ingest owns the tab badge
@@ -1126,6 +1146,107 @@ async function renderConfidence(view, m, seq){
 // The task file says what it set out to change; the log says what it actually
 // touched. Both were already being collected and nobody was putting them side by
 // side — which is the difference between a diagram and change governance.
+// Where the code does not do what the product says it does.
+//
+// Kept out of the model on purpose: the model is derived from code and rebuilt
+// whole, and these are judgements a person made about the gap between two
+// sources. A rebuild would throw them away.
+let specFilter = 'open';
+async function renderSpec(view, m, seq){
+  if(modelSrc){ view.innerHTML=viewHead('spec')+'<div class="model-empty">A shared model is a snapshot of someone else’s code. Findings are claims about a repository this machine cannot see.</div>'; return; }
+  await loadFindings(selected);
+  if(seq!=null && !viewAlive(seq)) return;
+  const all=findingsData.findings||[];
+  if(!all.length){
+    view.innerHTML=viewHead('spec')+
+      '<div class="model-empty">Nothing recorded yet.<br><br>'+
+      'These are written by whoever reads the product’s rules against its code — usually your agent, with '+
+      '<code>gitmir_flag</code>, at the moment it notices. Ask it to <b>check the spec against the code and flag what does not match</b>, '+
+      'and what it finds lands here instead of scrolling out of a conversation.</div>';
+    return;
+  }
+  const S=findingsData.summary||{};
+  const counts={open:all.filter(f=>f.status==='open').length,
+                accepted:all.filter(f=>f.status==='accepted').length,
+                fixed:all.filter(f=>f.status==='fixed').length, all:all.length};
+  if(!counts[specFilter]) specFilter = counts.open ? 'open' : 'all';
+
+  let h=viewHead('spec');
+  h+='<div class="sp-sum">'+
+     '<div class="sp-k'+(counts.open?' bad':'')+'"><b>'+counts.open+'</b><span>open</span></div>'+
+     '<div class="sp-k"><b>'+counts.accepted+'</b><span>accepted on purpose</span></div>'+
+     '<div class="sp-k"><b>'+counts.fixed+'</b><span>fixed</span></div>'+
+     (S.stale?'<div class="sp-k warn"><b>'+S.stale+'</b><span>need re-checking</span></div>':'')+
+     '</div>';
+  h+='<div class="ent-picker">'+
+    [['open','Open'],['accepted','Accepted'],['fixed','Fixed'],['all','All']]
+      .filter(([k])=>counts[k])
+      .map(([k,l])=>'<button class="epill'+(specFilter===k?' on':'')+'" data-f="'+k+'">'+l+' <i>'+counts[k]+'</i></button>').join('')+
+    '</div><div class="sp-list"></div>';
+  view.innerHTML=h;
+  view.querySelectorAll('.epill').forEach(b=>b.addEventListener('click',()=>{ specFilter=b.dataset.f; renderSpec(view,m,seq); }));
+
+  const list=view.querySelector('.sp-list');
+  const rows=(specFilter==='all'?all:all.filter(f=>f.status===specFilter))
+    // Worst first, and inside a severity the ones that need re-checking first:
+    // an unverified claim is the one most likely to be wasting somebody's time.
+    .sort((a,b)=>({high:0,medium:1,low:2}[a.severity]-{high:0,medium:1,low:2}[b.severity]) || (b.stale?1:0)-(a.stale?1:0));
+  for(const f of rows) list.appendChild(specCard(f, m, view, seq));
+}
+
+function specCard(f, m, view, seq){
+  const el=document.createElement('div');
+  el.className='sp-card '+f.status+(f.stale?' stale':'');
+  const KIND={'contradicts-spec':'does something else','not-implemented':'does nothing','undefined':'the rules never said','risk':'works, will not survive production'};
+  const chips=(f.touches||[]).map(id=>'<button class="mm-chip missed" data-id="'+esc(id)+'">'+
+    esc(labelOf(id,m)||id)+'<i class="hs-kind">'+esc(DIM_ONE[({module:'modules',entity:'entities',function:'serverFunctions',route:'apiRoutes',frontend:'frontendUnits',event:'events',process:'processes',statusFlow:'statusFlows'})[kindOf(id)]]||kindOf(id)||'')+'</i></button>').join('');
+  el.innerHTML=
+    '<div class="sp-top"><span class="sp-sev '+esc(f.severity)+'">'+esc(f.severity)+'</span>'+
+      '<span class="sp-kind">'+esc(KIND[f.kind]||f.kind)+'</span>'+
+      (f.source?'<span class="sp-src">'+esc(f.source)+'</span>':'')+
+      (f.status==='accepted'?'<span class="sp-badge acc">accepted</span>':'')+
+      (f.status==='fixed'?'<span class="sp-badge fix">fixed</span>':'')+
+      (f.stale?'<span class="sp-badge stale">re-check · '+esc(f.movedFile||'')+' changed</span>':'')+'</div>'+
+    '<div class="sp-line"><span>Should</span><div>'+esc(f.rule)+'</div></div>'+
+    '<div class="sp-line"><span>Does</span><div>'+esc(f.actual)+'</div></div>'+
+    (f.consequence?'<div class="sp-line"><span>Costs</span><div>'+esc(f.consequence)+'</div></div>':'')+
+    (chips?'<div class="sp-line"><span>On</span><div class="sp-chips">'+chips+'</div></div>':'')+
+    (f.decision?'<div class="sp-dec"><b>'+esc(f.decision.by)+'</b> decided on '+esc(f.decision.at)+': '+esc(f.decision.why)+'</div>':'')+
+    '<div class="sp-act"></div>';
+  el.querySelectorAll('.mm-chip').forEach(b=>b.addEventListener('click',()=>{
+    const id=b.dataset.id; if(kindOf(id)) openContextPopup(kindOf(id), id);
+  }));
+  const act=el.querySelector('.sp-act');
+  const btn=(label,title,fn)=>{ const b=document.createElement('button'); b.className='sp-btn'; b.textContent=label; b.title=title||''; b.addEventListener('click',fn); act.appendChild(b); return b; };
+  const move=async(status,decision)=>{
+    const r=await fetch('/api/finding-status',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({path:selected,id:f.id,status,decision})}).then(x=>x.json()).catch(()=>null);
+    if(!r||r.error){ act.insertAdjacentHTML('beforeend','<span class="sp-err">'+esc((r&&r.error)||'Could not save.')+'</span>'); return; }
+    renderSpec(view, m, seq);
+  };
+  if(f.status!=='fixed') btn('Mark fixed','The code now does what the rule says',()=>move('fixed'));
+  if(f.status==='open'){
+    btn('Accept this gap','The product will keep behaving this way, on purpose',()=>{
+      // A decision with nobody attached is one everybody forgot; the form asks for
+      // both before it will record anything.
+      act.innerHTML='<div class="sp-form">'+
+        '<input class="sp-by" placeholder="Who decided">'+
+        '<input class="sp-why" placeholder="Why this is acceptable">'+
+        '<button class="sp-btn go">Record the decision</button>'+
+        '<button class="sp-btn cancel">Cancel</button>'+
+        '<div class="sp-err-slot"></div></div>';
+      act.querySelector('.cancel').addEventListener('click',()=>renderSpec(view,m,seq));
+      act.querySelector('.go').addEventListener('click',()=>{
+        const by=act.querySelector('.sp-by').value.trim(), why=act.querySelector('.sp-why').value.trim();
+        if(!by||!why){ act.querySelector('.sp-err-slot').innerHTML='<span class="sp-err">Both, or it is not a decision anybody can be asked about later.</span>'; return; }
+        move('accepted',{by,why});
+      });
+    });
+  }
+  if(f.status!=='open') btn('Reopen','It is still wrong',()=>move('open'));
+  return el;
+}
+
 // How the product changed between two versions of the model.
 //
 // The versions are the project's own git history of .gitmir/model — nothing is
@@ -1364,6 +1485,7 @@ async function renderModelView(){
   if(modelView==='confidence') return renderConfidence(view, m, seq);
   if(modelView==='mismatch') return renderMismatch(view, m, seq);
   if(modelView==='changed') return renderChanged(view, m, seq);
+  if(modelView==='spec') return renderSpec(view, m, seq);
   view.innerHTML='';
   const box=document.createElement('div'); view.appendChild(box);
   if(modelView==='map'){
@@ -1459,7 +1581,28 @@ function objName(kind,id,m){
 }
 function ctxTitle(kind,id,m){ return objName(kind,id,m)+' ('+kind+')'; }
 
+// The context is what gets pasted into an agent. A known deviation left out of it
+// means the agent plans a change against rules the code does not actually follow —
+// so it goes in every path out of the builder, not into one of the six branches.
 function gatherContext(kind,id,m){
+  const base=gatherContextBase(kind,id,m);
+  const bad=findingsOnId(id).filter(f=>f.status!=='fixed');
+  if(!bad.length) return base;
+  const L=[base,'','## Known to be wrong here'];
+  for(const f of bad){
+    L.push('');
+    L.push('- SHOULD: '+f.rule+(f.source?'  ('+f.source+')':''));
+    L.push('  DOES:   '+f.actual);
+    if(f.consequence) L.push('  COSTS:  '+f.consequence);
+    if(f.status==='accepted'&&f.decision) L.push('  ACCEPTED by '+f.decision.by+' on '+f.decision.at+': '+f.decision.why);
+    if(f.stale) L.push('  RE-CHECK: '+(f.movedFile||'the file this was read from')+' has changed since it was checked.');
+  }
+  L.push('');
+  L.push('Say this out loud before changing any of it.');
+  return L.join('\n');
+}
+
+function gatherContextBase(kind,id,m){
   const ix=ctxIx(m); const nm=(mp,i)=> (mp.get(i)||{}).name || i; const L=[];
   if(kind==='entity'){
     const e=ix.ent.get(id); if(!e) return 'Entity not found: '+id;
@@ -1509,6 +1652,25 @@ document.addEventListener('fullscreenchange', ()=>{
   }
 });
 
+// Known deviations on this object, for the card somebody opens before changing it.
+function ctxFindings(id){
+  const list=findingsOnId(id).filter(f=>f.status!=='fixed');
+  if(!list.length) return '';
+  const open=list.filter(f=>f.status==='open');
+  return '<div class="ctx-bad'+(open.length?'':' accepted')+'">'+
+    '<div class="ctx-bad-h">'+(open.length
+      ? (open.length>1?open.length+' things here do not do what the product says':'This does not do what the product says')
+      : 'A known gap here, accepted on purpose')+'</div>'+
+    list.map(f=>'<div class="ctx-bad-i">'+
+      '<div><b>Should</b> '+esc(f.rule)+(f.source?' <i>('+esc(f.source)+')</i>':'')+'</div>'+
+      '<div><b>Does</b> '+esc(f.actual)+'</div>'+
+      (f.decision?'<div class="ctx-bad-d">Accepted by '+esc(f.decision.by)+' on '+esc(f.decision.at)+': '+esc(f.decision.why)+'</div>':'')+
+      (f.stale?'<div class="ctx-bad-d">Needs re-checking — '+esc(f.movedFile||'the file it was read from')+' has changed since.</div>':'')+
+    '</div>').join('')+
+    '<div class="ctx-bad-f">It travels with any task made here, and the radius warns anyone whose change reaches it.</div>'+
+  '</div>';
+}
+
 function openContextPopup(kind,id){
   if(!modelData) return; const m=modelData.model;
   const ctx=gatherContext(kind,id,m); const title=ctxTitle(kind,id,m);
@@ -1521,6 +1683,9 @@ function openContextPopup(kind,id){
         ? 'Deterministic context from the model shared by <b>'+esc(srcLabel())+'</b>. <b>Send to team</b> delivers it to <b>everyone currently online</b> in your workspace (the relay broadcasts — it cannot target one person), landing in their <code>tasks/todo/</code>. <b>Queue here</b> instead writes it into this local project.'
         : 'Deterministic context — assembled from the model by walking id-links. Paste into Claude, or turn it into a queued task.')+'</div>'+
       objectFacts(kind, id, m)+
+      // Above the context, not below it: somebody who opens this and stops reading
+      // after two lines must still have seen that this thing is known to be wrong.
+      ctxFindings(id)+
       '<pre class="ctx-pre">'+esc(ctx)+'</pre>'+
       // A shared view is read-only: it has no project on disk to queue into and no bridge
       // to send over. Copying context still works — that is the useful half for a reader.
@@ -2794,6 +2959,23 @@ function drawImpactDetail(row, m){
   for(const [l,n,d] of cards) h+='<div class="imp-card"><div class="imp-n">'+n+'</div><div class="imp-l">'+esc(l)+'</div>'+
     (d!=null&&d>0&&d<n?'<div class="imp-d">'+d+' directly</div>':'')+'</div>';
   h+='</div>';
+
+  // Before the picture and before the risk table: somebody about to approve this
+  // needs to know the ground it lands on is already not doing what it promises.
+  {
+    const reached=new Set([].concat(br.seed||[], [...(br.dist||new Map()).keys()]));
+    const hit=(findingsData.findings||[]).filter(f=>f.status==='open'&&(f.touches||[]).some(id=>reached.has(id)));
+    if(hit.length){
+      const direct=hit.filter(f=>(f.touches||[]).some(id=>(br.seed||[]).includes(id)));
+      h+='<div class="imp-bad"><div class="imp-bad-h">'+hit.length+' known deviation'+(hit.length>1?'s':'')+
+        ' in what this reaches'+(direct.length?' — '+direct.length+' on what it changes directly':'')+'</div>'+
+        hit.slice(0,6).map(f=>'<div class="imp-bad-i"><b>'+esc(f.severity)+'</b>'+esc(f.rule)+
+          (f.source?' <i>('+esc(f.source)+')</i>':'')+'<span>'+esc(f.actual)+'</span></div>').join('')+
+        (hit.length>6?'<div class="imp-bad-i">…and '+(hit.length-6)+' more, in Spec vs code.</div>':'')+
+        '<div class="imp-bad-f">Changing something that already breaks a rule is the cheapest moment to fix it, and the last moment anybody is looking.</div>'+
+      '</div>';
+    }
+  }
 
   h+='<div class="imp-sec">What it reaches, drawn</div><div class="imp-graph" id="impGraph"></div>';
 

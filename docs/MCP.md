@@ -78,6 +78,9 @@ Three of its commands write: `new`, `approve`, `withdraw`. The rest only read.
 | `gitmir_impact` | What would this change reach, and how risky is it? Takes `ids`, or a `task` file name from the queue. Returns the downstream objects, the areas, the user journeys, and the risk with its arithmetic. |
 | `gitmir_queue` | What work is planned, what does each task touch, what is approved? |
 | `gitmir_history` | How has the product changed? Compares two versions of the model and names what was gained, lost and renamed. Reads the versions your repository already holds — nothing is stored for it. |
+| `gitmir_flag` | Record that the code does not do what the product says. Written at the moment it is noticed, in one call — a finding described only in a reply is gone when the conversation ends. |
+| `gitmir_findings` | What is already known to be wrong, what was accepted on purpose and by whom, and what needs re-checking because the code has moved since. |
+| `gitmir_accept_finding` | Record the decision: accepted (needs a name and a reason), fixed, or reopened. |
 | `gitmir_create_task` | Turn a finding into queued work. Refuses to write a task with no `verify` steps — a requirement you cannot check is a wish, not a task — and shows the impact of what it just wrote. |
 | `gitmir_approve` | Record that a task is approved to run, or withdraw it. Writes the `Approved:` line that travels with the task. |
 
@@ -101,6 +104,24 @@ model-controlled, so the agent can reach for the procedure the moment it finds
 it needs one.
 
 `gitmir_setup` only ever creates folders and a list entry. It never touches code.
+
+## Where a finding lives, and why not in the model
+
+`gitmir_flag` writes one file into `.gitmir/findings/` — deliberately next to the model
+rather than inside it.
+
+The model is derived from code and rebuilt whole. A rebuild on a real project dropped an
+entity, an area and two lifecycles; a person's judgement written into the same files would
+eventually be thrown away the same way. A finding is not an extraction — it is somebody's
+reading of the gap between two descriptions of the product, and it has to outlive every
+rebuild of one of them.
+
+It is also not a task. A task is work somebody intends to do. Half of these are never
+worked at all: they are accepted, on purpose, by somebody who writes down why — and that
+signed decision is the part worth keeping.
+
+Findings carry the files they were read from. When one of those files changes, the finding
+says **re-check** rather than continuing to assert something about code that has moved.
 
 ## Where the history comes from
 
@@ -131,7 +152,7 @@ two planned tasks.
 
 ## The skills, without copy-paste
 
-The server also serves all eleven skills as MCP **prompts** — most clients surface
+The server also serves all twelve skills as MCP **prompts** — most clients surface
 those as slash commands. So `gitmir-model` is one command away in the same session
 that just told you there is no model, instead of a trip to the dashboard to copy text.
 
@@ -149,12 +170,16 @@ than no hint at all.
 
 | Tool | read-only | destructive | idempotent | open world |
 |---|---|---|---|---|
-| `gitmir_model` · `gitmir_navigate` · `gitmir_impact` · `gitmir_queue` · `gitmir_history` · `gitmir_skills` · `gitmir_skill` | yes | no | yes | no |
+| `gitmir_model` · `gitmir_navigate` · `gitmir_impact` · `gitmir_queue` · `gitmir_history` · `gitmir_findings` · `gitmir_skills` · `gitmir_skill` | yes | no | yes | no |
+| `gitmir_flag` | no | no | **yes** | no |
+| `gitmir_accept_finding` | no | **yes** | no | no |
 | `gitmir_setup` | no | no | **yes** | no |
 | `gitmir_create_task` | no | no | **no** | no |
 | `gitmir_approve` | no | **yes** | no | no |
 
 `gitmir_create_task` is not idempotent because calling it twice queues the work twice.
+`gitmir_flag` is idempotent because flagging the same rule on the same object updates the record rather than writing a second copy — which is what a re-audit should do. `gitmir_accept_finding` is destructive because reopening drops the signature off a decision somebody made.
+
 `gitmir_approve` is marked destructive because `withdraw` removes a line from a file
 that exists — even though the common path only adds one. Nothing here is open-world:
 the only thing any tool touches is this machine's own `.gitmir/` and `tasks/` folders.
@@ -167,5 +192,5 @@ the only thing any tool touches is this machine's own `.gitmir/` and `tasks/` fo
   text. The consumer here is a model reading prose, and the arithmetic it needs is in
   the prose already; a second serialization would double the payload to serve client
   code that does not exist yet.
-- **No pagination cursors.** Ten tools and eleven prompts fit in one response. A
+- **No pagination cursors.** Thirteen tools and twelve prompts fit in one response. A
   `cursor` is accepted and ignored rather than rejected, so a paginating client works.

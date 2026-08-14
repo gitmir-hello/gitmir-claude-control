@@ -27,6 +27,8 @@ import { readModel, modelStaleness, modelIdSet, readTasks } from './lib/read.js'
 import { createTask, setApproval, COLUMNS } from './lib/write.js';
 import { blastRadius, riskOf, kindOf, labelOf, moduleOf, objById, isJourney } from './lib/impact.js';
 import { modelVersions, modelAt, diffModels } from './lib/history.js';
+import { readFindings, writeFinding, setFindingStatus, findingsByTarget, openOnly, findingsSummary,
+  KINDS, SEVERITIES } from './lib/findings.js';
 
 const PROTOCOL = '2025-06-18';           // the version this server implements
 const SUPPORTED = new Set([PROTOCOL, '2025-03-26', '2024-11-05']);
@@ -121,7 +123,7 @@ function riskText(risk: any): string {
   return L.join('\n');
 }
 
-function impactText(ids: string[], m: any, heading: string): string {
+function impactText(ids: string[], m: any, heading: string, project?: string): string {
   const named = ids.filter((id) => objById(id, m));
   if (!named.length) return `${heading}\n\nNone of the ids given are in this model: ${ids.join(', ') || '(none)'}`;
   const br = blastRadius(named, m);
@@ -132,6 +134,26 @@ function impactText(ids: string[], m: any, heading: string): string {
   const journeys = procs.filter((p: any) => isJourney(p));
 
   const L = [heading, ''];
+  // The moment somebody is about to change a thing is the moment a known deviation
+  // in it is cheapest to fix, and the only moment they are certainly looking.
+  const warn: string[] = [];
+  if (project) {
+    const reached = new Set<string>([...named, ...Object.values(byKind).flat().map((x: any) => x.id)]);
+    const open = openOnly(readFindings(project).findings)
+      .filter((f) => f.touches.some((id: string) => reached.has(id)));
+    if (open.length) {
+      const direct = open.filter((f) => f.touches.some((id: string) => named.includes(id)));
+      warn.push('');
+      warn.push(`ALREADY KNOWN TO BE WRONG HERE — ${open.length} finding(s)` +
+        (direct.length ? `, ${direct.length} on what you are changing directly` : ', in what this reaches') + ':');
+      for (const f of open.slice(0, 8)) {
+        warn.push(`  [${f.severity}] should: ${f.rule}${f.source ? ` (${f.source})` : ''}`);
+        warn.push(`            does:   ${f.actual}`);
+      }
+      if (open.length > 8) warn.push(`  …and ${open.length - 8} more — gitmir_findings lists them.`);
+      warn.push('  Say this out loud before changing any of it: the product already does not do what it says here.');
+    }
+  }
   L.push('Changes directly:');
   for (const id of named) L.push('  - ' + describe(id, m));
   L.push('');
@@ -153,7 +175,7 @@ function impactText(ids: string[], m: any, heading: string): string {
   }
   L.push('');
   L.push(riskText(risk));
-  return L.join('\n');
+  return L.concat(warn).join('\n');
 }
 
 // ---------- tools ----------
@@ -312,7 +334,7 @@ const TOOLS: Tool[] = [
           ? 'DECLARED — the task named these on its Touches: line'
           : 'INFERRED — taken from every model id the task mentions; add a Touches: line for a deliberate scope';
         return {
-          text: [l.note, '', impactText(t.ids, m, `Impact of "${t.title}" (${t.col}/${t.file})`),
+          text: [l.note, '', impactText(t.ids, m, `Impact of "${t.title}" (${t.col}/${t.file})`, project),
             '', `Source of the ids: ${src}`,
             t.approved ? `Approved: ${t.approved}` : 'Not approved.'].join('\n'),
         };
@@ -322,7 +344,7 @@ const TOOLS: Tool[] = [
       if (!ids.length) {
         return { text: 'Give either `ids` (model object ids) or `task` (a task file name). Use gitmir_model to find ids.', isError: true };
       }
-      return { text: [l.note, '', impactText(ids, m, 'Impact of changing the objects given')].join('\n') };
+      return { text: [l.note, '', impactText(ids, m, 'Impact of changing the objects given', project)].join('\n') };
     },
   },
 
@@ -362,7 +384,7 @@ const TOOLS: Tool[] = [
       if (Array.isArray(o.paths) && o.paths.length) L.push('Lives in: ' + o.paths.join(', '));
       if (roles.length || o.sensitivity === 'high' || (o.paths || []).length) L.push('');
 
-      L.push(impactText([id], m, 'If this changes:'));
+      L.push(impactText([id], m, 'If this changes:', project));
       return { text: L.join('\n') };
     },
   },
@@ -609,6 +631,139 @@ const TOOLS: Tool[] = [
   },
 
   {
+    name: 'gitmir_flag',
+    // Writes one file under .gitmir/findings/. Safe to repeat: the same rule on the
+    // same object updates the record in place rather than queueing a second copy.
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    title: 'Record where the code disagrees with the product',
+    description:
+      'Record that the code does not do what the product is supposed to do. Call this the ' +
+      'moment you find one — reading a spec against the code, reviewing, or answering a ' +
+      'question — instead of only describing it in the conversation. A finding written here ' +
+      'is attached to the objects it sits on, shows on every diagram that draws them, warns ' +
+      'anyone planning a change that reaches them, and is still there next week; a finding ' +
+      'described in a reply is gone when the conversation ends. This is not a task: a task is ' +
+      'work someone intends to do, a finding is a fact about the product that stays true until ' +
+      'it is fixed or somebody decides to live with it.',
+    inputSchema: {
+      type: 'object',
+      required: ['rule', 'actual'],
+      properties: {
+        ...PROJECT_ARG,
+        rule: { type: 'string', description: 'What the product is supposed to do, in the product\'s own words. Not "should validate input" — the actual rule.' },
+        actual: { type: 'string', description: 'What the code does instead, naming the function or route you read it from.' },
+        consequence: { type: 'string', description: 'What goes wrong for a person because of the gap. This is what makes it arguable.' },
+        source: { type: 'string', description: 'Where the rule is written: a spec section, a ticket, a decision. "ТЗ 5.2", "docs/spec.md#pricing".' },
+        touches: { type: 'array', items: { type: 'string' }, description: 'Model ids this sits on — the functions, endpoints or screens involved. This is what makes it visible on the diagrams.' },
+        kind: { type: 'string', enum: [...KINDS], description: 'contradicts-spec: does something else. not-implemented: does nothing. undefined: the spec never said. risk: works, will not survive production.' },
+        severity: { type: 'string', enum: [...SEVERITIES] },
+        readFrom: { type: 'array', items: { type: 'string' }, description: 'Repo-relative files you read this from. When one of them changes, the finding asks to be re-checked instead of quietly going stale.' },
+        id: { type: 'string', description: 'Only to update a specific finding you already know the id of.' },
+      },
+    },
+    run(args: Record<string, unknown>, project: string) {
+      const r = writeFinding(project, args as any);
+      if (!r.ok) return { text: r.why || 'Could not record it.', isError: true };
+      const f = r.finding;
+      const L = [
+        `${r.updated ? 'Updated' : 'Recorded'} finding ${f.id}.`,
+        '',
+        `  rule    ${f.rule}`,
+        `  actual  ${f.actual}`,
+      ];
+      if (f.consequence) L.push(`  costs   ${f.consequence}`);
+      if (f.source) L.push(`  source  ${f.source}`);
+      L.push(`  on      ${f.touches.length ? f.touches.join(', ') : '(no model ids — it will not show on any diagram until it has some)'}`);
+      L.push('');
+      L.push('It is on the dashboard now, marked on every object it touches, and anyone planning a change that reaches them will be warned.');
+      if (!f.touches.length) L.push('Add `touches` with the ids from gitmir_navigate to make it visible where it matters.');
+      if (!f.readFrom.length) L.push('Add `readFrom` with the files you read, so the finding asks to be re-checked when they change.');
+      return { text: L.join('\n') };
+    },
+  },
+
+  {
+    name: 'gitmir_findings',
+    annotations: READS,
+    title: 'Where the code disagrees with the product',
+    description:
+      'Everything recorded about where this product does not do what it is supposed to. Call ' +
+      'this before changing anything, when asked what is wrong with the product, when picking ' +
+      'what to work on, or to check whether something you just noticed is already known. Says ' +
+      'which findings are open, which were accepted deliberately and by whom, and which need ' +
+      're-checking because the code they describe has moved since.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...PROJECT_ARG,
+        id: { type: 'string', description: 'One model id — only findings sitting on that object.' },
+        status: { type: 'string', enum: ['open', 'accepted', 'fixed', 'all'], description: 'Default open.' },
+      },
+    },
+    run(args: Record<string, unknown>, project: string) {
+      const all = readFindings(project).findings;
+      if (!all.length) {
+        return { text: 'Nothing recorded for this project yet. Use gitmir_flag when you find a place where the code does not do what the product says — reading a spec against the code is the usual way to find them.' };
+      }
+      const want = typeof args.status === 'string' ? args.status : 'open';
+      let list = want === 'all' ? all : all.filter((f: any) => f.status === want);
+      if (typeof args.id === 'string' && args.id) {
+        const by = findingsByTarget(all);
+        list = (by.get(args.id) || []).filter((f: any) => want === 'all' || f.status === want);
+        if (!list.length) return { text: `Nothing recorded on ${args.id}.` };
+      }
+      const s = findingsSummary(all);
+      const L = [`${s.open} open, ${s.accepted} accepted, ${s.fixed} fixed` +
+        (s.stale ? ` — ${s.stale} need re-checking, the code they describe has moved.` : '.'), ''];
+      for (const f of list) {
+        L.push(`[${f.severity}] ${f.id}${f.stale ? '  (RE-CHECK: ' + f.movedFile + ' has changed)' : ''}`);
+        L.push(`  should  ${f.rule}${f.source ? `   (${f.source})` : ''}`);
+        L.push(`  does    ${f.actual}`);
+        if (f.consequence) L.push(`  costs   ${f.consequence}`);
+        if (f.touches.length) L.push(`  on      ${f.touches.join(', ')}`);
+        if (f.status === 'accepted' && f.decision) L.push(`  ACCEPTED by ${f.decision.by} on ${f.decision.at}: ${f.decision.why}`);
+        L.push('');
+      }
+      return { text: L.join('\n') };
+    },
+  },
+
+  {
+    name: 'gitmir_accept_finding',
+    // Records a decision. Destructive because it can also reopen one, which drops
+    // the signature off a decision somebody made.
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    title: 'Decide what to do about a finding',
+    description:
+      'Record that a known deviation is accepted — the product will keep behaving this way on ' +
+      'purpose — or that it has been fixed, or reopen one. Accepting needs a name and a reason: ' +
+      'the whole point of the record is that somebody can be asked about it later. Call this ' +
+      'when the user decides to live with something, or after work that closes one.',
+    inputSchema: {
+      type: 'object',
+      required: ['id', 'status'],
+      properties: {
+        ...PROJECT_ARG,
+        id: { type: 'string', description: 'The finding id, from gitmir_findings.' },
+        status: { type: 'string', enum: ['accepted', 'fixed', 'open'] },
+        by: { type: 'string', description: 'Who decided. Required to accept.' },
+        why: { type: 'string', description: 'Why it is acceptable. Required to accept.' },
+      },
+    },
+    run(args: Record<string, unknown>, project: string) {
+      const r = setFindingStatus(project, String(args.id || ''), String(args.status || ''),
+        { by: args.by, why: args.why });
+      if (!r.ok) return { text: r.why || 'Could not record the decision.', isError: true };
+      const f = r.finding;
+      if (f.status === 'accepted' && f.decision) {
+        return { text: `${f.id} is accepted: ${f.decision.why}\n  decided by ${f.decision.by} on ${f.decision.at}\n\nIt still shows on the diagrams, marked as a decision rather than a defect — which is the difference between a product that has known limits and one that has surprises.` };
+      }
+      if (f.status === 'fixed') return { text: `${f.id} is marked fixed. It stays in the record: what the product used to get wrong is part of its history.` };
+      return { text: `${f.id} is open again.` };
+    },
+  },
+
+  {
     name: 'gitmir_create_task',
     // Writes, but only ever adds: a new file under tasks/todo/, never a replacement.
     // Not idempotent — calling it twice queues the work twice.
@@ -674,7 +829,7 @@ const TOOLS: Tool[] = [
       const L = [`Wrote tasks/todo/${file}`];
       if (l.ok && touches.length) {
         L.push('');
-        L.push(impactText(touches, l.model, 'What it would touch, before anyone runs it:'));
+        L.push(impactText(touches, l.model, 'What it would touch, before anyone runs it:', project));
       } else if (l.ok) {
         L.push('', 'No `touches` given, so its impact cannot be scored until someone adds a Touches: line.');
       }

@@ -67,6 +67,13 @@
     "pain": "Nobody can say what actually works in the running app"
   },
   {
+    "name": "spec-audit",
+    "title": "spec-audit",
+    "desc": "Reads the product's written rules against the code that implements them and records every disagreement on the objects it sits on — so it marks the diagrams and warns anyone planning a change, instead of scrolling out of a chat.",
+    "file": "skills/spec-audit.md",
+    "pain": "You find out at the demo that the product does not do what you promised"
+  },
+  {
     "name": "legacy-maintenance",
     "title": "legacy-maintenance",
     "desc": "Change or maintain an existing legacy codebase without breaking the behaviour next to it — maps the blast radius from the model, then ships small reversible steps you can verify. For keeping old projects alive, not rewriting them.",

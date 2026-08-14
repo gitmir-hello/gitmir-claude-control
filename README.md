@@ -91,7 +91,7 @@ planned tasks. Every screenshot in this README is that project.
 
 ---
 
-## Eleven skills, grouped by when you need them
+## Twelve skills, grouped by when you need them
 
 <img src="docs/img/skills.png" alt="The skill cards: understand what exists, decide what to build, build and prove it, work on code you inherited" width="960">
 
@@ -104,10 +104,32 @@ change them, keep your own.
 | **Decide what to build** | `product-docs-spec` turns a client's description into a `docs/` folder precise enough to build from · `context-distillation` compresses a pile of tickets and threads into a brief that fits |
 | **Build and prove it** | `task-planner` writes tasks that carry their own checks · `task-runner` works the queue to empty · `app-audit` walks the running app end to end · `task-log` keeps the record |
 | **Work on code you inherited** | `legacy-maintenance` changes an old system without breaking what sits next to it · `stack-port` moves it to a new stack, with a parity ledger |
+| **Prove it does what you promised** | `spec-audit` reads the written rules against the code and records every disagreement where it will be seen again |
 
 **→ [What each one does](docs/SKILLS.md)**
 
 ---
+
+## Where the code disagrees with the product
+
+Your agent reads the spec against the code and finds fifteen places they disagree. It
+writes them in a reply, and they are gone when the conversation ends — the agent that
+edits one of those functions next week does not know, and neither does whoever approves
+the change.
+
+`spec-audit` records them instead. Each one names the rule, what the code does instead,
+what that costs, and the objects it sits on:
+
+- the object is **drawn as deviating on every diagram** — colour, so the mark survives at
+  the zoom where labels disappear
+- the **radius warns** before anyone approves a change that reaches it
+- the **context handed to an agent carries it**, so it cannot plan against rules the code
+  does not follow
+- deciding to **live with one records who decided and why** — the difference between a
+  product with known limits and a product with surprises
+
+A finding remembers the files it was read from. When one changes, it asks to be re-checked
+rather than going on asserting something about code that has moved.
 
 ## Why "done" means something here
 
@@ -163,7 +185,7 @@ data. Every view opens by saying what it is, what it gives you, and how to use i
 | **What would a change cost?** | what a task reaches, how much of the product that is, and whether anything sensitive is in it |
 | **Who answers for it?** | the owning team per area — and the areas nobody has claimed, drawn as the gap they are |
 | **How much should I trust it?** | where the model is solid, where it is guessing, and what it does not know yet |
-| **What actually happened?** | what changed between two dates, whether finished work stayed inside the scope it declared, and the record in order |
+| **What actually happened?** | where the code does not do what the product says, what changed between two dates, whether finished work stayed inside the scope it declared, and the record in order |
 
 Alongside it: **Queue** (`todo → in progress → verify → done`, each card carrying its risk
 and its approval) and **Preview** (open any URL, click an element, get a prompt naming it

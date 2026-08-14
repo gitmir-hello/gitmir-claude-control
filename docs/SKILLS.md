@@ -35,6 +35,7 @@ these files are read by teammates, clients, reviewers and the next session.
 | Skill | What it does |
 |---|---|
 | **`app-audit`** | Walks the running app — every page, element and route — derives what a user can actually accomplish, proves each use case by executing it, and files a fix task for every failure with the repro. Refuses production; never presses a destructive control on data that matters. The **Queue** tab shows coverage, the defects, and — first — what it could not reach. |
+| **`spec-audit`** | Reads the product's written rules — a spec, a client brief, an acceptance document — against the code that implements them, and records every disagreement as a finding on the objects it sits on. Those marks stay: the object is drawn as deviating on every diagram, the radius warns anyone whose change reaches it, and the context handed to an agent carries it. A deviation somebody decides to live with is recorded as a decision, with a name and a reason. |
 
 ## Working on code you inherited
 

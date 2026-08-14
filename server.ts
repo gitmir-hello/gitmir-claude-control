@@ -90,6 +90,7 @@ function impactForBrowser(): string {
 import { MODEL_ID, idList, parseTouches, modelIdSet } from './lib/read.js';
 import { createTask, setApproval, COLUMNS } from './lib/write.js';
 import { modelVersions, modelAt, diffModels } from './lib/history.js';
+import { readFindings, writeFinding, setFindingStatus, findingsSummary } from './lib/findings.js';
 
 // ---------- model ids carried by tasks ----------
 
@@ -1084,6 +1085,30 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 404, { error: 'not found' });
       }
     }
+    // Where the code does not do what the product says it does. Recorded by
+    // whoever read the spec against the code — usually an agent, in one call at
+    // the moment it noticed, rather than in a report nobody opens twice.
+    if (req.method === 'GET' && url.pathname === '/api/findings') {
+      const p = url.searchParams.get('path') || '';
+      if (!p) return sendJSON(res, 400, { error: 'no path' });
+      const r = readFindings(p);
+      return sendJSON(res, 200, { ok: r.ok, findings: r.findings, summary: findingsSummary(r.findings) });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/finding') {
+      const body = await readBody(req);
+      const p = String(body.path || '');
+      if (!p) return sendJSON(res, 400, { error: 'no path' });
+      const r = writeFinding(p, body);
+      return sendJSON(res, r.ok ? 200 : 400, r.ok ? { ok: true, finding: r.finding } : { error: r.why });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/finding-status') {
+      const body = await readBody(req);
+      const p = String(body.path || '');
+      if (!p) return sendJSON(res, 400, { error: 'no path' });
+      const r = setFindingStatus(p, String(body.id || ''), String(body.status || ''), body.decision);
+      return sendJSON(res, r.ok ? 200 : 400, r.ok ? { ok: true, finding: r.finding } : { error: r.why });
+    }
+
     // How the product changed. The versions are the project's own git history of
     // .gitmir/model — we store nothing, which is why this works on a repository
     // that has been running for a year before it ever saw this dashboard.
@@ -1829,6 +1854,69 @@ const HTML = /* html */ `<!doctype html>
     text-transform:uppercase; color:var(--cyan-soft); padding-top:3px}
   .vh-h{color:var(--ink-2)}
   .proc-kind{font-size:12.5px; color:var(--ink-3); margin:2px 0 6px}
+  .imp-bad{border:1px solid rgba(255,64,96,.5); border-left-width:3px; background:rgba(255,64,96,.07);
+    padding:12px 15px; margin:14px 0}
+  .imp-bad-h{font-size:14px; color:#ff9db0; margin-bottom:8px}
+  .imp-bad-i{font-size:12.5px; color:var(--ink-1); line-height:1.6; margin-top:7px}
+  .imp-bad-i b{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.08em; text-transform:uppercase;
+    color:#ff8ba1; border:1px solid rgba(255,64,96,.45); padding:1px 6px; margin-right:9px; font-weight:400}
+  .imp-bad-i i{font-style:normal; color:var(--ink-3)}
+  .imp-bad-i span{display:block; color:var(--ink-3); margin:2px 0 0 62px}
+  .imp-bad-f{font-size:11.5px; color:var(--ink-3); margin-top:10px; padding-top:9px; border-top:1px solid var(--line)}
+  .ctx-bad{border:1px solid rgba(255,64,96,.5); border-left-width:3px; background:rgba(255,64,96,.07);
+    padding:11px 14px; margin:10px 0}
+  .ctx-bad.accepted{border-color:rgba(190,150,90,.55); background:rgba(190,150,90,.07)}
+  .ctx-bad-h{font-size:13.5px; color:#ff9db0; margin-bottom:7px}
+  .ctx-bad.accepted .ctx-bad-h{color:#e0bd7e}
+  .ctx-bad-i{font-size:12.5px; color:var(--ink-2); line-height:1.6; margin-top:6px}
+  .ctx-bad-i b{font-family:var(--font-mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--ink-3); margin-right:7px; font-weight:400}
+  .ctx-bad-i i{font-style:normal; color:var(--ink-3)}
+  .ctx-bad-d{color:var(--ink-3); font-size:12px; margin-top:3px}
+  .ctx-bad-f{font-size:11.5px; color:var(--ink-3); margin-top:9px; padding-top:8px; border-top:1px solid var(--line)}
+  .sp-sum{display:flex; flex-wrap:wrap; gap:10px; margin:12px 0 14px}
+  .sp-k{flex:1 1 140px; border:1px solid var(--line); background:rgba(10,18,36,.45); padding:12px 14px}
+  .sp-k b{display:block; font-size:22px; color:var(--ink-0); font-variant-numeric:tabular-nums}
+  .sp-k span{font-size:11.5px; color:var(--ink-3)}
+  .sp-k.bad{border-color:rgba(255,64,96,.45)} .sp-k.bad b{color:#ff7b93}
+  .sp-k.warn{border-color:rgba(255,178,78,.4)} .sp-k.warn b{color:#ffc073}
+  .sp-list{display:flex; flex-direction:column; gap:9px; margin-top:12px}
+  .sp-card{border:1px solid var(--line); border-left:3px solid rgba(255,64,96,.65);
+    background:rgba(10,18,36,.45); padding:13px 16px}
+  .sp-card.accepted{border-left-color:rgba(190,150,90,.7)}
+  .sp-card.fixed{border-left-color:rgba(96,246,176,.5); opacity:.72}
+  .sp-card.stale{border-left-style:dashed}
+  .sp-top{display:flex; align-items:center; flex-wrap:wrap; gap:9px; margin-bottom:9px}
+  .sp-sev{font-family:var(--font-mono); font-size:10px; letter-spacing:.09em; text-transform:uppercase;
+    padding:2px 7px; border:1px solid var(--line); color:var(--ink-2)}
+  .sp-sev.high{border-color:rgba(255,64,96,.55); color:#ff8ba1}
+  .sp-sev.medium{border-color:rgba(255,178,78,.45); color:#ffc073}
+  .sp-kind{font-size:12px; color:var(--ink-3)}
+  .sp-src{font-family:var(--font-mono); font-size:11px; color:var(--ink-2); margin-left:auto}
+  .sp-badge{font-family:var(--font-mono); font-size:10px; letter-spacing:.07em; text-transform:uppercase;
+    padding:2px 7px; border:1px solid var(--line); color:var(--ink-3)}
+  .sp-badge.acc{border-color:rgba(190,150,90,.6); color:#e0bd7e}
+  .sp-badge.fix{border-color:rgba(96,246,176,.45); color:#7fe8b8}
+  .sp-badge.stale{border-color:rgba(255,178,78,.5); color:#ffc073}
+  .sp-line{display:flex; gap:14px; align-items:flex-start; margin-top:6px}
+  .sp-line>span{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--ink-3); min-width:56px; padding-top:2px; flex:none}
+  .sp-line>div{font-size:13px; color:var(--ink-1); line-height:1.55}
+  .sp-chips{display:flex; flex-wrap:wrap; gap:6px}
+  .sp-dec{margin-top:10px; padding:9px 12px; border-left:2px solid rgba(190,150,90,.6);
+    background:rgba(190,150,90,.07); font-size:12.5px; color:var(--ink-2); line-height:1.55}
+  .sp-dec b{color:var(--ink-0); font-weight:400}
+  .sp-act{display:flex; flex-wrap:wrap; gap:8px; margin-top:11px}
+  .sp-btn{cursor:pointer; border:1px solid var(--line); background:rgba(10,18,36,.6); color:var(--ink-2);
+    padding:6px 13px; border-radius:0; font-size:12.5px}
+  .sp-btn:hover{border-color:rgba(96,232,255,.45); color:var(--ink-0)}
+  .sp-form{display:flex; flex-wrap:wrap; gap:8px; align-items:center; width:100%}
+  .sp-form input{background:rgba(5,10,22,.8); border:1px solid var(--line); color:var(--ink-1);
+    padding:6px 11px; border-radius:0; font-size:12.5px; min-width:190px; flex:1 1 190px}
+  .sp-form input:focus{outline:none; border-color:rgba(96,232,255,.5)}
+  .sp-err-slot{flex-basis:100%}
+  .sp-err{font-size:12px; color:#ff8ba1}
+  .epill i{font-style:normal; font-family:var(--font-mono); font-size:10.5px; color:var(--ink-3); margin-left:5px}
   .hs-bar{display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; margin:12px 0 14px}
   .hs-bar label{display:flex; flex-direction:column; gap:5px; font-family:var(--font-mono); font-size:10.5px;
     letter-spacing:.09em; text-transform:uppercase; color:var(--ink-3)}

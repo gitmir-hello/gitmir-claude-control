@@ -51,7 +51,46 @@ const HUD_PALETTE = {
   gm_changed:   { color: [255, 92, 110],  accent: [255, 214, 130], glow: 1.30 },
   // The thing the question was asked about, and nothing else on the map.
   gm_origin:    { color: [178, 128, 255], accent: [232, 214, 255], glow: 1.35 },
+  // Where the code does not do what the product says. It outranks the object's own
+  // colour on purpose: at the zoom where rows disappear, colour is all that is left,
+  // and this is the one fact that has to survive that.
+  gm_wrong:     { color: [255, 64, 96],   accent: [255, 220, 140], glow: 1.40 },
+  // Known, and decided. A product with declared limits is not a product with
+  // surprises, and the picture should not read them the same.
+  gm_accepted:  { color: [190, 150, 90],  accent: [255, 226, 170], glow: 0.80 },
 };
+
+// Findings, by the model id they sit on. Set once per render from the dashboard;
+// the scene builders read it, so every diagram marks the same objects without each
+// one having to be taught how.
+let HUD_FINDINGS = new Map();
+window.hudSetFindings = function (list) {
+  HUD_FINDINGS = new Map();
+  for (const f of (list || [])) {
+    if (f.status === 'fixed') continue;
+    for (const id of (f.touches || [])) {
+      if (!HUD_FINDINGS.has(id)) HUD_FINDINGS.set(id, []);
+      HUD_FINDINGS.get(id).push(f);
+    }
+  }
+};
+const findingsOn = (id) => HUD_FINDINGS.get(id) || [];
+
+/**
+ * Open deviations sitting anywhere inside an area.
+ *
+ * The top level of the map shows areas, not functions — and an area drawn clean
+ * while something inside it is known to be wrong is the failure this whole layer
+ * exists to prevent. A container carries what it contains.
+ */
+function findingsInArea(aid, m) {
+  let n = 0;
+  for (const [id, list] of HUD_FINDINGS) {
+    if (!list.some((f) => f.status === 'open')) continue;
+    if (moduleOf(id, m) === aid) n++;
+  }
+  return n;
+}
 
 const HUD_KINDS_LABEL = {
   entity: 'gm_entity', function: 'gm_function', route: 'gm_route',
@@ -98,10 +137,18 @@ function hudObjectNode(id, m, extraRows) {
   if (Array.isArray(o.steps) && o.steps.length) rows.push(['STEPS', String(o.steps.length)]);
   if (o.method && o.path) rows.push(['ROUTE', String(o.method).toUpperCase()]);
   if (o.sensitive) rows.push(['CARE', 'SENSITIVE']);
+  // A known deviation goes above anything else the rows would have said: it is the
+  // one fact here that changes what somebody does next.
+  const bad = findingsOn(id);
+  const openBad = bad.filter((f) => f.status === 'open');
+  if (openBad.length) rows.unshift(['SPEC', openBad.length > 1 ? openBad.length + ' DEVIATIONS' : 'DOES NOT MATCH']);
+  else if (bad.length) rows.unshift(['SPEC', 'ACCEPTED GAP']);
   for (const r of (extraRows || [])) rows.push(r);
   return {
     id, modelId: id,
-    kind: o.sensitive ? 'gm_care' : (HUD_KINDS_LABEL[k] || 'gm_function'),
+    kind: openBad.length ? 'gm_wrong'
+      : bad.length ? 'gm_accepted'
+      : o.sensitive ? 'gm_care' : (HUD_KINDS_LABEL[k] || 'gm_function'),
     title: hudTitle(labelOf(id, m) || id),
     tag: id.slice(0, 14),
     rows: rows.slice(0, 5),
@@ -184,10 +231,13 @@ function hudSceneProductMap(m, layer, hooks) {
     for (const id of ids) {
       for (const to of (idx.get(id) || [])) if (inside.has(to) && id !== to) kidEdges.push([id, to, '']);
     }
+    const areaBad = findingsInArea(aid, m);
+    if (areaBad) rows.unshift(['SPEC', areaBad + (areaBad > 1 ? ' DEVIATIONS' : ' DEVIATION')]);
     nodes.push({
       id: aid, modelId: aid === OTHER ? null : aid,
       kind: (origin && aid === origin) ? 'gm_origin'
-          : (lay && layer.kind === 'risk' && lay.t > 0.6 ? 'gm_care' : 'gm_area'),
+          : (areaBad ? 'gm_wrong'
+          : (lay && layer.kind === 'risk' && lay.t > 0.6 ? 'gm_care' : 'gm_area')),
       title: hudTitle(aid === OTHER ? 'Everything else' : ((mod || {}).name || aid)),
       tag: (aid === OTHER ? 'AREA' : aid).slice(0, 14),
       rows: rows.slice(0, 5),
@@ -263,8 +313,10 @@ function hudSceneImpact(t, m, br, hooks) {
         route: 'ENDPOINTS', event: 'EVENTS', statusFlow: 'LIFECYCLES' })[k] || k.toUpperCase(), String(n)]);
     }
     if (mod.owner) rows.push(['OWNER', String(mod.owner).toUpperCase().slice(0, 16)]);
+    const areaBad = ids.filter((id) => findingsOn(id).some((f) => f.status === 'open')).length;
+    if (areaBad) rows.unshift(['SPEC', areaBad + (areaBad > 1 ? ' DEVIATIONS' : ' DEVIATION')]);
     nodes.push({
-      id: 'area:' + aid, modelId: aid === '__other' ? null : aid, kind: 'gm_area',
+      id: 'area:' + aid, modelId: aid === '__other' ? null : aid, kind: areaBad ? 'gm_wrong' : 'gm_area',
       title: hudTitle(mod.name || 'Everything else'),
       tag: 'AREA', rows: rows.slice(0, 5),
       detailText: mod.description || '',
