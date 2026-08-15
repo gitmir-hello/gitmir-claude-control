@@ -120,7 +120,12 @@ async function stop({ quiet = false } = {}) {
 
 async function update() {
   if (!fs.existsSync(path.join(DIR, '.git'))) {
-    die(`${DIR} is not a git checkout — re-run the installer to replace it.`);
+    // Installed by npm, or from a tarball: there is no history to pull. Point at
+    // whichever route actually put it here rather than at the one we prefer.
+    const viaNpm = DIR.includes(`${path.sep}node_modules${path.sep}`);
+    die(viaNpm
+      ? `Installed through npm, so there is no git history here to pull.\n    Update with:  npm i -g github:gitmir-hello/gitmir-claude-control`
+      : `${DIR} is not a git checkout — there is no history here to pull.\n    Update by running the installer again:\n      curl -fsSL https://raw.githubusercontent.com/gitmir-hello/gitmir-claude-control/main/install.sh | bash`);
   }
   say(`Updating ${DIR}`);
   const before = git(['rev-parse', '--short', 'HEAD']).trim();
