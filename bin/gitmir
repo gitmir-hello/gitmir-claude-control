@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# The POSIX shim. Everything the command does lives in gitmir.mjs next to this
+# file — one implementation, so a fix lands once rather than in a bash copy and
+# a PowerShell copy that drift apart.
+#
+# The path is resolved through any symlinks first: on the PATH this file is a
+# link, and dirname of a link points at the bin directory, not at the checkout.
+set -euo pipefail
+self="${BASH_SOURCE[0]}"
+while [ -L "$self" ]; do
+  target="$(readlink "$self")"
+  case "$target" in
+    /*) self="$target" ;;
+    *)  self="$(cd -P "$(dirname "$self")" && pwd)/$target" ;;
+  esac
+done
+exec node "$(cd -P "$(dirname "$self")" && pwd)/gitmir.mjs" "$@"

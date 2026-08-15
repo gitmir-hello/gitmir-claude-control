@@ -76,14 +76,45 @@ and to say so out loud before running something unapproved.
 ## 60 seconds
 
 ```bash
-git clone https://github.com/gitmir-hello/gitmir-claude-control.git
-cd gitmir-claude-control
-node server.ts
+curl -fsSL https://raw.githubusercontent.com/gitmir-hello/gitmir-claude-control/main/install.sh | bash     # macOS · Linux
+gitmir
 ```
 
-**http://localhost:4599** → add a project folder → **▶ Run Claude** → paste the
-**`gitmir-model`** skill. Claude reads the repo, writes `.gitmir/model/`, and every view
-above has something in it. No account, no build step, no runtime dependencies.
+<details>
+<summary>Windows · npm · from a clone</summary>
+
+```powershell
+irm https://raw.githubusercontent.com/gitmir-hello/gitmir-claude-control/main/install.ps1 | iex            # Windows
+gitmir
+```
+
+```bash
+npm i -g github:gitmir-hello/gitmir-claude-control  # if you would rather npm did it
+```
+
+```bash
+git clone https://github.com/gitmir-hello/gitmir-claude-control.git
+cd gitmir-claude-control && node server.ts          # no installer at all
+```
+
+The installer clones into `~/.gitmir/claude-control` and links one command onto your
+PATH. It downloads nothing from a package registry — Node runs the TypeScript directly,
+the renderer is written for this project, and the fonts are in the repository. Run it
+again to update, or `gitmir update`.
+
+</details>
+
+`gitmir` starts the dashboard and opens **http://localhost:4599** → add a project folder →
+**▶ Run Claude** → paste the **`gitmir-model`** skill. Claude reads the repo, writes
+`.gitmir/model/`, and every view above has something in it. No account, no build step, no
+runtime dependencies.
+
+| | |
+|---|---|
+| `gitmir` | start it and open the browser |
+| `gitmir mcp add` | register the MCP server with the Claude Code CLI, so your agent answers from the same model |
+| `gitmir status` | Node version, port, what is missing |
+| `gitmir update` | pull the latest, and restart if it was running |
 
 Want to look before pointing it at your own code? Add
 [`examples/refund-shop`](examples/refund-shop) — an invented shop with a model and two
@@ -150,6 +181,10 @@ reach becomes the `## Verify` steps**, and a task moves to `done` only when they
 Cursor, or anything else that speaks it can ask what something is, what breaks if it
 changes, what a task would touch, what changed in the product last month, and queue or
 approve work — without leaving the editor.
+
+```bash
+gitmir mcp add        # or `gitmir mcp` to print the config for another editor
+```
 
 ```json
 { "mcpServers": { "gitmir": {
@@ -224,6 +259,9 @@ builder, viewers free** — sharing a read-only map is free on any plan.
 Windows · Linux. `dependencies` is empty and staying that way: the diagrams are drawn by a
 renderer written for this, and the fonts are vendored, so it works offline. Port 4599, or `GITMIR_PORT=4600 node server.ts`. Desktop
 shortcut: `bash install-shortcut.command` (macOS) · `install-shortcut.cmd` (Windows).
+`curl -fsSL https://raw.githubusercontent.com/gitmir-hello/gitmir-claude-control/main/install.sh | bash` installs the `gitmir` command; reading
+[`install.sh`](install.sh) before running it is the correct instinct and it is kept short
+for that reason.
 
 **License.** Dual: **[AGPL-3.0](LICENSE)** — free, fork it, use it for paid work; distribute
 a modified version as a service and your source goes AGPL too. Or a **[commercial
