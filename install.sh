@@ -15,7 +15,11 @@
 #   ~/.gitmir/claude-control   the checkout
 #   ~/.local/bin/gitmir        a symlink to bin/gitmir inside that checkout
 
-set -euo pipefail
+# POSIX below this line, on purpose: the command on a landing page gets copied
+# as `| sh` about as often as `| bash`, and on most Linux /bin/sh is dash, which
+# has no pipefail and would abort on the very first line.
+set -eu
+if (set -o pipefail 2>/dev/null); then set -o pipefail; fi
 
 REPO="${GITMIR_REPO:-https://github.com/gitmir-hello/gitmir-claude-control.git}"
 BRANCH="${GITMIR_BRANCH:-main}"

@@ -1,12 +1,16 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # The POSIX shim. Everything the command does lives in gitmir.mjs next to this
 # file — one implementation, so a fix lands once rather than in a bash copy and
 # a PowerShell copy that drift apart.
 #
+# /bin/sh and no bashisms: a container image with Node but without bash is a
+# normal thing, and there is no reason for the launcher to be the part that
+# cannot run there.
+#
 # The path is resolved through any symlinks first: on the PATH this file is a
 # link, and dirname of a link points at the bin directory, not at the checkout.
-set -euo pipefail
-self="${BASH_SOURCE[0]}"
+set -eu
+self="$0"
 while [ -L "$self" ]; do
   target="$(readlink "$self")"
   case "$target" in
