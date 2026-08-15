@@ -89,13 +89,13 @@ gitmir
 ```
 
 ```bash
-npm i -g github:gitmir-hello/gitmir-claude-control  # if you would rather npm did it
-```
-
-```bash
 git clone https://github.com/gitmir-hello/gitmir-claude-control.git
 cd gitmir-claude-control && node server.ts          # no installer at all
 ```
+
+There is no npm route on purpose: `npm i -g` would put this under `node_modules`, and
+Node refuses to strip TypeScript types from there — the install would look fine and the
+server would die on its first import. Cloning is what makes "no build step" possible.
 
 The installer clones into `~/.gitmir/claude-control` and links one command onto your
 PATH. It downloads nothing from a package registry — Node runs the TypeScript directly,

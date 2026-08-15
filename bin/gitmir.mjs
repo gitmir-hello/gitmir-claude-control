@@ -61,12 +61,32 @@ function openBrowser(url) {
 }
 
 function git(args, opts = {}) {
-  return execFileSync('git', ['-C', DIR, ...args], { encoding: 'utf8', ...opts });
+  // stderr silenced: `status` asks git for a version it may not have, and
+  // "fatal: not a git repository" printed above a clean report reads as a crash.
+  return execFileSync('git', ['-C', DIR, ...args],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], ...opts });
 }
 
 // --- commands ----------------------------------------------------------------
 
+// Node refuses to strip TypeScript types for anything under node_modules, so a
+// global npm install cannot host the runtime — the server dies on the first
+// import with a stack trace nobody should have to read. Say the actual thing.
+const IN_NODE_MODULES = DIR.includes(`${path.sep}node_modules${path.sep}`);
+function refuseNodeModules() {
+  if (!IN_NODE_MODULES) return;
+  die(`This copy lives under node_modules, and Node will not run TypeScript from there
+    (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING) — which is what lets this project
+    have no build step at all.
+
+    Install it the way it expects instead:
+      curl -fsSL https://raw.githubusercontent.com/gitmir-hello/gitmir-claude-control/main/install.sh | sh
+
+    Then: npm rm -g gitmir-claude-control`);
+}
+
 async function start() {
+  refuseNodeModules();
   if (!nodeOk()) {
     die(`Node ${process.versions.node} is too old — this runs TypeScript with no build step, which needs 22.18 or newer.`);
   }
@@ -186,6 +206,11 @@ async function doctor() {
   row(`port ${PORT}`, (await listening()) ? 'serving' : 'not running');
   row('version', ver);
   row('runtime deps', deps);
+  if (IN_NODE_MODULES) {
+    console.log('');
+    say(c('1;31', '✕') + ' Installed under node_modules — Node will not run TypeScript from there.');
+    say('  Use the installer instead:  curl -fsSL https://raw.githubusercontent.com/gitmir-hello/gitmir-claude-control/main/install.sh | sh');
+  }
   console.log('');
 }
 
