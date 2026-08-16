@@ -1,5 +1,5 @@
 #!/bin/bash
-# Двойной клик по этому файлу в Finder запускает Claude Control.
+# Двойной клик по этому файлу в Finder запускает GitMir Local.
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 

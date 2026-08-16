@@ -1,5 +1,5 @@
 @echo off
-REM Puts a "GITMIR Claude Control" shortcut on your Desktop (Windows).
+REM Puts a "GitMir Local" shortcut on your Desktop (Windows).
 REM
 REM start.cmd works but keeps a console window open, and closing that window stops the
 REM dashboard. This creates an ordinary .lnk shortcut instead: double-clicking it starts
@@ -25,10 +25,10 @@ if errorlevel 1 (
 )
 for /f "delims=" %%i in ('node -v') do echo node:             %%i
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$dir='%DIR%'; $lnk = Join-Path ([Environment]::GetFolderPath('Desktop')) 'GITMIR Claude Control.lnk'; $w = New-Object -ComObject WScript.Shell; $s = $w.CreateShortcut($lnk); $s.TargetPath = (Get-Command powershell).Source; $s.Arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"' + (Join-Path $dir 'launch.ps1') + '\"'; $s.WorkingDirectory = $dir; $s.Description = 'Start GITMIR Claude Control and open it in the browser'; $ico = Join-Path $dir 'vendor\gitmir.ico'; if (Test-Path $ico) { $s.IconLocation = $ico }; $s.WindowStyle = 7; $s.Save(); Write-Host ('Shortcut created: ' + $lnk)"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$dir='%DIR%'; $lnk = Join-Path ([Environment]::GetFolderPath('Desktop')) 'GitMir Local.lnk'; $w = New-Object -ComObject WScript.Shell; $s = $w.CreateShortcut($lnk); $s.TargetPath = (Get-Command powershell).Source; $s.Arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"' + (Join-Path $dir 'launch.ps1') + '\"'; $s.WorkingDirectory = $dir; $s.Description = 'Start GitMir Local and open it in the browser'; $ico = Join-Path $dir 'vendor\gitmir.ico'; if (Test-Path $ico) { $s.IconLocation = $ico }; $s.WindowStyle = 7; $s.Save(); Write-Host ('Shortcut created: ' + $lnk)"
 
 echo.
-echo Double-click "GITMIR Claude Control" on your Desktop: the dashboard starts with no
+echo Double-click "GitMir Local" on your Desktop: the dashboard starts with no
 echo window and your browser opens. It keeps running after you close the browser.
 echo To stop it:  taskkill /IM node.exe /F
 echo.

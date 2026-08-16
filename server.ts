@@ -1,4 +1,4 @@
-// GITMIR Claude Control — local dashboard for running Claude Code across projects.
+// GitMir Local — local dashboard for running Claude Code across projects.
 // Copyright (C) 2026 GITMIR
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
@@ -1439,7 +1439,7 @@ server.listen(PORT, '127.0.0.1', () => {
     }
   }
   const addr = `http://localhost:${PORT}`;
-  console.log(`\n  GITMIR Claude Control  ->  ${addr}\n  (Ctrl+C to stop)\n`);
+  console.log(`\n  GitMir Local  ->  ${addr}\n  (Ctrl+C to stop)\n`);
   const opener = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', addr]]
     : process.platform === 'darwin' ? ['open', [addr]]
     : ['xdg-open', [addr]];
@@ -1452,7 +1452,7 @@ const HTML = /* html */ `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>GITMIR Claude Control</title>
+<title>GitMir Local</title>
 <link rel="stylesheet" href="/vendor/fonts.css">
 <style>
   :root{
@@ -2694,7 +2694,7 @@ const HTML = /* html */ `<!doctype html>
   <header class="topbar">
     <a class="brand-link" href="https://ide.gitmir.com" target="_blank" rel="noopener" title="Open ide.gitmir.com"><span class="brand-logo" role="img" aria-label="GitMir IDE"></span></a>
     <span class="brand-sep"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg></span>
-    <span class="brand-sub">Claude Control</span>
+    <span class="brand-sub">Local</span>
     <span class="c" id="count"></span>
     <div class="top-proj" id="topProj"></div>
     <div class="top-tools" id="topTools">

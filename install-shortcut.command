@@ -1,5 +1,5 @@
 #!/bin/bash
-# Puts a "GITMIR Claude Control" app on your Desktop.
+# Puts a "GitMir Local" app on your Desktop.
 #
 # Double-clicking start.command works, but it keeps a Terminal window open and the
 # server dies when you close it. This builds a small .app instead: it starts the
@@ -10,7 +10,7 @@
 set -e
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
-APP_NAME="GITMIR Claude Control"
+APP_NAME="GitMir Local"
 APP="$HOME/Desktop/$APP_NAME.app"
 PORT="${GITMIR_PORT:-4599}"   # same override the server honours
 URL="http://localhost:$PORT"
@@ -61,7 +61,7 @@ if curl -s --max-time 2 "\$URL/api/ping" >/dev/null 2>&1; then
   open "\$URL"; exit 0
 fi
 
-cd "\$DIR" || { osascript -e 'display alert "GITMIR Claude Control" message "The project folder has moved. Run install-shortcut.command again."'; exit 1; }
+cd "\$DIR" || { osascript -e 'display alert "GitMir Local" message "The project folder has moved. Run install-shortcut.command again."'; exit 1; }
 mkdir -p "\$(dirname "\$LOG")"
 # nohup + disown: the dashboard outlives this launcher and anything you close.
 GITMIR_PORT="$PORT" nohup "\$NODE" server.ts >>"\$LOG" 2>&1 &
@@ -72,7 +72,7 @@ for i in \$(seq 1 60); do
   sleep 0.25
 done
 
-osascript -e 'display alert "GITMIR Claude Control" message "The dashboard did not start. See ~/Library/Logs/gitmir-local.log"'
+osascript -e 'display alert "GitMir Local" message "The dashboard did not start. See ~/Library/Logs/gitmir-local.log"'
 exit 1
 LAUNCH
 chmod +x "$APP/Contents/MacOS/launch"

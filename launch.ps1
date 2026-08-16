@@ -1,4 +1,4 @@
-# Starts GITMIR Claude Control without a console window and opens it in the browser.
+# Starts GitMir Local without a console window and opens it in the browser.
 # You are not meant to run this by hand — install-shortcut.cmd makes a Desktop shortcut
 # that calls it. Running it directly works too.
 $ErrorActionPreference = 'SilentlyContinue'
@@ -20,7 +20,7 @@ if (-not $node) {
     Add-Type -AssemblyName System.Windows.Forms
     [System.Windows.Forms.MessageBox]::Show(
         "Node.js was not found. Install Node.js 18 or newer (22+ for the Team bridge) from nodejs.org, then try again.",
-        "GITMIR Claude Control") | Out-Null
+        "GitMir Local") | Out-Null
     exit 1
 }
 
@@ -35,5 +35,5 @@ for ($i = 0; $i -lt 60; $i++) {
 Add-Type -AssemblyName System.Windows.Forms
 [System.Windows.Forms.MessageBox]::Show(
     "The dashboard did not start within 15 seconds. Try running 'node server.ts' in`n$dir`nto see the error.",
-    "GITMIR Claude Control") | Out-Null
+    "GitMir Local") | Out-Null
 exit 1

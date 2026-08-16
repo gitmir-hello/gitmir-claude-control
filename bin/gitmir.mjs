@@ -113,7 +113,7 @@ async function start() {
     console.error('');
     process.exit(1);
   }
-  console.log(`\n  ${c('1;36', 'GITMIR Claude Control')}  http://localhost:${PORT}`);
+  console.log(`\n  ${c('1;36', 'GitMir Local')}  http://localhost:${PORT}`);
   say(`log: ${LOG}   ·   stop with: gitmir stop`);
   console.log('');
   openBrowser(`http://localhost:${PORT}`);
@@ -198,7 +198,7 @@ async function doctor() {
   try { ver = git(['log', '--oneline', '-1']).trim(); } catch {}
 
   const row = (k, v) => console.log('  ' + k.padEnd(16) + v);
-  console.log(`\n  ${c('1;36', 'GITMIR Claude Control')}\n`);
+  console.log(`\n  ${c('1;36', 'GitMir Local')}\n`);
   row('install', DIR);
   row('state', STATE);
   row('node', 'v' + process.versions.node + (nodeOk() ? '' : c('1;31', '  TOO OLD — needs 22.18+')));

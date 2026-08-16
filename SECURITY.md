@@ -1,6 +1,6 @@
 # Security & privacy
 
-**Short version:** GITMIR Claude Control runs entirely on your machine and makes
+**Short version:** GitMir Local runs entirely on your machine and makes
 **no network calls to our servers**. No account, no telemetry, nothing uploaded.
 You can verify every claim on this page yourself in a few minutes — it is three
 files with zero runtime dependencies.

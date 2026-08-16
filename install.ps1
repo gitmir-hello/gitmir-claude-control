@@ -1,4 +1,4 @@
-# GITMIR Claude Control — install in one line, on Windows.
+# GitMir Local — install in one line, on Windows.
 #
 #   irm https://ide.gitmir.com/install.ps1 | iex
 #
@@ -19,7 +19,7 @@ function Step($m) { Write-Host "  · $m" -ForegroundColor Cyan }
 function Die($m)  { Write-Host ""; Write-Host "  x $m" -ForegroundColor Red; Write-Host ""; exit 1 }
 
 Write-Host ""
-Write-Host "  GITMIR Claude Control" -ForegroundColor Cyan
+Write-Host "  GitMir Local" -ForegroundColor Cyan
 Write-Host ""
 
 # --- node ---------------------------------------------------------------------

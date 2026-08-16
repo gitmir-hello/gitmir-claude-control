@@ -1,4 +1,4 @@
-// GITMIR Claude Control — local dashboard for running Claude Code across projects.
+// GitMir Local — local dashboard for running Claude Code across projects.
 // Copyright (C) 2026 GITMIR
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //

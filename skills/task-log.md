@@ -1,5 +1,5 @@
 Keep a log of the work you complete in this project, in `.claude/tasks.json`
-(relative to the root of the current working directory). The local Claude Control
+(relative to the root of the current working directory). The local GitMir
 dashboard reads it and shows what has been done in the project.
 
 Do this immediately:

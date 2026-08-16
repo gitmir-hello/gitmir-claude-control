@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GITMIR Claude Control — install in one line.
+# GitMir Local — install in one line.
 #
 #   curl -fsSL https://ide.gitmir.com/install.sh | sh
 #
@@ -31,7 +31,7 @@ say()  { printf '  %s\n' "$*"; }
 step() { printf '  %s %s\n' "$(c '0;36' '·')" "$*"; }
 die()  { printf '\n  %s %s\n\n' "$(c '1;31' '✕')" "$*" >&2; exit 1; }
 
-printf '\n  %s\n\n' "$(c '1;36' 'GITMIR Claude Control')"
+printf '\n  %s\n\n' "$(c '1;36' 'GitMir Local')"
 
 # --- node ---------------------------------------------------------------------
 # The one hard requirement, and the one that fails confusingly if unmet: below

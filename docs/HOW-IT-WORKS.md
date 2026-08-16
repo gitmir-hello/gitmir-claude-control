@@ -146,7 +146,7 @@ files: the diagram is for the conversation, `docs/` is for the record.
 | Specification toolkits | no — the spec is human intent | writes criteria, from memory | no |
 | Code-graph / context servers | a *symbol* graph | no — they are read tools | no |
 | LLM evaluation platforms | no | no — they score model behaviour | n/a |
-| **GITMIR Claude Control** | **yes, at the product level** | **yes, explicitly** | **yes, and records what happened** |
+| **GitMir Local** | **yes, at the product level** | **yes, explicitly** | **yes, and records what happened** |
 
 These are complements, not enemies. Keep your code-graph server for fast symbol
 lookup and your evals for model behaviour; this is the layer that decides whether

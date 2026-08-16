@@ -1,6 +1,6 @@
 # Third-party notices
 
-GITMIR Claude Control is licensed under AGPL-3.0, with a commercial license also
+GitMir Local is licensed under AGPL-3.0, with a commercial license also
 available (see LICENSING.md). It bundles the following
 third-party components in `vendor/`, each distributed under its own license
 (mere aggregation — they are used unmodified). Their licenses continue to apply

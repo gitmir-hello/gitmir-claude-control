@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * GITMIR Claude Control — MCP server.
+ * GitMir Local — MCP server.
  *
  * The dashboard draws the product model for a person. This serves the same model,
  * as text, to whatever agent the developer already works in — Claude Code, Cursor,
@@ -1005,7 +1005,7 @@ async function handle(msg: any): Promise<void> {
       return result(id, {
         protocolVersion: agreed,
         capabilities: { tools: {}, prompts: {} },
-        serverInfo: { name: NAME, title: 'GITMIR Claude Control', version: VERSION },
+        serverInfo: { name: NAME, title: 'GitMir Local', version: VERSION },
         instructions:
           'This project may carry a GitMir model — a map of what the product does, built from ' +
           'its own code and linked by stable ids. Prefer these tools over reading files when the ' +

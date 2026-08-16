@@ -1,6 +1,6 @@
 # Licensing
 
-GITMIR Claude Control is **dual-licensed**. You choose which of the two applies to you.
+GitMir Local is **dual-licensed**. You choose which of the two applies to you.
 
 ## 1. Open source — AGPL-3.0 (free)
 
