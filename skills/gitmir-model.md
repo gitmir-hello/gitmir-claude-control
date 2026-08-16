@@ -1,7 +1,7 @@
 ---
 name: gitmir-model
 description: >-
-  Build and maintain the single source of truth for what this product does: an
+  Build and maintain a shared model of what this product does: an
   object model read out of the code itself and written as id-linked JSON into the
   project's local .gitmir/model/ folder. It is what lets everyone — the agent, the
   developer, whoever asked for the feature — work against what the product IS
