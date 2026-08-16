@@ -82,7 +82,7 @@ function refuseNodeModules() {
     Install it the way it expects instead:
       curl -fsSL https://ide.gitmir.com/install.sh | sh
 
-    Then: npm rm -g gitmir-claude-control`);
+    Then: npm rm -g gitmir-local`);
 }
 
 async function start() {
@@ -144,7 +144,7 @@ async function update() {
     // whichever route actually put it here rather than at the one we prefer.
     const viaNpm = DIR.includes(`${path.sep}node_modules${path.sep}`);
     die(viaNpm
-      ? `Installed through npm, so there is no git history here to pull.\n    Update with:  npm i -g github:gitmir-hello/gitmir-claude-control`
+      ? `Installed through npm, so there is no git history here to pull.\n    Update with:  npm i -g github:gitmir-hello/gitmir-local`
       : `${DIR} is not a git checkout — there is no history here to pull.\n    Update by running the installer again:\n      curl -fsSL https://ide.gitmir.com/install.sh | sh`);
   }
   say(`Updating ${DIR}`);

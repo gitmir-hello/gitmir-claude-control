@@ -108,8 +108,8 @@ proven.
 Read it first, then run it:
 
 ```bash
-git clone https://github.com/gitmir-hello/gitmir-claude-control.git
-cd gitmir-claude-control
+git clone https://github.com/gitmir-hello/gitmir-local.git
+cd gitmir-local
 node server.ts
 ```
 
@@ -121,7 +121,7 @@ irm https://ide.gitmir.com/install.ps1 | iex          # Windows
 gitmir
 ```
 
-<sub>Clones into <code>~/.gitmir/claude-control</code>, links one command onto your PATH, and pulls nothing from a package registry. <a href="install.sh">Read the installer</a> — it is short on purpose. There is no npm route: <code>npm i -g</code> would put this under <code>node_modules</code>, where Node refuses to strip TypeScript types.</sub>
+<sub>Clones into <code>~/.gitmir/local</code>, links one command onto your PATH, and pulls nothing from a package registry. <a href="install.sh">Read the installer</a> — it is short on purpose. There is no npm route: <code>npm i -g</code> would put this under <code>node_modules</code>, where Node refuses to strip TypeScript types.</sub>
 
 **http://localhost:4599** → add a project folder → **▶ Run Claude** → paste the
 **`gitmir-model`** skill. Claude reads the repo, writes `.gitmir/model/`, and every view
@@ -366,7 +366,7 @@ We built this for ourselves — we run Claude Code all day across dozens of proj
 did the model understand it correctly · what did it miss · what dependency did it find that
 you did not expect
 
-**[Share what the model got right and wrong](https://github.com/gitmir-hello/gitmir-claude-control/discussions/1)**
+**[Share what the model got right and wrong](https://github.com/gitmir-hello/gitmir-local/discussions/1)**
 There is no telemetry, so that thread is the only way we learn anything.
 
 🌐 **[gitmir.com](https://gitmir.com)** · 🚀 **[ide.gitmir.com](https://ide.gitmir.com)** · ✉️ **hello@gitmir.com**

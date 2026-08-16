@@ -284,7 +284,7 @@ function renderRail(){
       + svgIcon(r.ic, 20) + '<span class="l">' + r.l + '</span>'
       + (r.badge ? '<span class="badge" id="' + r.badge + '"></span>' : '') + '</button>').join('')
     + '<div class="rail-foot">'
-    + '<a href="https://github.com/gitmir-hello/gitmir-claude-control" target="_blank" rel="noopener" title="Source on GitHub">'
+    + '<a href="https://github.com/gitmir-hello/gitmir-local" target="_blank" rel="noopener" title="Source on GitHub">'
     + svgIcon('github', 16) + '</a><span>AGPL</span></div>';
   railEl.querySelectorAll('.rl').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
 }
@@ -742,7 +742,7 @@ const subH = (n) => 50 + Math.max(0, n - 1) * SUB_LH;
 // folder they are asking about.
 function renderMcpBox(){
   const box=document.getElementById('mcpBox'); if(!box) return;
-  const home=window.__GITMIR_HOME__||'/path/to/gitmir-claude-control';
+  const home=window.__GITMIR_HOME__||'/path/to/gitmir-local';
   const proj=selected||'/path/to/your/project';
   const q=s=>'"'+String(s).replace(/"/g,'\\"')+'"';
   const add='claude mcp add gitmir -- node '+q(home+'/mcp.ts')+' --project '+q(proj);

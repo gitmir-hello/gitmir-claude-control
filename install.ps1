@@ -2,7 +2,7 @@
 #
 #   irm https://ide.gitmir.com/install.ps1 | iex
 #
-# Clones into %USERPROFILE%\.gitmir\claude-control and puts a `gitmir` command
+# Clones into %USERPROFILE%\.gitmir\local and puts a `gitmir` command
 # on your PATH. Nothing is compiled and nothing comes from a package registry:
 # Node runs the TypeScript directly, and the fonts and renderer are in the repo.
 #
@@ -10,9 +10,9 @@
 
 $ErrorActionPreference = 'Stop'
 
-$Repo   = if ($env:GITMIR_REPO)   { $env:GITMIR_REPO }   else { 'https://github.com/gitmir-hello/gitmir-claude-control.git' }
+$Repo   = if ($env:GITMIR_REPO)   { $env:GITMIR_REPO }   else { 'https://github.com/gitmir-hello/gitmir-local.git' }
 $Branch = if ($env:GITMIR_BRANCH) { $env:GITMIR_BRANCH } else { 'main' }
-$Dir    = if ($env:GITMIR_HOME)   { $env:GITMIR_HOME }   else { Join-Path $env:USERPROFILE '.gitmir\claude-control' }
+$Dir    = if ($env:GITMIR_HOME)   { $env:GITMIR_HOME }   else { Join-Path $env:USERPROFILE '.gitmir\local' }
 $BinDir = if ($env:GITMIR_BIN)    { $env:GITMIR_BIN }    else { Join-Path $env:USERPROFILE '.gitmir\bin' }
 
 function Step($m) { Write-Host "  · $m" -ForegroundColor Cyan }
@@ -37,6 +37,16 @@ if ([int]$parts[0] -lt 22 -or ([int]$parts[0] -eq 22 -and [int]$parts[1] -lt 18)
 Step "Node $v"
 
 # --- fetch --------------------------------------------------------------------
+# The project was called gitmir-claude-control and installed into .gitmir\claude-control.
+# Move an existing checkout rather than cloning a second copy beside it: git
+# redirects the old remote, so the moved one keeps updating without being touched.
+$old = Join-Path $env:USERPROFILE '.gitmir\claude-control'
+if ((Test-Path (Join-Path $old '.git')) -and -not (Test-Path (Join-Path $Dir '.git'))) {
+  Step "Moving the earlier install: $old -> $Dir"
+  New-Item -ItemType Directory -Force -Path (Split-Path $Dir) | Out-Null
+  Move-Item -Path $old -Destination $Dir
+}
+
 $git = Get-Command git -ErrorAction SilentlyContinue
 if (Test-Path (Join-Path $Dir '.git')) {
   Step "Updating $Dir"

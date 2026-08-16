@@ -54,7 +54,7 @@ cat > "$APP/Contents/MacOS/launch" <<LAUNCH
 DIR="$DIR"
 NODE="$NODE"
 URL="$URL"
-LOG="\$HOME/Library/Logs/gitmir-claude-control.log"
+LOG="\$HOME/Library/Logs/gitmir-local.log"
 
 # Already up? Just show it.
 if curl -s --max-time 2 "\$URL/api/ping" >/dev/null 2>&1; then
@@ -72,7 +72,7 @@ for i in \$(seq 1 60); do
   sleep 0.25
 done
 
-osascript -e 'display alert "GITMIR Claude Control" message "The dashboard did not start. See ~/Library/Logs/gitmir-claude-control.log"'
+osascript -e 'display alert "GITMIR Claude Control" message "The dashboard did not start. See ~/Library/Logs/gitmir-local.log"'
 exit 1
 LAUNCH
 chmod +x "$APP/Contents/MacOS/launch"

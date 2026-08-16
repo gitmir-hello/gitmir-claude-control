@@ -30,7 +30,7 @@ Point your MCP client at `mcp.ts` in this repository:
   "mcpServers": {
     "gitmir": {
       "command": "node",
-      "args": ["/path/to/gitmir-claude-control/mcp.ts",
+      "args": ["/path/to/gitmir-local/mcp.ts",
                "--project", "/path/to/your/project"]
     }
   }

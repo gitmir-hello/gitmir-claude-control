@@ -1,13 +1,13 @@
 {
-  "name": "gitmir-claude-control",
+  "name": "gitmir-local",
   "version": "1.0.0",
   "description": "Local dashboard for running Claude Code across projects: models each product from the real code, turns any part of that model into an exact task, and verifies the work before calling it done.",
   "type": "module",
   "license": "AGPL-3.0-or-later",
-  "homepage": "https://github.com/gitmir-hello/gitmir-claude-control",
+  "homepage": "https://github.com/gitmir-hello/gitmir-local",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/gitmir-hello/gitmir-claude-control.git"
+    "url": "git+https://github.com/gitmir-hello/gitmir-local.git"
   },
   "engines": {
     "node": ">=22.18.0"

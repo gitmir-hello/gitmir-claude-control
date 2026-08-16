@@ -3,7 +3,7 @@
 #
 #   curl -fsSL https://ide.gitmir.com/install.sh | sh
 #
-# It clones the repository into ~/.gitmir/claude-control and links a `gitmir`
+# It clones the repository into ~/.gitmir/local and links a `gitmir`
 # command onto your PATH. Nothing is compiled and nothing is downloaded from a
 # package registry: Node runs the TypeScript directly, the diagram renderer is
 # written for this project, and the fonts are in the repository.
@@ -12,7 +12,7 @@
 #
 # Reading this before running it is the correct instinct, and this file is short
 # on purpose. Everything it touches:
-#   ~/.gitmir/claude-control   the checkout
+#   ~/.gitmir/local   the checkout
 #   ~/.local/bin/gitmir        a symlink to bin/gitmir inside that checkout
 
 # POSIX below this line, on purpose: the command on a landing page gets copied
@@ -21,9 +21,10 @@
 set -eu
 if (set -o pipefail 2>/dev/null); then set -o pipefail; fi
 
-REPO="${GITMIR_REPO:-https://github.com/gitmir-hello/gitmir-claude-control.git}"
+REPO="${GITMIR_REPO:-https://github.com/gitmir-hello/gitmir-local.git}"
 BRANCH="${GITMIR_BRANCH:-main}"
-DIR="${GITMIR_HOME:-$HOME/.gitmir/claude-control}"
+DIR="${GITMIR_HOME:-$HOME/.gitmir/local}"
+OLD="$HOME/.gitmir/claude-control"    # where it lived before the project was renamed
 
 c()   { printf '\033[%sm%s\033[0m' "$1" "$2"; }
 say()  { printf '  %s\n' "$*"; }
@@ -50,6 +51,15 @@ fi
 step "Node $NODEV"
 
 # --- fetch --------------------------------------------------------------------
+# The project was called gitmir-claude-control and installed into .gitmir/claude-control.
+# Move an existing checkout rather than cloning a second copy beside it: git
+# redirects the old remote, so the moved one keeps updating without being touched.
+if [ -d "$OLD/.git" ] && [ ! -d "$DIR/.git" ]; then
+  step "Moving the earlier install: $OLD -> $DIR"
+  mkdir -p "$(dirname "$DIR")"
+  mv "$OLD" "$DIR"
+fi
+
 if [ -d "$DIR/.git" ]; then
   step "Updating $DIR"
   git -C "$DIR" fetch --quiet origin "$BRANCH"

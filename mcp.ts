@@ -32,7 +32,7 @@ import { readFindings, writeFinding, setFindingStatus, findingsByTarget, openOnl
 
 const PROTOCOL = '2025-06-18';           // the version this server implements
 const SUPPORTED = new Set([PROTOCOL, '2025-03-26', '2024-11-05']);
-const NAME = 'gitmir-claude-control';
+const NAME = 'gitmir-local';
 const VERSION = '1.0.0';
 
 // ---------- project resolution ----------
