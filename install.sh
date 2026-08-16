@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # GITMIR Claude Control — install in one line.
 #
-#   curl -fsSL https://raw.githubusercontent.com/gitmir-hello/gitmir-claude-control/main/install.sh | bash
+#   curl -fsSL https://ide.gitmir.com/install.sh | sh
 #
 # It clones the repository into ~/.gitmir/claude-control and links a `gitmir`
 # command onto your PATH. Nothing is compiled and nothing is downloaded from a

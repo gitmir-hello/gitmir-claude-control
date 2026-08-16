@@ -1,6 +1,6 @@
 # GITMIR Claude Control — install in one line, on Windows.
 #
-#   irm https://raw.githubusercontent.com/gitmir-hello/gitmir-claude-control/main/install.ps1 | iex
+#   irm https://ide.gitmir.com/install.ps1 | iex
 #
 # Clones into %USERPROFILE%\.gitmir\claude-control and puts a `gitmir` command
 # on your PATH. Nothing is compiled and nothing comes from a package registry:

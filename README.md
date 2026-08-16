@@ -76,7 +76,7 @@ and to say so out loud before running something unapproved.
 ## 60 seconds
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gitmir-hello/gitmir-claude-control/main/install.sh | bash     # macOS · Linux
+curl -fsSL https://ide.gitmir.com/install.sh | sh       # macOS · Linux
 gitmir
 ```
 
@@ -84,7 +84,7 @@ gitmir
 <summary>Windows · npm · from a clone</summary>
 
 ```powershell
-irm https://raw.githubusercontent.com/gitmir-hello/gitmir-claude-control/main/install.ps1 | iex            # Windows
+irm https://ide.gitmir.com/install.ps1 | iex            # Windows
 gitmir
 ```
 
@@ -259,7 +259,7 @@ builder, viewers free** — sharing a read-only map is free on any plan.
 Windows · Linux. `dependencies` is empty and staying that way: the diagrams are drawn by a
 renderer written for this, and the fonts are vendored, so it works offline. Port 4599, or `GITMIR_PORT=4600 node server.ts`. Desktop
 shortcut: `bash install-shortcut.command` (macOS) · `install-shortcut.cmd` (Windows).
-`curl -fsSL https://raw.githubusercontent.com/gitmir-hello/gitmir-claude-control/main/install.sh | bash` installs the `gitmir` command; reading
+`curl -fsSL https://ide.gitmir.com/install.sh | sh` installs the `gitmir` command; reading
 [`install.sh`](install.sh) before running it is the correct instinct and it is kept short
 for that reason.
 

@@ -80,7 +80,7 @@ function refuseNodeModules() {
     have no build step at all.
 
     Install it the way it expects instead:
-      curl -fsSL https://raw.githubusercontent.com/gitmir-hello/gitmir-claude-control/main/install.sh | sh
+      curl -fsSL https://ide.gitmir.com/install.sh | sh
 
     Then: npm rm -g gitmir-claude-control`);
 }
@@ -145,7 +145,7 @@ async function update() {
     const viaNpm = DIR.includes(`${path.sep}node_modules${path.sep}`);
     die(viaNpm
       ? `Installed through npm, so there is no git history here to pull.\n    Update with:  npm i -g github:gitmir-hello/gitmir-claude-control`
-      : `${DIR} is not a git checkout — there is no history here to pull.\n    Update by running the installer again:\n      curl -fsSL https://raw.githubusercontent.com/gitmir-hello/gitmir-claude-control/main/install.sh | bash`);
+      : `${DIR} is not a git checkout — there is no history here to pull.\n    Update by running the installer again:\n      curl -fsSL https://ide.gitmir.com/install.sh | sh`);
   }
   say(`Updating ${DIR}`);
   const before = git(['rev-parse', '--short', 'HEAD']).trim();
@@ -209,7 +209,7 @@ async function doctor() {
   if (IN_NODE_MODULES) {
     console.log('');
     say(c('1;31', '✕') + ' Installed under node_modules — Node will not run TypeScript from there.');
-    say('  Use the installer instead:  curl -fsSL https://raw.githubusercontent.com/gitmir-hello/gitmir-claude-control/main/install.sh | sh');
+    say('  Use the installer instead:  curl -fsSL https://ide.gitmir.com/install.sh | sh');
   }
   console.log('');
 }
