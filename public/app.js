@@ -811,7 +811,13 @@ function renderMcpBox(){
   const home=window.__GITMIR_HOME__||'/path/to/gitmir-local';
   const proj=selected||'/path/to/your/project';
   const q=s=>'"'+String(s).replace(/"/g,'\\"')+'"';
-  const add='claude mcp add gitmir -- node '+q(home+'/mcp.ts')+' --project '+q(proj);
+  // `claude mcp add` defaults to local scope — the registration lives in the folder
+  // the command was run from. Somebody who runs it once and then opens their editor
+  // in a project finds nothing and concludes it did not work. -s user covers every
+  // project; the server answers about whichever one the editor was opened in.
+  const add='gitmir mcp add';
+  const addRaw='claude mcp add -s user gitmir -- node '+q(home+'/mcp.ts');
+  const addHere='gitmir mcp add-here';
   const check='cd '+q(home)+' && node mcp-check.ts '+q(proj)+' model';
 
   // Four steps, each answering the same three questions in the same order: what
@@ -847,11 +853,13 @@ function renderMcpBox(){
     '<div class="mcp-steps">'+
     step(1,
       'Register this project with your agent',
-      'One command tells Claude Code where the server lives and which project it answers about. It writes a line '+
-      'into your Claude config and nothing else — no service, no port, no account.',
+      'One command, once. It writes a line into your Claude config and nothing else — no service, no port, no '+
+      'account. Registered for every project: the server answers about whichever folder your editor is open in.',
       add,
-      'Using another editor? <b>gitmir mcp</b> in a terminal prints the same thing as JSON to paste into its settings.',
-      '<code>claude mcp list</code> shows <b>gitmir</b> as connected.') +
+      'No <b>gitmir</b> command because you cloned instead of installing? Use '+
+      '<code>'+esc(addRaw)+'</code>. To pin it to this repository instead — in a <code>.mcp.json</code> you commit, so '+
+      'teammates get it too — run <b>'+esc(addHere)+'</b> in the project folder.',
+      '<code>claude mcp list</code> shows <b>gitmir</b> as connected, from any directory.') +
     step(2,
       'Restart the editor',
       'An MCP client reads its config once, at startup. Skipping this is the most common reason people conclude the '+
@@ -860,10 +868,11 @@ function renderMcpBox(){
       'Your agent lists tools whose names start with <b>gitmir_</b>.') +
     step(3,
       'Say: <i>set this project up with GitMir</i>',
-      'The procedures are tools the agent can call, not text you paste. It adds the folder to this dashboard, creates '+
-      'the task queue, and says what is still missing — including the model, if there is none yet.',
+      'All twelve procedures arrive with the server — as slash commands, and as tools the agent can call on its own. '+
+      'Nothing is pasted. This one adds the folder to this dashboard, creates the task queue, and says what is still '+
+      'missing, including the model if there is none yet.',
       '', '',
-      'The project appears here with a queue, and the agent reports what it did.') +
+      'The project appears here with a queue, the agent reports what it did, and typing <b>/</b> lists the skills.') +
     step(4,
       'Ask it something only the model knows',
       '<i>What breaks if I change the order status?</i> The point is not that it answers — it is where the answer comes '+
@@ -1333,14 +1342,15 @@ async function renderHome(pathStr){
     // so this offers the explicit one — pinned to this folder — and it is a button
     // that copies it, not a box that looks like a button and does nothing.
     const q=s=>'"'+String(s).replace(/"/g,'\\"')+'"';
-    const addCmd='claude mcp add gitmir -- node '+q((window.__GITMIR_HOME__||'.')+'/mcp.ts')+' --project '+q(pathStr);
+    const addCmd='gitmir mcp add';
     h+='<div class="hm-hero-h">The context is built. Nothing has asked it anything yet.</div>'+
        '<p>Point your agent at it and every answer it takes is counted here, against the size of the files '+
        'those objects live in.</p>'+
        '<button class="hm-cmd" data-copy="'+esc(addCmd)+'" title="Copy this command">'+
          '<span class="hm-cmd-c">'+esc(addCmd)+'</span><span class="hm-cmd-a">Copy</span></button>'+
-       '<div class="hm-cmd-w">Run it once in a terminal, then restart your editor — a client reads its MCP config at '+
-       'startup. <button class="hm-link" data-go="mcp">The rest of the steps →</button></div>';
+       '<div class="hm-cmd-w">Once, in a terminal, for every project — then restart your editor, because a client '+
+       'reads its MCP config only at startup. All twelve skills arrive with it. '+
+       '<button class="hm-link" data-go="mcp">The rest of the steps →</button></div>';
   }
   h+='</div>';
 

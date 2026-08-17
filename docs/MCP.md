@@ -23,7 +23,23 @@ JSON-RPC over stdin and stdout.
 
 ## Setup
 
-Point your MCP client at `mcp.ts` in this repository:
+One command, if you installed with the installer:
+
+```bash
+gitmir mcp add          # every project
+gitmir mcp add-here     # or pin it to this repo, in a .mcp.json you commit
+```
+
+It registers at **user scope** on purpose. `claude mcp add` defaults to `local`, which
+stores the registration in whichever directory you happened to run it from — so somebody
+who runs it once and then opens their editor in a project finds nothing there and
+reasonably concludes it did not work. At user scope the server is available everywhere and
+answers about whichever folder the editor was opened in.
+
+All twelve skills arrive with it, as prompts — most clients surface those as slash
+commands — and as tools the agent can call on its own. Nothing is pasted.
+
+Point another MCP client at `mcp.ts` in this repository instead:
 
 ```json
 {

@@ -170,15 +170,34 @@ function mcpConfig() {
 function mcp(sub) {
   // Registering with the agent is where people got stuck: an MCP server has no
   // screen, so a config that never took looks exactly like one that did.
-  if (sub === 'add') {
+  if (sub === 'add' || sub === 'add-here') {
+    // `claude mcp add` defaults to local scope — the registration lives in the
+    // directory you happened to run it from. Somebody who runs this once, from
+    // anywhere, and then opens their editor in a project finds nothing there and
+    // reasonably concludes it did not work.
+    //
+    //   add       -> user scope: every project, answering about whichever one the
+    //               editor was opened in, because the server falls back to its cwd.
+    //   add-here  -> project scope: writes .mcp.json into this folder, which is
+    //               committed and therefore arrives for teammates too.
+    const scope = sub === 'add-here' ? 'project' : 'user';
     try {
-      execFileSync('claude', ['mcp', 'add', 'gitmir', '--', 'node', path.join(DIR, 'mcp.ts')], { stdio: 'inherit' });
+      execFileSync('claude', ['mcp', 'add', '-s', scope, 'gitmir', '--', 'node', path.join(DIR, 'mcp.ts')],
+        { stdio: 'inherit' });
     } catch {
       die("The 'claude' CLI is not on your PATH.\n    Run `gitmir mcp` and paste the config into your editor's MCP settings instead.");
     }
     console.log('');
-    say(`Added. In a new session, ask your agent: ${c('0;36', 'set this project up with GitMir')}`);
-    say(`Check it answers:  node ${path.join(DIR, 'mcp-check.ts')} . init`);
+    if (scope === 'user') {
+      say('Added for every project. The server answers about whichever folder your editor is open in.');
+      say(`To pin it to one repository instead — and commit it for teammates: ${c('0;36', 'gitmir mcp add-here')}`);
+    } else {
+      say(`Added to .mcp.json in ${process.cwd()} — commit it and your teammates get it too.`);
+    }
+    console.log('');
+    say(`${c('1;37', 'Restart your editor')} — a client reads its MCP config once, at startup.`);
+    say(`Then say: ${c('0;36', 'set this project up with GitMir')}`);
+    say(`All twelve skills arrive as slash commands; nothing has to be pasted.`);
     console.log('');
     return;
   }
@@ -223,7 +242,8 @@ const HELP = `
     gitmir status       node, port, version, what is missing
     gitmir update       git pull, and restart if it was running
     gitmir mcp          the MCP config for your editor
-    gitmir mcp add      register it with the Claude Code CLI
+    gitmir mcp add      register it for every project (Claude Code CLI)
+    gitmir mcp add-here pin it to this folder, in a committed .mcp.json
     gitmir log [n]      the last n lines the server printed
     gitmir path         where the checkout lives
 
