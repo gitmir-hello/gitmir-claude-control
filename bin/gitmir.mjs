@@ -60,6 +60,26 @@ function openBrowser(url) {
   try { spawn(cmd[0], cmd[1], { stdio: 'ignore', detached: true }).unref(); } catch {}
 }
 
+/**
+ * Run the Claude CLI.
+ *
+ * On Windows it is a .cmd shim, and execFileSync cannot execute those — it fails
+ * with ENOENT, which the caller would report as "claude is not on your PATH"
+ * while `gitmir status` says it is, using `where`. Two of our own screens
+ * contradicting each other is a worse failure than the one being reported.
+ *
+ * Candidates rather than a shell, so a path with a space in it stays one argument.
+ */
+function runClaude(args, opts = {}) {
+  const names = process.platform === 'win32' ? ['claude.cmd', 'claude.exe', 'claude'] : ['claude'];
+  let last;
+  for (const name of names) {
+    try { return execFileSync(name, args, opts); }
+    catch (e) { last = e; if (e.code !== 'ENOENT') throw e; }
+  }
+  throw last;
+}
+
 function git(args, opts = {}) {
   // stderr silenced: `status` asks git for a version it may not have, and
   // "fatal: not a git repository" printed above a clean report reads as a crash.
@@ -183,7 +203,7 @@ function mcp(sub) {
     const scope = sub === 'add-here' ? 'project' : 'user';
     const args = ['mcp', 'add', '-s', scope, 'gitmir', '--', 'node', path.join(DIR, 'mcp.ts')];
     try {
-      console.log(execFileSync('claude', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim());
+      console.log(runClaude(args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim());
     } catch (e) {
       // Every failure used to report the same cause — "claude is not on your PATH" —
       // including the common one where it is on the PATH and the server is simply

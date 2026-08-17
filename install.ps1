@@ -79,10 +79,12 @@ else {
 # to the repository updates what the command does.
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 $shim = Join-Path $BinDir 'gitmir.cmd'
+# Written in the console codepage, not ASCII: %USERPROFILE% is C:\Users\Владимир on a
+# Russian Windows, and ASCII would mangle the one path this file exists to hold.
 @"
 @echo off
 node "$Dir\bin\gitmir.mjs" %*
-"@ | Set-Content -Path $shim -Encoding ASCII
+"@ | Set-Content -Path $shim -Encoding Oem
 Step "Wrote $shim"
 
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
