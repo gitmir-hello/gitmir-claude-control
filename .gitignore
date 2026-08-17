@@ -1,4 +1,9 @@
 # local runtime state (personal — never commit)
+# The usage ledger and the footprint cache are per-machine records of what was
+# asked here. They belong in the project they describe, not in this repository —
+# including the shipped example, where they would be one developer's test run.
+examples/*/.gitmir/usage.jsonl
+examples/*/.gitmir/footprint.json
 projects.json
 team.json
 .claude/
