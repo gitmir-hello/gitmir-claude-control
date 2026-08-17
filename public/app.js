@@ -813,34 +813,90 @@ function renderMcpBox(){
   const q=s=>'"'+String(s).replace(/"/g,'\\"')+'"';
   const add='claude mcp add gitmir -- node '+q(home+'/mcp.ts')+' --project '+q(proj);
   const check='cd '+q(home)+' && node mcp-check.ts '+q(proj)+' model';
+
+  // Four steps, each answering the same three questions in the same order: what
+  // you do, what it buys, and how you know it worked. The page before this put
+  // that last one in grey small print at the bottom — which is where somebody
+  // looks only after they have already decided the thing is broken.
+  const step=(n, title, why, cmd, cmdNote, proof)=>
+    '<div class="ms">'+
+      '<div class="ms-n">'+n+'</div>'+
+      '<div class="ms-b">'+
+        '<div class="ms-t">'+title+'</div>'+
+        '<div class="ms-w">'+why+'</div>'+
+        (cmd? '<button class="ms-cmd" data-copy="'+esc(cmd)+'" title="Copy">'+
+                '<span class="ms-cmd-c">'+esc(cmd)+'</span><span class="ms-cmd-a">Copy</span></button>'+
+              (cmdNote? '<div class="ms-cmd-n">'+cmdNote+'</div>':'') : '')+
+        // The proof line is a flex row of exactly two things: the label and the
+        // sentence. Without the wrapper every <b> and <code> inside becomes a flex
+        // item of its own and the gap prises the words apart.
+        '<div class="ms-p"><span>You know it worked when</span><div>'+proof+'</div></div>'+
+      '</div>'+
+    '</div>';
+
   box.innerHTML=
-    '<div class="skills-label">Your editor, reading this model while it works</div>'+
-    '<div class="mcp-what">The dashboard is where you <b>look</b> at the model. MCP is how your coding agent '+
-      '<b>reads the same model while it works</b> — what an object is, what breaks if it changes, what a task '+
-      'would touch — instead of re-reading your repository every session.</div>'+
-    '<div class="mcp-not">It has no screen of its own. <b>The diagrams stay here</b> — Impact, the product map, '+
-      'journeys. MCP answers in text, to the agent, in the editor you already work in.</div>'+
-    '<div class="mcp-step"><span class="mcp-n">1</span>Run this once, in a terminal. It registers this project with Claude Code.'+
-      '<code class="mcp-cmd" id="mcpAdd">'+esc(add)+'</code>'+
-      '<button class="ghost mcp-copy" data-c="add">📋 Copy</button></div>'+
-    '<div class="mcp-step"><span class="mcp-n">2</span>Restart your editor and say: <i>set this project up with GitMir</i>. '+
-      'It adds the folder here, makes the task queue, and builds the model itself — the procedures are tools it can '+
-      'call, so nothing has to be pasted by hand.</div>'+
-    '<div class="mcp-step"><span class="mcp-n">3</span>Then ask it something only the model knows — '+
-      '<i>what breaks if I change the order status?</i> It will answer from here.</div>'+
-    '<div class="mcp-step"><span class="mcp-n">4</span>Not sure it connected? This prints exactly what the agent will see.'+
-      '<code class="mcp-cmd" id="mcpChk">'+esc(check)+'</code>'+
-      '<button class="ghost mcp-copy" data-c="chk">📋 Copy</button></div>'+
-    '<div class="mcp-note"><b>If nothing happens.</b> Check the command actually registered: <code>claude mcp list</code> '+
-      'should show <code>gitmir</code> as connected. A client only reads its config at startup, so the editor has to be '+
-      'restarted after step 1. And a project with no model answers "there is no model here yet" to everything — that is '+
-      'not a broken connection, it is the model missing.</div>'+
-    '<div class="mcp-note">You can also do all of it by hand, from the <b>Skills</b> page: '+
-      '<b>gitmir-model</b> builds the model, <b>task-planner</b> writes work that carries its own checks. '+
-      'MCP changes who does the typing, not what gets done.</div>';
-  box.querySelectorAll('.mcp-copy').forEach(b=>b.addEventListener('click',async()=>{
-    try{ await navigator.clipboard.writeText(b.dataset.c==='add'?add:check); toast('Copied ✓'); }
-    catch(e){ toast('Could not copy — select the line and press ⌘C'); }
+    '<div class="mcp-lead">'+
+      '<div class="mcp-lead-t">The same model, inside the editor you already work in</div>'+
+      '<p>The dashboard is where <b>you</b> look at the object context. MCP is how <b>your agent</b> reads it '+
+      'while it works — what an object is, what breaks if it changes, what a task would touch, where the code '+
+      'already disagrees with the spec — instead of re-reading your repository at the start of every session.</p>'+
+      '<p class="mcp-lead-n">It has no screen of its own and it moves nothing out of here. The diagrams, the change '+
+      'radius and the record stay in this dashboard; MCP answers in text, to the agent, in your editor.</p>'+
+    '</div>'+
+
+    '<div class="mcp-steps">'+
+    step(1,
+      'Register this project with your agent',
+      'One command tells Claude Code where the server lives and which project it answers about. It writes a line '+
+      'into your Claude config and nothing else — no service, no port, no account.',
+      add,
+      'Using another editor? <b>gitmir mcp</b> in a terminal prints the same thing as JSON to paste into its settings.',
+      '<code>claude mcp list</code> shows <b>gitmir</b> as connected.') +
+    step(2,
+      'Restart the editor',
+      'An MCP client reads its config once, at startup. Skipping this is the most common reason people conclude the '+
+      'connection failed — the command worked, the editor simply had not looked yet.',
+      '', '',
+      'Your agent lists tools whose names start with <b>gitmir_</b>.') +
+    step(3,
+      'Say: <i>set this project up with GitMir</i>',
+      'The procedures are tools the agent can call, not text you paste. It adds the folder to this dashboard, creates '+
+      'the task queue, and says what is still missing — including the model, if there is none yet.',
+      '', '',
+      'The project appears here with a queue, and the agent reports what it did.') +
+    step(4,
+      'Ask it something only the model knows',
+      '<i>What breaks if I change the order status?</i> The point is not that it answers — it is where the answer comes '+
+      'from: the object context, walked from real links, with a line stating how fresh it is.',
+      '', '',
+      'The answer names objects and areas from your model, and opens with how fresh that model is.') +
+    '</div>'+
+
+    '<div class="mcp-card check">'+
+      '<div class="mcp-card-t">Check it without an editor</div>'+
+      '<p>An MCP server has no screen, which makes a broken setup hard to tell from a working one. This starts the '+
+      'server exactly as your editor would, asks it one question, and prints the answer for a person.</p>'+
+      '<button class="ms-cmd" data-copy="'+esc(check)+'" title="Copy"><span class="ms-cmd-c">'+esc(check)+
+      '</span><span class="ms-cmd-a">Copy</span></button>'+
+    '</div>'+
+
+    '<div class="mcp-card warn">'+
+      '<div class="mcp-card-t">If the answers are not what you expected</div>'+
+      '<div class="mcp-q"><b>Everything comes back "there is no model here yet".</b> Not a broken connection — the '+
+      'model is missing. Build it from the <b>Skills</b> page, or ask the agent to.</div>'+
+      '<div class="mcp-q"><b>No gitmir_ tools are listed.</b> The editor has not re-read its config. Restart it, then '+
+      'check <code>claude mcp list</code>.</div>'+
+      '<div class="mcp-q"><b>It answers about the wrong project.</b> The <code>--project</code> in step 1 pins it; '+
+      'without it the server answers about whatever directory the agent started in.</div>'+
+    '</div>'+
+
+    '<div class="mcp-foot">MCP changes who does the typing, not what gets done. All of it can be done by hand from the '+
+    '<b>Skills</b> page — <b>gitmir-model</b> builds the context, <b>task-planner</b> writes work that carries its own '+
+    'checks.</div>';
+
+  box.querySelectorAll('[data-copy]').forEach(b=>b.addEventListener('click', async ()=>{
+    try{ await copyToClipboard(b.dataset.copy); toast('Copied ✓  Paste it into a terminal'); }
+    catch(e){ toast('Copy failed — select the line and press ⌘C', true); }
   }));
 }
 
