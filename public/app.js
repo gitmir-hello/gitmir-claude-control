@@ -815,9 +815,14 @@ function renderMcpBox(){
   // the command was run from. Somebody who runs it once and then opens their editor
   // in a project finds nothing and concludes it did not work. -s user covers every
   // project; the server answers about whichever one the editor was opened in.
-  const add='gitmir mcp add';
-  const addRaw='claude mcp add -s user gitmir -- node '+q(home+'/mcp.ts');
-  const addHere='gitmir mcp add-here';
+  // Show the command that exists on THIS machine. `gitmir` arrives with the
+  // installer, not with a clone, and printing it to somebody who cloned sends them
+  // looking for something that is not there.
+  const hasCli = !!window.__GITMIR_CLI__;
+  const rawAdd='claude mcp add -s user gitmir -- node '+q(home+'/mcp.ts');
+  const add = hasCli ? 'gitmir mcp add' : rawAdd;
+  const addHere = hasCli ? 'gitmir mcp add-here'
+    : 'claude mcp add -s project gitmir -- node '+q(home+'/mcp.ts');
   const check='cd '+q(home)+' && node mcp-check.ts '+q(proj)+' model';
 
   // Four steps, each answering the same three questions in the same order: what
@@ -856,9 +861,13 @@ function renderMcpBox(){
       'One command, once. It writes a line into your Claude config and nothing else — no service, no port, no '+
       'account. Registered for every project: the server answers about whichever folder your editor is open in.',
       add,
-      'No <b>gitmir</b> command because you cloned instead of installing? Use '+
-      '<code>'+esc(addRaw)+'</code>. To pin it to this repository instead — in a <code>.mcp.json</code> you commit, so '+
-      'teammates get it too — run <b>'+esc(addHere)+'</b> in the project folder.',
+      (hasCli
+        ? 'To pin it to one repository instead — in a <code>.mcp.json</code> you commit, so teammates get it without '+
+          'being told — run <b>'+esc(addHere)+'</b> in that folder.'
+        : 'This is the long form because <b>gitmir</b> is not on your PATH — you are running a clone rather than an '+
+          'install. <code>curl -fsSL https://ide.gitmir.com/install.sh | sh</code> gives you the short one. To pin it '+
+          'to one repository instead, run <code>'+esc(addHere)+'</code> in that folder — <code>.mcp.json</code> is '+
+          'committed, so teammates get it too.'),
       '<code>claude mcp list</code> shows <b>gitmir</b> as connected, from any directory.') +
     step(2,
       'Restart the editor',
@@ -1342,7 +1351,8 @@ async function renderHome(pathStr){
     // so this offers the explicit one — pinned to this folder — and it is a button
     // that copies it, not a box that looks like a button and does nothing.
     const q=s=>'"'+String(s).replace(/"/g,'\\"')+'"';
-    const addCmd='gitmir mcp add';
+    const addCmd = window.__GITMIR_CLI__ ? 'gitmir mcp add'
+      : 'claude mcp add -s user gitmir -- node '+q((window.__GITMIR_HOME__||'.')+'/mcp.ts');
     h+='<div class="hm-hero-h">The context is built. Nothing has asked it anything yet.</div>'+
        '<p>Point your agent at it and every answer it takes is counted here, against the size of the files '+
        'those objects live in.</p>'+

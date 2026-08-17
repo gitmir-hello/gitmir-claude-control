@@ -13,7 +13,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { execFile, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 
 // ---------- the shapes this dashboard actually moves around ----------
 /** A folder the user added, as stored in projects.json. */
@@ -623,6 +623,24 @@ function buildShareBundle(projectPath: string, displayName: string): { html: str
 
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'model';
   return { html, filename: slug + '-model.html' };
+}
+
+/**
+ * Is the `gitmir` command on this machine's PATH?
+ *
+ * It arrives with the installer and not with a clone, so a page that prints
+ * `gitmir mcp add` to somebody who cloned the repository is sending them to look
+ * for something that is not there. Checked once at startup: PATH does not change
+ * under a running process in any way worth re-reading it for.
+ */
+let cliCache: boolean | null = null;
+function hasGitmirCli(): boolean {
+  if (cliCache !== null) return cliCache;
+  try {
+    execFileSync(process.platform === 'win32' ? 'where' : 'which', ['gitmir'], { stdio: 'ignore' });
+    cliCache = true;
+  } catch { cliCache = false; }
+  return cliCache;
 }
 
 /** How many of each thing the model holds — the shape of the product, in one object. */
@@ -2906,7 +2924,8 @@ const HTML = /* html */ `<!doctype html>
 
   <div class="toast" id="toast"></div>
 
-<script>window.__GITMIR_HOME__ = ${JSON.stringify(import.meta.dirname)};</script>
+<script>window.__GITMIR_HOME__ = ${JSON.stringify(import.meta.dirname)};
+window.__GITMIR_CLI__ = ${JSON.stringify(hasGitmirCli())};</script>
 <script src="/impact.js"></script>
 <script src="/hud.js"></script>
 <script src="/hud-scenes.js"></script>
