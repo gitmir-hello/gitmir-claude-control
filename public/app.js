@@ -430,6 +430,7 @@ function renderDetail(){
   wrap.querySelectorAll('.tab-btn').forEach(b=> b.addEventListener('click', ()=> setTab(b.dataset.tab)));
   wrap.querySelector('#modelRefresh').addEventListener('click', ()=>{ if(selected) loadModel(selected); });
   wrap.querySelector('#modelShare').addEventListener('click', openSharePopup);
+  if(selected) loadNextStep(selected).then(()=>{ if(selected===p.path) renderSkillButtons(); });
   setTab(activeTab);
   wrap.querySelectorAll('.sub-pill').forEach(b=>b.addEventListener('click',()=>{
     setupSub = b.dataset.sub;
@@ -472,11 +473,49 @@ const SKILL_GROUPS = [
     items:{ 'legacy-maintenance':'branch', 'stack-port':'external' } },
 ];
 
+// Which skill this project actually needs next, from /api/overview. Twelve cards
+// shown at once is an inventory; a person needs the one that fits where they are.
+let nextStep = null, nextStepFor = null, showAllSkills = false;
+async function loadNextStep(pathStr){
+  if(nextStepFor===pathStr) return nextStep;
+  try{
+    const o=await fetch('/api/overview?path='+encodeURIComponent(pathStr)).then(r=>r.json());
+    nextStep = o && o.ok ? o.next : null; nextStepFor = pathStr;
+  }catch{ nextStep=null; }
+  return nextStep;
+}
+
 function renderSkillButtons(){
   const box = document.getElementById('skillsBtns');
   if(!box) return;
   box.innerHTML = '';
   if(!SKILLS.length){ box.innerHTML = '<div class="skills-empty">no skills in skills.json</div>'; return; }
+
+  // The next step first, on its own, with the reason it is the next step. The
+  // other eleven are a click away and stay there — this is a shelf, not a wall.
+  const byNameAll = {}; for(const s of SKILLS) byNameAll[s.name]=s;
+  const step = nextStep && byNameAll[nextStep.name] ? byNameAll[nextStep.name] : null;
+  if(step && !showAllSkills){
+    const w=document.createElement('div'); w.className='sk-next';
+    w.innerHTML='<div class="sk-next-h">Where this project is now</div>'+
+      '<div class="sk-next-w">'+esc(nextStep.why)+'</div>'+
+      '<button class="sk-next-b" type="button">'+
+        '<span class="sk-next-t">'+esc(step.pain||step.title||step.name)+'</span>'+
+        '<span class="sk-next-n">'+esc(step.name)+'</span>'+
+        '<span class="sk-next-c">Copy it — then paste into Claude (⌘V + Enter)</span>'+
+      '</button>'+
+      '<button class="sk-all" type="button">All twelve skills →</button>';
+    w.querySelector('.sk-next-b').addEventListener('click', ()=>copySkill(step.name, step.title||step.name));
+    w.querySelector('.sk-all').addEventListener('click', ()=>{ showAllSkills=true; renderSkillButtons(); });
+    box.appendChild(w);
+    return;
+  }
+  if(step && showAllSkills){
+    const back=document.createElement('button'); back.className='sk-all back'; back.type='button';
+    back.textContent='← Just the next step';
+    back.addEventListener('click', ()=>{ showAllSkills=false; renderSkillButtons(); });
+    box.appendChild(back);
+  }
 
   const byName = {};
   for(const s of SKILLS) byName[s.name] = s;
@@ -1182,84 +1221,80 @@ async function renderHome(pathStr){
   const p=byPath(pathStr)||{};
   view.innerHTML='<div class="model-empty">Reading the project…</div>';
 
-  const [u, m] = await Promise.all([
-    fetch('/api/usage?path='+encodeURIComponent(pathStr)).then(r=>r.json()).catch(()=>null),
-    fetch('/api/model?path='+encodeURIComponent(pathStr)).then(r=>r.json()).catch(()=>null),
-  ]);
-  if(selected!==pathStr) return;                       // the user moved on
-  await loadFindings(pathStr);
-  const ch = await loadChanges(false).catch(()=>null);
+  const o = await fetch('/api/overview?path='+encodeURIComponent(pathStr)).then(r=>r.json()).catch(()=>null);
   if(selected!==pathStr) return;
+  if(!o || !o.ok){ view.innerHTML='<div class="model-empty">Could not read this project.</div>'; return; }
 
-  const has = !!(m && m.exists);
-  const mm = (m && m.model) || {};
-  const objects = DIM_ORDER.reduce((n,k)=>n+((mm[k]||[]).length),0);
-  const links = has ? countLinks(mm) : 0;
-  const s = (u && u.summary) || {answers:0, served:0, wouldBytes:0, wouldFiles:0, ratio:0};
-  const find = findingsData.summary || {open:0, accepted:0, high:0, stale:0};
-  const tasks = ((ch&&ch.tasks)||[]);
-  const open = tasks.filter(t=>t.col!=='done');
+  const s=o.usage.summary, C=o.caught;
+  const objects=Object.values(o.model.counts||{}).reduce((a,b)=>a+b,0);
 
   let h='<div class="hm">';
-
-  // --- what this is, in one line somebody can repeat
   h+='<div class="hm-top"><div class="hm-name">'+esc(p.name||pathStr.split('/').pop())+'</div>'+
      '<div class="hm-path">'+esc(pathStr)+'</div></div>';
 
-  if(!has){
+  if(!o.exists){
     h+='<div class="hm-hero empty"><div class="hm-hero-h">No object context yet</div>'+
        '<p>GitMir reads this repository once and writes what the product is — areas, business objects, '+
        'functions, endpoints, screens, events, journeys, lifecycles — into <code>.gitmir/model/</code>, '+
        'linked by stable ids. After that both you and your agent answer from it instead of from the files.</p>'+
-       '<div class="hm-next"><button class="run hm-go" data-act="model">▶ Build it with Claude</button>'+
-       '<span>Runs the <b>gitmir-model</b> skill in this folder. One pass over the repository.</span></div></div>';
-    h+='</div>';
-    view.innerHTML=h;
-    view.querySelector('.hm-go').addEventListener('click',()=>{ setTab('settings'); setupSub='skills'; renderDetail(); });
-    return;
+       '<div class="hm-next"><button class="run" data-go="build-model">▶ Build it with Claude</button>'+
+       '<span>Runs the <b>'+esc(o.next.name)+'</b> skill in this folder. '+esc(o.next.why)+'</span></div></div></div>';
+    view.innerHTML=h; wire(); return;
   }
 
-  // --- the headline: what the context replaced
+  // --- what the context replaced -------------------------------------------
   h+='<div class="hm-hero">';
   if(s.answers){
-    h+='<div class="hm-big">'+s.ratio.toFixed(1)+'×</div>'+
-       '<div class="hm-big-l">less read to answer</div>'+
+    h+='<div class="hm-big">'+s.ratio.toFixed(1)+'×</div><div class="hm-big-l">less read to answer</div>'+
        '<p><b>'+s.answers+' answer'+(s.answers===1?'':'s')+'</b> served from the model, '+KB(s.served)+' in total. '+
-       'The objects those answers covered live in <b>'+s.wouldFiles+' file'+(s.wouldFiles===1?'':'s')+'</b> — '+
-       KB(s.wouldBytes)+' of source. That is a fact about this repository, not a claim about what an agent would '+
-       'otherwise have done with it.</p>';
+       'The objects they covered live in <b>'+s.wouldFiles+' file'+(s.wouldFiles===1?'':'s')+'</b> — '+KB(s.wouldBytes)+
+       ' of source. A fact about this repository, not a claim about what an agent would otherwise have done with it.</p>';
   } else {
     h+='<div class="hm-hero-h">The context is built. Nothing has asked it anything yet.</div>'+
-       '<p>Point your agent at it and every answer it takes from the model is counted here, against the size of '+
-       'the files those objects live in.</p>'+
-       '<div class="hm-cmd">gitmir mcp add</div>';
+       '<p>Point your agent at it and every answer it takes is counted here, against the size of the files '+
+       'those objects live in.</p><div class="hm-cmd">gitmir mcp add</div>';
   }
   h+='</div>';
 
-  // --- what you have
-  h+='<div class="hm-row">'+
-     card('Object context', objects+' objects', links+' relationships between them · '+KB((u&&u.model&&u.model.bytes)||0), 'model')+
-     card('Read from', ((u&&u.source&&u.source.files)||0)+' source files', KB((u&&u.source&&u.source.bytes)||0)+' of code in this repository', null)+
-     card('Freshness', (m.stale? 'Code has moved' : 'Matches the code'),
-          m.stale ? 'Rebuild before quoting a number from it' : 'Nothing changed since the model was built',
-          'model', m.stale?'warn':'')+
+  // --- what needs a person --------------------------------------------------
+  if(o.attention && o.attention.length){
+    h+='<div class="hm-sec">What needs you</div><div class="hm-att">';
+    for(const a of o.attention){
+      h+='<div class="hm-a '+esc(a.level)+'">'+
+         '<div class="hm-a-t">'+esc(a.title)+'</div>'+
+         '<div class="hm-a-w">'+esc(a.why)+'</div>'+
+         '<button class="hm-a-b" data-go="'+esc(a.action.go)+'"'+(a.action.arg?' data-arg="'+esc(a.action.arg)+'"':'')+'>'+
+         esc(a.action.label)+'</button></div>';
+    }
+    h+='</div>';
+  } else {
+    h+='<div class="hm-sec">What needs you</div>'+
+       '<div class="hm-clear">Nothing. The model matches the code, every recorded deviation has been decided, '+
+       'and no planned task reaches further than its ticket says.</div>';
+  }
+
+  // --- what it caught before anyone wrote code ------------------------------
+  if(C && C.tasks){
+    h+='<div class="hm-sec">Caught before the code was written</div><div class="hm-row">'+
+       card('Tickets named', C.named+' objects', 'across '+C.tasks+' task'+(C.tasks===1?'':'s')+' that name part of the model', 'queue')+
+       card('The model showed', C.reached+' of '+objects, 'what those tasks actually reach, walked from real links', 'impact')+
+       card('Nobody had mentioned', C.unnamed+' of them', C.unnamed? 'found before anyone opened an editor' : 'the tickets named everything they touch', 'impact', C.unnamed?'warn':'')+
+       (C.high? card('At high risk', C.high+' task'+(C.high===1?'':'s'), 'reaching a quarter of the product or more', 'impact', 'bad') : '')+
+       '</div>';
+  }
+
+  // --- what you have --------------------------------------------------------
+  h+='<div class="hm-sec">What you have</div><div class="hm-row">'+
+     card('Object context', objects+' objects', countLinks(modelData&&modelData.model||{})+' relationships · '+KB(o.model.bytes), 'model')+
+     card('Read from', o.source.files+' source files', KB(o.source.bytes)+' of code in this repository', null)+
+     card('Freshness', o.stale?'Code has moved':'Matches the code',
+          o.stale? esc(o.staleFile||'')+' changed since' : 'Nothing changed since the model was built', 'model', o.stale?'warn':'')+
      '</div>';
 
-  // --- what it caught
-  const caught=[];
-  if(find.open)     caught.push(card('Where code disagrees with the product', find.open+' open',
-     (find.high? find.high+' of them high · ':'')+(find.accepted? find.accepted+' accepted on purpose':'nobody has decided on them yet'), 'spec', find.high?'bad':''));
-  if(open.length)   caught.push(card('Work planned', open.length+' task'+(open.length===1?'':'s'),
-     open.filter(t=>t.approved).length+' approved · risk is on every card', 'queue'));
-  const noOwner=(mm.modules||[]).filter(x=>!x.owner).length;
-  if(noOwner)       caught.push(card('Areas nobody has claimed', noOwner+' of '+(mm.modules||[]).length,
-     'A question about these has nowhere to go', 'ownership', 'warn'));
-  if(caught.length) h+='<div class="hm-sec">What it has caught</div><div class="hm-row">'+caught.join('')+'</div>';
-
-  // --- what happened, in order: the transparency half
-  if(u && u.entries && u.entries.length){
+  // --- the record -----------------------------------------------------------
+  if(o.usage.entries.length){
     h+='<div class="hm-sec">What was asked, and what it served</div><div class="hm-log">';
-    for(const e of u.entries.slice(0,12)){
+    for(const e of o.usage.entries){
       h+='<div class="hm-e"><span class="hm-e-w">'+esc(e.by||'agent')+'</span>'+
          '<span class="hm-e-q">'+esc(e.q||e.tool)+'</span>'+
          '<span class="hm-e-n">'+KB(e.served)+'</span>'+
@@ -1271,20 +1306,25 @@ async function renderHome(pathStr){
 
   h+='</div>';
   view.innerHTML=h;
-  view.querySelectorAll('[data-go]').forEach(b=>b.addEventListener('click',()=>{
-    const g=b.dataset.go;
-    if(g==='model'||g==='spec'||g==='ownership'){
-      setTab('model');
-      if(g==='spec') modelView='spec'; else if(g==='ownership') modelView='ownership';
-      renderModelNav(); renderModelView();
-    } else setTab(g);
-  }));
+  wire();
 
+  function wire(){
+    view.querySelectorAll('[data-go]').forEach(b=>b.addEventListener('click',()=>{
+      const g=b.dataset.go, arg=b.dataset.arg;
+      if(g==='build-model'||g==='skill'){ setTab('settings'); setupSub='skills'; renderDetail(); return; }
+      if(g==='impact'){ setTab('model'); modelView='impact'; if(arg) impactPick=arg; renderModelNav(); renderModelView(); return; }
+      if(g==='spec'||g==='ownership'||g==='model'){
+        setTab('model');
+        if(g!=='model') modelView=g;
+        renderModelNav(); renderModelView(); return;
+      }
+      setTab(g);
+    }));
+  }
   function card(label, value, sub, go, tone){
     return '<div class="hm-card '+(tone||'')+'"'+(go?' data-go="'+go+'" role="button" tabindex="0"':'')+'>'+
-      '<div class="hm-c-l">'+esc(label)+'</div>'+
-      '<div class="hm-c-v">'+esc(value)+'</div>'+
-      '<div class="hm-c-s">'+esc(sub)+'</div></div>';
+      '<div class="hm-c-l">'+esc(label)+'</div><div class="hm-c-v">'+esc(value)+'</div>'+
+      '<div class="hm-c-s">'+sub+'</div></div>';
   }
 }
 

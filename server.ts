@@ -87,11 +87,12 @@ function impactForBrowser(): string {
   return src.replace(/^export \{[^}]*\};?\s*$/m, '');
 }
 
-import { MODEL_ID, idList, parseTouches, modelIdSet, readModel } from './lib/read.js';
+import { MODEL_ID, idList, parseTouches, modelIdSet, readModel, readTasks, modelStaleness } from './lib/read.js';
 import { createTask, setApproval, COLUMNS } from './lib/write.js';
 import { modelVersions, modelAt, diffModels } from './lib/history.js';
 import { readFindings, writeFinding, setFindingStatus, findingsSummary } from './lib/findings.js';
 import { readUsage, summarise, modelBytes, sourceBytes, record as recordUse, fileBytesFor } from './lib/usage.js';
+import { attention, caught, nextSkill } from './lib/attention.js';
 
 // ---------- model ids carried by tasks ----------
 
@@ -624,6 +625,16 @@ function buildShareBundle(projectPath: string, displayName: string): { html: str
   return { html, filename: slug + '-model.html' };
 }
 
+/** How many of each thing the model holds — the shape of the product, in one object. */
+function countsOf(model: any): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const d of ['modules','entities','serverUnits','serverFunctions','apiRoutes',
+                   'frontendUnits','events','processes','statusFlows','reactions']) {
+    out[d] = ((model && model[d]) || []).length;
+  }
+  return out;
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://localhost:${PORT}`);
   try {
@@ -1086,6 +1097,35 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 404, { error: 'not found' });
       }
     }
+    // Everything the first screen needs, in one answer. Four round-trips to draw
+    // one page is the kind of thing that makes a fast tool feel slow.
+    if (req.method === 'GET' && url.pathname === '/api/overview') {
+      const p = url.searchParams.get('path') || '';
+      if (!p) return sendJSON(res, 400, { error: 'no path' });
+      const m = readModel(p);
+      const known = m.exists ? modelIdSet(path.join(p, '.gitmir', 'model')) : new Set<string>();
+      const tasks = m.exists ? readTasks(p, known) : [];
+      const st = m.exists ? modelStaleness(p, m.writtenMs || 0) : { stale: false, newestFile: '' };
+      const entries = readUsage(p, 300);
+      const src = sourceBytes(p);
+      const F = readFindings(p);
+      return sendJSON(res, 200, {
+        ok: true,
+        exists: m.exists,
+        stale: st.stale, staleFile: st.newestFile,
+        model: { bytes: modelBytes(p), counts: countsOf(m.model) },
+        source: { bytes: src.bytes, files: src.files },
+        usage: { summary: summarise(entries), entries: entries.slice(-12).reverse() },
+        findings: findingsSummary(F.findings),
+        attention: m.exists
+          ? attention({ projectPath: p, model: m.model, exists: true, stale: st.stale, staleFile: st.newestFile, tasks })
+          : attention({ projectPath: p, model: {}, exists: false }),
+        caught: m.exists ? caught({ model: m.model, tasks }) : null,
+        next: nextSkill({ exists: m.exists, stale: st.stale, model: m.model, tasks,
+                          findings: F.findings.length, sourceFiles: src.files }),
+      });
+    }
+
     // What the object context did — measured. The product is sold on spending
     // less, and until this endpoint existed nothing in it counted anything.
     if (req.method === 'GET' && url.pathname === '/api/usage') {
@@ -1937,6 +1977,35 @@ const HTML = /* html */ `<!doctype html>
   .hm-c-s{font-size:12.5px; color:var(--ink-3); line-height:1.5}
   .hm-sec{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase;
     color:var(--ink-3); margin:20px 0 9px; padding-bottom:6px; border-bottom:1px solid var(--line)}
+  .sk-next{border:1px solid rgba(96,232,255,.3); border-left-width:3px; background:rgba(47,216,255,.05); padding:18px 20px}
+  .sk-next-h{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3)}
+  .sk-next-w{font-size:13.5px; color:var(--ink-1); line-height:1.6; margin:7px 0 14px; max-width:80ch}
+  .sk-next-b{display:block; width:100%; text-align:left; cursor:pointer; border:1px solid var(--line);
+    background:rgba(5,10,22,.55); padding:16px 18px; border-radius:0}
+  .sk-next-b:hover{border-color:rgba(96,232,255,.5)}
+  .sk-next-t{display:block; font-size:17px; color:var(--ink-0); line-height:1.35}
+  .sk-next-n{display:block; font-family:var(--font-mono); font-size:12px; color:#8fe8ff; margin-top:6px}
+  .sk-next-c{display:block; font-size:12px; color:var(--ink-3); margin-top:9px}
+  .sk-all{margin-top:14px; cursor:pointer; border:1px solid var(--line); background:none; color:var(--ink-3);
+    padding:7px 13px; border-radius:0; font-size:12.5px}
+  .sk-all:hover{border-color:rgba(96,232,255,.4); color:var(--ink-1)}
+  .sk-all.back{margin:0 0 14px}
+  .hm-att{display:flex; flex-direction:column; gap:8px}
+  .hm-a{display:grid; grid-template-columns:1fr auto; gap:4px 18px; align-items:center;
+    border:1px solid var(--line); border-left-width:3px; background:rgba(10,18,36,.45); padding:13px 16px}
+  .hm-a.act{border-left-color:rgba(255,64,96,.7)}
+  .hm-a.check{border-left-color:rgba(255,178,78,.65)}
+  .hm-a.note{border-left-color:var(--line)}
+  .hm-a-t{font-size:14.5px; color:var(--ink-0)}
+  .hm-a-w{grid-column:1; font-size:12.5px; color:var(--ink-3); line-height:1.55; max-width:88ch}
+  .hm-a-b{grid-row:1/3; grid-column:2; cursor:pointer; white-space:nowrap; align-self:center;
+    border:1px solid var(--line); background:rgba(10,18,36,.6); color:var(--ink-1);
+    padding:8px 15px; border-radius:0; font-size:12.5px}
+  .hm-a-b:hover{border-color:rgba(96,232,255,.5); color:var(--ink-0)}
+  .hm-a.act .hm-a-b{border-color:rgba(255,64,96,.45)}
+  .hm-clear{border:1px solid var(--line); background:rgba(96,246,176,.05); border-left:3px solid rgba(96,246,176,.5);
+    padding:13px 16px; font-size:13px; color:var(--ink-2); line-height:1.6}
+  @media (max-width:820px){ .hm-a{grid-template-columns:1fr} .hm-a-b{grid-row:auto; grid-column:1; justify-self:start; margin-top:8px} }
   .hm-log{display:flex; flex-direction:column; gap:3px}
   .hm-e{display:grid; grid-template-columns:58px minmax(150px,1.1fr) 68px 1.4fr 120px; gap:12px; align-items:baseline;
     padding:7px 12px; border-left:2px solid var(--line); background:rgba(10,18,36,.4); font-size:12.5px}

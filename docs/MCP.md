@@ -79,6 +79,7 @@ Three of its commands write: `new`, `approve`, `withdraw`. The rest only read.
 | `gitmir_queue` | What work is planned, what does each task touch, what is approved? |
 | `gitmir_history` | How has the product changed? Compares two versions of the model and names what was gained, lost and renamed. Reads the versions your repository already holds — nothing is stored for it. |
 | `gitmir_flag` | Record that the code does not do what the product says. Written at the moment it is noticed, in one call — a finding described only in a reply is gone when the conversation ends. |
+| `gitmir_attention` | What needs a person right now, worked out from the model: the code having moved past it, deviations whose files have since changed, planned work reaching further than its ticket says, tasks queued without approval, parts nobody owns. Each item says what closes it. Call it at the start of a session instead of asking what to do. |
 | `gitmir_findings` | What is already known to be wrong, what was accepted on purpose and by whom, and what needs re-checking because the code has moved since. |
 | `gitmir_accept_finding` | Record the decision: accepted (needs a name and a reason), fixed, or reopened. |
 | `gitmir_create_task` | Turn a finding into queued work. Refuses to write a task with no `verify` steps — a requirement you cannot check is a wish, not a task — and shows the impact of what it just wrote. |
@@ -184,7 +185,7 @@ than no hint at all.
 
 | Tool | read-only | destructive | idempotent | open world |
 |---|---|---|---|---|
-| `gitmir_model` · `gitmir_navigate` · `gitmir_impact` · `gitmir_queue` · `gitmir_history` · `gitmir_findings` · `gitmir_skills` · `gitmir_skill` | yes | no | yes | no |
+| `gitmir_model` · `gitmir_navigate` · `gitmir_impact` · `gitmir_queue` · `gitmir_history` · `gitmir_findings` · `gitmir_attention` · `gitmir_skills` · `gitmir_skill` | yes | no | yes | no |
 | `gitmir_flag` | no | no | **yes** | no |
 | `gitmir_accept_finding` | no | **yes** | no | no |
 | `gitmir_setup` | no | no | **yes** | no |
@@ -206,5 +207,5 @@ the only thing any tool touches is this machine's own `.gitmir/` and `tasks/` fo
   text. The consumer here is a model reading prose, and the arithmetic it needs is in
   the prose already; a second serialization would double the payload to serve client
   code that does not exist yet.
-- **No pagination cursors.** Thirteen tools and twelve prompts fit in one response. A
+- **No pagination cursors.** Fourteen tools and twelve prompts fit in one response. A
   `cursor` is accepted and ignored rather than rejected, so a paginating client works.

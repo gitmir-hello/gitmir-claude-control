@@ -228,8 +228,13 @@ subprocess over stdin/stdout — **no port, no network, and the dashboard does n
 running.** Every reply states how fresh the model is, because there is no amber banner in
 somebody else's editor.
 
-**→ [The MCP server](docs/MCP.md)** — thirteen tools, and what each admits about its own
+**→ [The MCP server](docs/MCP.md)** — fourteen tools, and what each admits about its own
 behaviour.
+
+An agent that starts a session with `gitmir_attention` gets the list this screen shows —
+what has moved, what is unverified, what reaches further than its ticket says — with the
+procedure that closes each one. The system does the noticing; a person still does the
+deciding, which is the only version of "it runs itself" a governance tool can defend.
 
 ---
 

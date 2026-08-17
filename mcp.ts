@@ -28,6 +28,7 @@ import { createTask, setApproval, COLUMNS } from './lib/write.js';
 import { blastRadius, riskOf, kindOf, labelOf, moduleOf, objById, isJourney } from './lib/impact.js';
 import { modelVersions, modelAt, diffModels } from './lib/history.js';
 import { record as recordUse, fileBytesFor } from './lib/usage.js';
+import { attention, caught, nextSkill } from './lib/attention.js';
 import { readFindings, writeFinding, setFindingStatus, findingsByTarget, openOnly, findingsSummary,
   KINDS, SEVERITIES } from './lib/findings.js';
 
@@ -666,6 +667,63 @@ const TOOLS: Tool[] = [
       }
       L.push('');
       L.push(`Compared ${from.slice(0, 7)} against ${to.slice(0, 7)}; ${vs.length} versions exist, oldest ${vs[vs.length - 1].date}.`);
+      return { text: L.join('\n') };
+    },
+  },
+
+  {
+    name: 'gitmir_attention',
+    annotations: READS,
+    title: 'What needs a person, derived from the model',
+    description:
+      'What this project needs attention on right now, worked out from the model itself: the code ' +
+      'having moved past it, recorded deviations whose files have since changed, planned work that ' +
+      'reaches further than its ticket says, tasks queued without approval, parts of the product ' +
+      'nobody owns. Call this at the start of a session instead of asking what to do, and after ' +
+      'finishing work to see what it left behind. Each item says what it is, why it costs something ' +
+      'to ignore, and what closes it.',
+    inputSchema: { type: 'object', properties: { ...PROJECT_ARG } },
+    run(_args: Record<string, unknown>, project: string) {
+      const l = load(project);
+      const known = l.ok ? modelIdSet(path.join(project, '.gitmir', 'model')) : new Set<string>();
+      const tasks = l.ok ? readTasks(project, known) : [];
+      // load() keeps the freshness note, not the timestamp; read it once more here
+      // rather than widen that type for one caller.
+      let st: { stale: boolean; newestFile: string } = { stale: false, newestFile: '' };
+      if (l.ok) {
+        try { const r = readModel(project); const s = modelStaleness(project, r.writtenMs);
+              st = { stale: !!s.stale, newestFile: s.newestFile || '' }; } catch {}
+      }
+      const items = attention({
+        projectPath: project, model: l.ok ? l.model : {}, exists: !!l.ok,
+        stale: st.stale, staleFile: st.newestFile, tasks,
+      });
+      const L: string[] = [];
+      if (!items.length) {
+        L.push('Nothing needs a person here. The model matches the code, every recorded deviation has been decided, and no planned task reaches further than its ticket says.');
+      } else {
+        const word = { act: 'DO', check: 'CHECK', note: 'NOTE' } as Record<string, string>;
+        L.push(`${items.length} thing(s) need a person, worst first:`);
+        L.push('');
+        for (const i of items) {
+          L.push(`[${word[i.level] || i.level}] ${i.title}`);
+          L.push(`  why: ${i.why}`);
+          L.push(`  closes it: ${i.action.label}${i.action.arg ? ` (${i.action.arg})` : ''}`);
+          L.push('');
+        }
+      }
+      if (l.ok) {
+        const c = caught({ model: l.model, tasks });
+        if (c.tasks) {
+          L.push(`Across ${c.tasks} task(s) that name part of the model: tickets named ${c.named} objects, ` +
+            `the model shows they reach ${c.reached} — ${c.unnamed} nobody mentioned.`);
+        }
+        const n = nextSkill({ exists: true, stale: st.stale, model: l.model, tasks,
+                              findings: readFindings(project).findings.length });
+        L.push('');
+        L.push(`If you are looking for what to do next: the ${n.name} procedure fits where this project is — ${n.why}`);
+        L.push(`Fetch it in full with gitmir_skill("${n.name}").`);
+      }
       return { text: L.join('\n') };
     },
   },
