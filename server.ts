@@ -1961,8 +1961,17 @@ const HTML = /* html */ `<!doctype html>
   .hm-big{font-size:46px; line-height:1; color:#8fe8ff; font-variant-numeric:tabular-nums}
   .hm-big-l{font-family:var(--font-mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase;
     color:var(--ink-3); margin-top:5px}
-  .hm-cmd{display:inline-block; margin-top:12px; font-family:var(--font-mono); font-size:13px; color:#8fe8ff;
-    border:1px solid rgba(96,232,255,.35); background:rgba(5,10,22,.6); padding:7px 14px}
+  .hm-cmd{display:inline-flex; align-items:center; gap:14px; margin-top:12px; cursor:pointer; text-align:left;
+    border:1px solid rgba(96,232,255,.35); background:rgba(5,10,22,.6); padding:9px 12px 9px 15px; border-radius:0;
+    max-width:100%}
+  .hm-cmd:hover{border-color:rgba(96,232,255,.7)}
+  .hm-cmd-c{font-family:var(--font-mono); font-size:12.5px; color:#8fe8ff; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .hm-cmd-a{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.09em; text-transform:uppercase;
+    color:var(--ink-3); border-left:1px solid var(--line); padding-left:12px; flex:none}
+  .hm-cmd:hover .hm-cmd-a{color:var(--ink-1)}
+  .hm-cmd-w{font-size:12.5px; color:var(--ink-3); margin-top:9px; line-height:1.6}
+  .hm-link{cursor:pointer; background:none; border:none; padding:0; font-size:12.5px; color:#8fe8ff; border-radius:0}
+  .hm-link:hover{text-decoration:underline}
   .hm-next{display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-top:14px}
   .hm-next span{font-size:12.5px; color:var(--ink-3)}
   .hm-row{display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:10px; margin-bottom:14px}
@@ -1977,6 +1986,7 @@ const HTML = /* html */ `<!doctype html>
   .hm-c-s{font-size:12.5px; color:var(--ink-3); line-height:1.5}
   .hm-sec{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase;
     color:var(--ink-3); margin:20px 0 9px; padding-bottom:6px; border-bottom:1px solid var(--line)}
+  .sk-one + .sk-one{margin-top:16px; padding-top:16px; border-top:1px solid var(--line)}
   .sk-next{border:1px solid rgba(96,232,255,.3); border-left-width:3px; background:rgba(47,216,255,.05); padding:18px 20px}
   .sk-next-h{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3)}
   .sk-next-w{font-size:13.5px; color:var(--ink-1); line-height:1.6; margin:7px 0 14px; max-width:80ch}

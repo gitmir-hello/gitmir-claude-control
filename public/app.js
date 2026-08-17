@@ -485,32 +485,54 @@ async function loadNextStep(pathStr){
   return nextStep;
 }
 
+// One card: what it is for, its name, and the copy it does when clicked.
+function skillCard(s, why, eyebrow){
+  const w=document.createElement('div'); w.className='sk-one';
+  w.innerHTML='<div class="sk-next-h">'+esc(eyebrow)+'</div>'+
+    '<div class="sk-next-w">'+esc(why||'')+'</div>'+
+    '<button class="sk-next-b" type="button">'+
+      '<span class="sk-next-t">'+esc(s.pain||s.title||s.name)+'</span>'+
+      '<span class="sk-next-n">'+esc(s.name)+'</span>'+
+      '<span class="sk-next-c">Copy it — then paste into Claude (⌘V + Enter)</span>'+
+    '</button>';
+  w.querySelector('.sk-next-b').addEventListener('click', ()=>copySkill(s.name, s.title||s.name));
+  return w;
+}
+
 function renderSkillButtons(){
   const box = document.getElementById('skillsBtns');
   if(!box) return;
   box.innerHTML = '';
   if(!SKILLS.length){ box.innerHTML = '<div class="skills-empty">no skills in skills.json</div>'; return; }
 
-  // The next step first, on its own, with the reason it is the next step. The
-  // other eleven are a click away and stay there — this is a shelf, not a wall.
+  // Building the object context comes first and stays first. It is what every
+  // other skill answers from, and it is re-run whenever the code moves — hiding
+  // it behind a suggestion means the one thing somebody came here to do is the
+  // one thing they cannot find. The derived next step sits under it, when it is
+  // something else.
   const byNameAll = {}; for(const s of SKILLS) byNameAll[s.name]=s;
+  const builder = byNameAll[(nextStep && nextStep.name==='model-ingest') ? 'model-ingest' : 'gitmir-model'];
   const step = nextStep && byNameAll[nextStep.name] ? byNameAll[nextStep.name] : null;
-  if(step && !showAllSkills){
+  const stepIsBuilder = !step || step.name===builder.name;
+
+  if(builder && !showAllSkills){
     const w=document.createElement('div'); w.className='sk-next';
-    w.innerHTML='<div class="sk-next-h">Where this project is now</div>'+
-      '<div class="sk-next-w">'+esc(nextStep.why)+'</div>'+
-      '<button class="sk-next-b" type="button">'+
-        '<span class="sk-next-t">'+esc(step.pain||step.title||step.name)+'</span>'+
-        '<span class="sk-next-n">'+esc(step.name)+'</span>'+
-        '<span class="sk-next-c">Copy it — then paste into Claude (⌘V + Enter)</span>'+
-      '</button>'+
-      '<button class="sk-all" type="button">All twelve skills →</button>';
-    w.querySelector('.sk-next-b').addEventListener('click', ()=>copySkill(step.name, step.title||step.name));
-    w.querySelector('.sk-all').addEventListener('click', ()=>{ showAllSkills=true; renderSkillButtons(); });
+    w.appendChild(skillCard(builder,
+      stepIsBuilder && nextStep ? nextStep.why
+        : 'Reads this repository and writes what the product is into .gitmir/model/. Run it again whenever the code moves on.',
+      'Start here'));
+    if(!stepIsBuilder){
+      w.appendChild(skillCard(step, nextStep.why, 'Then'));
+    }
+    const all=document.createElement('button'); all.className='sk-all'; all.type='button';
+    all.textContent='All twelve skills →';
+    all.addEventListener('click', ()=>{ showAllSkills=true; renderSkillButtons(); });
+    w.appendChild(all);
     box.appendChild(w);
     return;
   }
-  if(step && showAllSkills){
+  if(builder && showAllSkills){
+
     const back=document.createElement('button'); back.className='sk-all back'; back.type='button';
     back.textContent='← Just the next step';
     back.addEventListener('click', ()=>{ showAllSkills=false; renderSkillButtons(); });
@@ -1250,9 +1272,19 @@ async function renderHome(pathStr){
        'The objects they covered live in <b>'+s.wouldFiles+' file'+(s.wouldFiles===1?'':'s')+'</b> — '+KB(s.wouldBytes)+
        ' of source. A fact about this repository, not a claim about what an agent would otherwise have done with it.</p>';
   } else {
+    // The shorthand reads well and registers against whatever directory the agent
+    // happens to be in. On a screen about one project that is the wrong command,
+    // so this offers the explicit one — pinned to this folder — and it is a button
+    // that copies it, not a box that looks like a button and does nothing.
+    const q=s=>'"'+String(s).replace(/"/g,'\\"')+'"';
+    const addCmd='claude mcp add gitmir -- node '+q((window.__GITMIR_HOME__||'.')+'/mcp.ts')+' --project '+q(pathStr);
     h+='<div class="hm-hero-h">The context is built. Nothing has asked it anything yet.</div>'+
        '<p>Point your agent at it and every answer it takes is counted here, against the size of the files '+
-       'those objects live in.</p><div class="hm-cmd">gitmir mcp add</div>';
+       'those objects live in.</p>'+
+       '<button class="hm-cmd" data-copy="'+esc(addCmd)+'" title="Copy this command">'+
+         '<span class="hm-cmd-c">'+esc(addCmd)+'</span><span class="hm-cmd-a">Copy</span></button>'+
+       '<div class="hm-cmd-w">Run it once in a terminal, then restart your editor — a client reads its MCP config at '+
+       'startup. <button class="hm-link" data-go="mcp">The rest of the steps →</button></div>';
   }
   h+='</div>';
 
@@ -1309,8 +1341,13 @@ async function renderHome(pathStr){
   wire();
 
   function wire(){
+    view.querySelectorAll('[data-copy]').forEach(b=>b.addEventListener('click', async ()=>{
+      try{ await copyToClipboard(b.dataset.copy); toast('Copied ✓  Paste it into a terminal'); }
+      catch(e){ toast('Copy failed: '+(e.message||e), true); }
+    }));
     view.querySelectorAll('[data-go]').forEach(b=>b.addEventListener('click',()=>{
       const g=b.dataset.go, arg=b.dataset.arg;
+      if(g==='mcp'){ setTab('settings'); setupSub='mcp'; renderDetail(); return; }
       if(g==='build-model'||g==='skill'){ setTab('settings'); setupSub='skills'; renderDetail(); return; }
       if(g==='impact'){ setTab('model'); modelView='impact'; if(arg) impactPick=arg; renderModelNav(); renderModelView(); return; }
       if(g==='spec'||g==='ownership'||g==='model'){
