@@ -95,17 +95,47 @@ step "Linked $BIN/gitmir"
 ON_PATH=0
 case ":$PATH:" in *":$BIN:"*) ON_PATH=1 ;; esac
 
+# --- putting the command within reach ------------------------------------------
+# ~/.local/bin is not on PATH by default on macOS. Linking there and printing
+# "add this to your shell profile" means the next thing the user types — the
+# command this installer exists to provide — is not found. Do it for them, the
+# way every installer that works does, and say so.
+RC=""
+ADDED=0
+if [ "$ON_PATH" -eq 0 ]; then
+  case "${SHELL:-}" in
+    */zsh)  RC="$HOME/.zshrc" ;;
+    */bash) if [ -f "$HOME/.bash_profile" ]; then RC="$HOME/.bash_profile"; else RC="$HOME/.bashrc"; fi ;;
+    */fish) RC="$HOME/.config/fish/config.fish" ;;
+    *)      RC="$HOME/.profile" ;;
+  esac
+  LINE="export PATH=\"$BIN:\$PATH\""
+  case "$RC" in */config.fish) LINE="fish_add_path $BIN" ;; esac
+  # Once only: running the installer again must not stack the same line up.
+  if [ -f "$RC" ] && grep -Fq "$BIN" "$RC" 2>/dev/null; then
+    ADDED=2
+  else
+    mkdir -p "$(dirname "$RC")" 2>/dev/null || true
+    { printf '\n# GitMir Local\n%s\n' "$LINE" >> "$RC"; } 2>/dev/null && ADDED=1
+  fi
+fi
+
 # --- what to do next -----------------------------------------------------------
 printf '\n  %s\n\n' "$(c '1;32' 'Installed.')"
 
 if [ "$ON_PATH" -eq 0 ]; then
-  RC="$HOME/.bashrc"
-  case "${SHELL:-}" in */zsh) RC="$HOME/.zshrc" ;; esac
-  printf '  %s %s is not on your PATH. Add it:\n\n' "$(c '1;33' '!')" "$BIN"
-  printf '      echo '"'"'export PATH="%s:$PATH"'"'"' >> %s\n' "$BIN" "$RC"
-  printf '      source %s\n\n' "$RC"
-  printf '  Or start it right now with the full path:\n\n'
-  printf '      %s\n\n' "$(c '0;36' "$BIN/gitmir")"
+  if [ "$ADDED" -eq 1 ]; then
+    printf '  Added %s to your PATH in %s.\n\n' "$BIN" "$RC"
+  elif [ "$ADDED" -eq 2 ]; then
+    printf '  %s is already in %s.\n\n' "$BIN" "$RC"
+  else
+    printf '  %s Could not write to %s. Add this line yourself:\n\n      export PATH="%s:$PATH"\n\n' \
+      "$(c '1;33' '!')" "$RC" "$BIN"
+  fi
+  printf '  %s\n\n' "$(c '1;37' 'Open a new terminal, or run this one line, and the command is ready:')"
+  printf '      %s\n\n' "$(c '0;36' "export PATH=\"$BIN:\$PATH\"")"
+  printf '      %s              start it and open the browser\n' "$(c '0;36' 'gitmir')"
+  printf '      %s     let your agent use the same model\n\n' "$(c '0;36' 'gitmir mcp add')"
 else
   printf '      %s              start it and open the browser\n' "$(c '0;36' 'gitmir')"
   printf '      %s     let your agent use the same model\n' "$(c '0;36' 'gitmir mcp add')"

@@ -811,19 +811,23 @@ function renderMcpBox(){
   const home=window.__GITMIR_HOME__||'/path/to/gitmir-local';
   const proj=selected||'/path/to/your/project';
   const q=s=>'"'+String(s).replace(/"/g,'\\"')+'"';
-  // `claude mcp add` defaults to local scope — the registration lives in the folder
-  // the command was run from. Somebody who runs it once and then opens their editor
-  // in a project finds nothing and concludes it did not work. -s user covers every
-  // project; the server answers about whichever one the editor was opened in.
   // Show the command that exists on THIS machine. `gitmir` arrives with the
   // installer, not with a clone, and printing it to somebody who cloned sends them
   // looking for something that is not there.
   const hasCli = !!window.__GITMIR_CLI__;
+  // `claude mcp add` defaults to local scope — the registration lives in the folder
+  // the command was run from. Somebody who runs it once and then opens their editor
+  // in a project finds nothing and concludes it did not work. -s user covers every
+  // project; the server answers about whichever one the editor was opened in.
+
   const rawAdd='claude mcp add -s user gitmir -- node '+q(home+'/mcp.ts');
   const add = hasCli ? 'gitmir mcp add' : rawAdd;
   const addHere = hasCli ? 'gitmir mcp add-here'
     : 'claude mcp add -s project gitmir -- node '+q(home+'/mcp.ts');
-  const check='cd '+q(home)+' && node mcp-check.ts '+q(proj)+' model';
+  // Same reasoning as the register command: show the short form when the launcher
+  // is on this machine, and the long one when it is not.
+  const check = hasCli ? 'gitmir check '+q(proj)
+    : 'cd '+q(home)+' && node mcp-check.ts '+q(proj)+' model';
 
   // Four steps, each answering the same three questions in the same order: what
   // you do, what it buys, and how you know it worked. The page before this put

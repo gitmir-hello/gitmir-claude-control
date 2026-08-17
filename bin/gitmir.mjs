@@ -181,11 +181,28 @@ function mcp(sub) {
     //   add-here  -> project scope: writes .mcp.json into this folder, which is
     //               committed and therefore arrives for teammates too.
     const scope = sub === 'add-here' ? 'project' : 'user';
+    const args = ['mcp', 'add', '-s', scope, 'gitmir', '--', 'node', path.join(DIR, 'mcp.ts')];
     try {
-      execFileSync('claude', ['mcp', 'add', '-s', scope, 'gitmir', '--', 'node', path.join(DIR, 'mcp.ts')],
-        { stdio: 'inherit' });
-    } catch {
-      die("The 'claude' CLI is not on your PATH.\n    Run `gitmir mcp` and paste the config into your editor's MCP settings instead.");
+      console.log(execFileSync('claude', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim());
+    } catch (e) {
+      // Every failure used to report the same cause — "claude is not on your PATH" —
+      // including the common one where it is on the PATH and the server is simply
+      // already registered. Being told the wrong reason is worse than being told
+      // nothing: it sends somebody to fix a thing that is not broken.
+      const said = `${e.stdout || ''}${e.stderr || ''}`.trim();
+      if (e.code === 'ENOENT') {
+        die("The 'claude' CLI is not on your PATH.\n    Run `gitmir mcp` and paste the config into your editor's MCP settings instead.");
+      }
+      if (/already exists/i.test(said)) {
+        say(`${c('0;36', 'Already registered')} — gitmir is in your ${scope} config.`);
+        say(`Pointing at: ${path.join(DIR, 'mcp.ts')}`);
+        say(`To repoint it at this checkout:  claude mcp remove -s ${scope} gitmir && gitmir mcp${sub === 'add-here' ? ' add-here' : ' add'}`);
+        console.log('');
+        say('Check what it resolves to now:  claude mcp list');
+        console.log('');
+        return;
+      }
+      die(`claude could not register it:\n    ${said.split('\n')[0] || String(e.message || e)}`);
     }
     console.log('');
     if (scope === 'user') {
@@ -204,6 +221,25 @@ function mcp(sub) {
   console.log("\n  Point your editor's MCP settings at this:\n");
   console.log(mcpConfig().split('\n').map((l) => '    ' + l).join('\n'));
   console.log(`\n  Or, with the Claude Code CLI:  ${c('0;36', 'gitmir mcp add')}\n`);
+}
+
+/**
+ * Ask the MCP server a question and print what it said.
+ *
+ * The long form of this is `cd <checkout> && node mcp-check.ts <project> model`,
+ * which is three things to get right in a line somebody is copying while already
+ * unsure whether anything works. This is the same call with the paths filled in.
+ */
+function check(arg) {
+  const project = path.resolve(arg || process.cwd());
+  if (!fs.existsSync(project)) die(`No such folder: ${project}`);
+  say(`Asking the server about ${project}`);
+  console.log('');
+  try {
+    execFileSync(process.execPath, ['mcp-check.ts', project, 'model'], { cwd: DIR, stdio: 'inherit' });
+  } catch {
+    die('The check did not run. `gitmir status` will say whether Node is new enough.');
+  }
 }
 
 async function doctor() {
@@ -244,6 +280,7 @@ const HELP = `
     gitmir mcp          the MCP config for your editor
     gitmir mcp add      register it for every project (Claude Code CLI)
     gitmir mcp add-here pin it to this folder, in a committed .mcp.json
+    gitmir check [dir]  ask the server what it knows, and print the answer
     gitmir log [n]      the last n lines the server printed
     gitmir path         where the checkout lives
 
@@ -258,6 +295,7 @@ switch (cmd) {
   case 'status': case 'doctor': await doctor(); break;
   case 'update': await update(); break;
   case 'mcp': mcp(arg); break;
+  case 'check': check(arg); break;
   case 'path': console.log(DIR); break;
   case 'log':
     try { console.log(fs.readFileSync(LOG, 'utf8').split('\n').slice(-(Number(arg) || 40)).join('\n')); }
