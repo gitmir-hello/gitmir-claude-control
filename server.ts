@@ -87,10 +87,11 @@ function impactForBrowser(): string {
   return src.replace(/^export \{[^}]*\};?\s*$/m, '');
 }
 
-import { MODEL_ID, idList, parseTouches, modelIdSet } from './lib/read.js';
+import { MODEL_ID, idList, parseTouches, modelIdSet, readModel } from './lib/read.js';
 import { createTask, setApproval, COLUMNS } from './lib/write.js';
 import { modelVersions, modelAt, diffModels } from './lib/history.js';
 import { readFindings, writeFinding, setFindingStatus, findingsSummary } from './lib/findings.js';
+import { readUsage, summarise, modelBytes, sourceBytes, record as recordUse, fileBytesFor } from './lib/usage.js';
 
 // ---------- model ids carried by tasks ----------
 
@@ -1085,6 +1086,40 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 404, { error: 'not found' });
       }
     }
+    // What the object context did — measured. The product is sold on spending
+    // less, and until this endpoint existed nothing in it counted anything.
+    if (req.method === 'GET' && url.pathname === '/api/usage') {
+      const p = url.searchParams.get('path') || '';
+      if (!p) return sendJSON(res, 400, { error: 'no path' });
+      const entries = readUsage(p, 300);
+      const src = sourceBytes(p);
+      return sendJSON(res, 200, {
+        ok: true,
+        entries: entries.slice(-40).reverse(),
+        summary: summarise(entries),
+        model: { bytes: modelBytes(p) },
+        source: { bytes: src.bytes, files: src.files },
+      });
+    }
+    // The dashboard serves answers too, and an answer read by a person costs the
+    // same to produce as one read by an agent. Recording only the agent's half
+    // would make the ledger a story about MCP rather than about the model.
+    if (req.method === 'POST' && url.pathname === '/api/usage') {
+      const body = await readBody(req);
+      const p = String(body.path || '');
+      if (!p) return sendJSON(res, 400, { error: 'no path' });
+      // The browser knows which objects it showed; only this side knows what the
+      // files they live in weigh, so the comparison is computed here.
+      const ids: string[] = Array.isArray(body.ids) ? body.ids.map(String) : [];
+      let reach = { files: 0, bytes: 0 };
+      if (ids.length) {
+        const model = readModel(p);
+        if (model && model.exists) reach = fileBytesFor(p, ids, model.model);
+      }
+      recordUse(p, { ...body, ids, wouldFiles: reach.files, wouldBytes: reach.bytes, by: 'person' });
+      return sendJSON(res, 200, { ok: true });
+    }
+
     // Where the code does not do what the product says it does. Recorded by
     // whoever read the spec against the code — usually an agent, in one call at
     // the moment it noticed, rather than in a report nobody opens twice.
@@ -1874,6 +1909,44 @@ const HTML = /* html */ `<!doctype html>
   .ctx-bad-i i{font-style:normal; color:var(--ink-3)}
   .ctx-bad-d{color:var(--ink-3); font-size:12px; margin-top:3px}
   .ctx-bad-f{font-size:11.5px; color:var(--ink-3); margin-top:9px; padding-top:8px; border-top:1px solid var(--line)}
+  .hm{max-width:1180px}
+  .hm-top{margin-bottom:16px}
+  .hm-name{font-size:22px; color:var(--ink-0)}
+  .hm-path{font-family:var(--font-mono); font-size:11.5px; color:var(--ink-3); margin-top:3px}
+  .hm-hero{border:1px solid rgba(96,232,255,.32); border-left-width:3px; background:rgba(47,216,255,.05);
+    padding:20px 24px; margin-bottom:18px}
+  .hm-hero.empty{border-color:var(--line); background:rgba(10,18,36,.45)}
+  .hm-hero p{font-size:13.5px; color:var(--ink-2); line-height:1.65; margin:8px 0 0; max-width:78ch}
+  .hm-hero-h{font-size:16px; color:var(--ink-0)}
+  .hm-big{font-size:46px; line-height:1; color:#8fe8ff; font-variant-numeric:tabular-nums}
+  .hm-big-l{font-family:var(--font-mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--ink-3); margin-top:5px}
+  .hm-cmd{display:inline-block; margin-top:12px; font-family:var(--font-mono); font-size:13px; color:#8fe8ff;
+    border:1px solid rgba(96,232,255,.35); background:rgba(5,10,22,.6); padding:7px 14px}
+  .hm-next{display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-top:14px}
+  .hm-next span{font-size:12.5px; color:var(--ink-3)}
+  .hm-row{display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:10px; margin-bottom:14px}
+  .hm-card{border:1px solid var(--line); background:rgba(10,18,36,.45); padding:14px 16px}
+  .hm-card[role=button]{cursor:pointer}
+  .hm-card[role=button]:hover{border-color:rgba(96,232,255,.45)}
+  .hm-card.warn{border-color:rgba(255,178,78,.4)}
+  .hm-card.bad{border-color:rgba(255,64,96,.45)}
+  .hm-c-l{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-3)}
+  .hm-c-v{font-size:20px; color:var(--ink-0); margin:6px 0 4px; font-variant-numeric:tabular-nums}
+  .hm-card.warn .hm-c-v{color:#ffc073} .hm-card.bad .hm-c-v{color:#ff8ba1}
+  .hm-c-s{font-size:12.5px; color:var(--ink-3); line-height:1.5}
+  .hm-sec{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--ink-3); margin:20px 0 9px; padding-bottom:6px; border-bottom:1px solid var(--line)}
+  .hm-log{display:flex; flex-direction:column; gap:3px}
+  .hm-e{display:grid; grid-template-columns:58px minmax(150px,1.1fr) 68px 1.4fr 120px; gap:12px; align-items:baseline;
+    padding:7px 12px; border-left:2px solid var(--line); background:rgba(10,18,36,.4); font-size:12.5px}
+  .hm-e-w{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.07em; text-transform:uppercase; color:var(--ink-3)}
+  .hm-e-q{font-family:var(--font-mono); font-size:11.5px; color:var(--ink-1); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .hm-e-n{font-family:var(--font-mono); font-size:11.5px; color:#8fe8ff; text-align:right; font-variant-numeric:tabular-nums}
+  .hm-e-v{color:var(--ink-3)}
+  .hm-e-t{font-family:var(--font-mono); font-size:10.5px; color:var(--ink-3); text-align:right}
+  .hm-note{font-size:12px; color:var(--ink-3); margin-top:11px; line-height:1.6}
+  @media (max-width:900px){ .hm-e{grid-template-columns:1fr; gap:2px} .hm-e-n,.hm-e-t{text-align:left} }
   .sp-sum{display:flex; flex-wrap:wrap; gap:10px; margin:12px 0 14px}
   .sp-k{flex:1 1 140px; border:1px solid var(--line); background:rgba(10,18,36,.45); padding:12px 14px}
   .sp-k b{display:block; font-size:22px; color:var(--ink-0); font-variant-numeric:tabular-nums}

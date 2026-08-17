@@ -105,6 +105,20 @@ it needs one.
 
 `gitmir_setup` only ever creates folders and a list entry. It never touches code.
 
+## Every answer leaves a line
+
+The server appends one line to `.gitmir/usage.jsonl` for each answer it serves:
+the tool, what was asked, the size of the answer, how many model objects it
+covered, and how big the files are that those objects live in.
+
+That last pair is the point. It is not an estimate of what an agent would
+otherwise have read — it is a measurement of this repository: these objects, these
+files, this many bytes. The dashboard's first screen adds them up, and anybody can
+read the file and check the arithmetic.
+
+Nothing is sent anywhere. The record exists so the no-telemetry claim is
+checkable instead of merely stated.
+
 ## Where a finding lives, and why not in the model
 
 `gitmir_flag` writes one file into `.gitmir/findings/` — deliberately next to the model

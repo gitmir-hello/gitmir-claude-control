@@ -270,6 +270,7 @@ function setShell(open){
 }
 
 const RAIL = [
+  { tab:'home',     ic:'compass',  l:'Overview' },
   { tab:'settings', ic:'settings', l:'Setup' },
   { tab:'tasks',    ic:'tasks',    l:'Tasks' },
   { tab:'model',    ic:'schema',   l:'Model',   badge:'modelBadge' },
@@ -291,7 +292,9 @@ function renderRail(){
 
 let taskTimer = null;
 let queueTimer = null;
-let activeTab = 'settings';
+// The first screen inside a project used to be a settings form — a name field and
+// a description box, in a tool bought for what it knows about the product.
+let activeTab = 'home';
 // Which page of Setup is open — kept across re-renders, so it does not snap back.
 let setupSub = 'skills';
 function setTab(tab){
@@ -299,6 +302,7 @@ function setTab(tab){
   document.querySelectorAll('.rl').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
   document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('active', p.dataset.pane===tab));
   clearInterval(queueTimer);
+  if(tab==='home' && selected) renderHome(selected);
   if(tab==='model' && selected) loadModel(selected);
   if(tab==='queue' && selected){ loadQueue(selected); queueTimer=setInterval(()=>{ if(selected && activeTab==='queue') loadQueue(selected); }, 4000); }
   if(tab==='team'){ renderTeam(); teamPoll(); }
@@ -315,6 +319,7 @@ function renderDetail(){
   }
   const wrap = document.createElement('div'); wrap.className='detail-wrap';
   wrap.innerHTML =
+    '<div class="pane" data-pane="home"><div id="homeView"></div></div>' +
     '<div class="pane" data-pane="settings">' +
       '<div class="field"><div class="row-lbl"><label>Name</label><span class="saved" id="savedN">saved ✓</span></div>' +
         '<input class="f-name" id="fName"></div>' +
@@ -1148,6 +1153,155 @@ async function renderConfidence(view, m, seq){
 // The task file says what it set out to change; the log says what it actually
 // touched. Both were already being collected and nobody was putting them side by
 // side — which is the difference between a diagram and change governance.
+// One line in the project's record whenever somebody takes an answer from the
+// model. Reaching for the model instead of the files is the thing being measured,
+// and it is the same act whether an agent does it or a person does.
+function recordAnswer(entry){
+  if(!selected || modelSrc) return;              // a shared snapshot is not this project's record
+  const m=modelData&&modelData.model;
+  let ids=entry.ids||[];
+  if(m && ids.length){
+    try{ const br=blastRadius(ids.filter(id=>objById(id,m)), m); ids=[...new Set(ids.concat([...br.dist.keys()]))]; }catch{}
+  }
+  fetch('/api/usage',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ path:selected, ...entry, ids })}).catch(()=>{});
+}
+
+// The first screen of a project: what the object context is, what it replaced,
+// what it caught, and the one thing to do next.
+//
+// Everything here is measured. The product is sold on spending less — on agents
+// answering from a model instead of crawling a repository, and on people
+// deciding from evidence instead of instinct — and until this screen existed
+// nothing in the product counted either. A tool that asks to be believed is in a
+// weaker position than one that shows the number, especially in a room where
+// somebody has to justify the spend.
+const KB = (b) => b >= 1048576 ? (b/1048576).toFixed(1)+' MB' : Math.round((b||0)/1024)+' KB';
+async function renderHome(pathStr){
+  const view=document.getElementById('homeView'); if(!view) return;
+  const p=byPath(pathStr)||{};
+  view.innerHTML='<div class="model-empty">Reading the project…</div>';
+
+  const [u, m] = await Promise.all([
+    fetch('/api/usage?path='+encodeURIComponent(pathStr)).then(r=>r.json()).catch(()=>null),
+    fetch('/api/model?path='+encodeURIComponent(pathStr)).then(r=>r.json()).catch(()=>null),
+  ]);
+  if(selected!==pathStr) return;                       // the user moved on
+  await loadFindings(pathStr);
+  const ch = await loadChanges(false).catch(()=>null);
+  if(selected!==pathStr) return;
+
+  const has = !!(m && m.exists);
+  const mm = (m && m.model) || {};
+  const objects = DIM_ORDER.reduce((n,k)=>n+((mm[k]||[]).length),0);
+  const links = has ? countLinks(mm) : 0;
+  const s = (u && u.summary) || {answers:0, served:0, wouldBytes:0, wouldFiles:0, ratio:0};
+  const find = findingsData.summary || {open:0, accepted:0, high:0, stale:0};
+  const tasks = ((ch&&ch.tasks)||[]);
+  const open = tasks.filter(t=>t.col!=='done');
+
+  let h='<div class="hm">';
+
+  // --- what this is, in one line somebody can repeat
+  h+='<div class="hm-top"><div class="hm-name">'+esc(p.name||pathStr.split('/').pop())+'</div>'+
+     '<div class="hm-path">'+esc(pathStr)+'</div></div>';
+
+  if(!has){
+    h+='<div class="hm-hero empty"><div class="hm-hero-h">No object context yet</div>'+
+       '<p>GitMir reads this repository once and writes what the product is — areas, business objects, '+
+       'functions, endpoints, screens, events, journeys, lifecycles — into <code>.gitmir/model/</code>, '+
+       'linked by stable ids. After that both you and your agent answer from it instead of from the files.</p>'+
+       '<div class="hm-next"><button class="run hm-go" data-act="model">▶ Build it with Claude</button>'+
+       '<span>Runs the <b>gitmir-model</b> skill in this folder. One pass over the repository.</span></div></div>';
+    h+='</div>';
+    view.innerHTML=h;
+    view.querySelector('.hm-go').addEventListener('click',()=>{ setTab('settings'); setupSub='skills'; renderDetail(); });
+    return;
+  }
+
+  // --- the headline: what the context replaced
+  h+='<div class="hm-hero">';
+  if(s.answers){
+    h+='<div class="hm-big">'+s.ratio.toFixed(1)+'×</div>'+
+       '<div class="hm-big-l">less read to answer</div>'+
+       '<p><b>'+s.answers+' answer'+(s.answers===1?'':'s')+'</b> served from the model, '+KB(s.served)+' in total. '+
+       'The objects those answers covered live in <b>'+s.wouldFiles+' file'+(s.wouldFiles===1?'':'s')+'</b> — '+
+       KB(s.wouldBytes)+' of source. That is a fact about this repository, not a claim about what an agent would '+
+       'otherwise have done with it.</p>';
+  } else {
+    h+='<div class="hm-hero-h">The context is built. Nothing has asked it anything yet.</div>'+
+       '<p>Point your agent at it and every answer it takes from the model is counted here, against the size of '+
+       'the files those objects live in.</p>'+
+       '<div class="hm-cmd">gitmir mcp add</div>';
+  }
+  h+='</div>';
+
+  // --- what you have
+  h+='<div class="hm-row">'+
+     card('Object context', objects+' objects', links+' relationships between them · '+KB((u&&u.model&&u.model.bytes)||0), 'model')+
+     card('Read from', ((u&&u.source&&u.source.files)||0)+' source files', KB((u&&u.source&&u.source.bytes)||0)+' of code in this repository', null)+
+     card('Freshness', (m.stale? 'Code has moved' : 'Matches the code'),
+          m.stale ? 'Rebuild before quoting a number from it' : 'Nothing changed since the model was built',
+          'model', m.stale?'warn':'')+
+     '</div>';
+
+  // --- what it caught
+  const caught=[];
+  if(find.open)     caught.push(card('Where code disagrees with the product', find.open+' open',
+     (find.high? find.high+' of them high · ':'')+(find.accepted? find.accepted+' accepted on purpose':'nobody has decided on them yet'), 'spec', find.high?'bad':''));
+  if(open.length)   caught.push(card('Work planned', open.length+' task'+(open.length===1?'':'s'),
+     open.filter(t=>t.approved).length+' approved · risk is on every card', 'queue'));
+  const noOwner=(mm.modules||[]).filter(x=>!x.owner).length;
+  if(noOwner)       caught.push(card('Areas nobody has claimed', noOwner+' of '+(mm.modules||[]).length,
+     'A question about these has nowhere to go', 'ownership', 'warn'));
+  if(caught.length) h+='<div class="hm-sec">What it has caught</div><div class="hm-row">'+caught.join('')+'</div>';
+
+  // --- what happened, in order: the transparency half
+  if(u && u.entries && u.entries.length){
+    h+='<div class="hm-sec">What was asked, and what it served</div><div class="hm-log">';
+    for(const e of u.entries.slice(0,12)){
+      h+='<div class="hm-e"><span class="hm-e-w">'+esc(e.by||'agent')+'</span>'+
+         '<span class="hm-e-q">'+esc(e.q||e.tool)+'</span>'+
+         '<span class="hm-e-n">'+KB(e.served)+'</span>'+
+         '<span class="hm-e-v">'+(e.wouldBytes? 'covered '+e.ids+' objects living in '+KB(e.wouldBytes) : e.ids+' objects')+'</span>'+
+         '<span class="hm-e-t">'+esc(String(e.at||'').slice(0,16).replace('T',' '))+'</span></div>';
+    }
+    h+='</div><div class="hm-note">Kept in <code>.gitmir/usage.jsonl</code>, in this project. It is never sent anywhere — there is no GitMir telemetry, and this is the record that lets you check that claim rather than take it.</div>';
+  }
+
+  h+='</div>';
+  view.innerHTML=h;
+  view.querySelectorAll('[data-go]').forEach(b=>b.addEventListener('click',()=>{
+    const g=b.dataset.go;
+    if(g==='model'||g==='spec'||g==='ownership'){
+      setTab('model');
+      if(g==='spec') modelView='spec'; else if(g==='ownership') modelView='ownership';
+      renderModelNav(); renderModelView();
+    } else setTab(g);
+  }));
+
+  function card(label, value, sub, go, tone){
+    return '<div class="hm-card '+(tone||'')+'"'+(go?' data-go="'+go+'" role="button" tabindex="0"':'')+'>'+
+      '<div class="hm-c-l">'+esc(label)+'</div>'+
+      '<div class="hm-c-v">'+esc(value)+'</div>'+
+      '<div class="hm-c-s">'+esc(sub)+'</div></div>';
+  }
+}
+
+// Relationships, not nodes: the count that says what the model is actually for.
+function countLinks(m){
+  let n=0;
+  for(const e of (m.entities||[])){ for(const f of (e.fields||[])) if(f&&f.refEntityId) n++; n+=(e.derivedFrom||[]).length; }
+  for(const f of (m.serverFunctions||[])) n+=(f.callsFunctionIds||[]).length+(f.emitsEventIds||[]).length+
+    (f.subscribesEventIds||[]).length+(f.writesFieldIds||[]).length+(f.readsFieldIds||[]).length+(f.routeId?1:0);
+  for(const u of (m.frontendUnits||[])) n+=(u.consumesRouteIds||[]).length+(u.dependsOn||[]).length+
+    (u.emitsEventIds||[]).length+(u.subscribesEventIds||[]).length;
+  for(const p of (m.processes||[])) n+=(p.steps||[]).filter(s=>s&&s.refId).length;
+  for(const fl of (m.statusFlows||[])){ n+=fl.entityId?1:0; for(const tr of (fl.transitions||[])) n+=(tr.effects||[]).length; }
+  for(const r of (m.reactions||[])) n+=(r.effects||[]).length;
+  return n;
+}
+
 // Where the code does not do what the product says it does.
 //
 // Kept out of the model on purpose: the model is derived from code and rebuilt
@@ -1697,6 +1851,7 @@ function openContextPopup(kind,id){
       '</div>'+
     '</div>';
   mountOverlay(ov).classList.add('show');
+  recordAnswer({ tool:'context', q:kindOf(id)+' '+id, served:ctx.length, ids:[id] });
   // Expanding a reach group, and stepping from here to any object it named.
   ov.querySelectorAll('.of-r').forEach(b=>b.addEventListener('click',()=>{
     const k=b.dataset.k, box=ov.querySelector('.of-exp[data-k="'+k+'"]');

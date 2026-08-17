@@ -81,6 +81,25 @@ rule, and how to disagree with the number.
 
 ---
 
+## What it cost you to answer, measured
+
+Open a project and the first screen is not a settings form. It is what the
+context is, what it replaced, and what it has caught:
+
+<img src="docs/img/overview.png" alt="A project overview: 24.6x less read to answer, the object context against the source it came from, open deviations, and the record of what was asked" width="900">
+
+Every answer taken from the model — by your agent over MCP, or by you opening an
+object — leaves one line in `.gitmir/usage.jsonl`: what was asked, how big the
+answer was, and how big the files are that those objects live in.
+
+That second number is deliberately not a claim about what an agent "would have
+done". It is a fact about your repository: these objects live in these files, and
+the files are this size. On a real 6-area product, four answers came to 12 KB
+against 299 KB of source — and you can open the record and check every line.
+
+The record never leaves the machine. It is the file that lets you verify the
+no-telemetry claim rather than take it.
+
 ## What you get
 
 **1 · Understand the product.** Ask what checkout depends on, where a business rule is

@@ -23,10 +23,11 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { readModel, modelStaleness, modelIdSet, readTasks } from './lib/read.js';
+import { readModel, modelStaleness, modelIdSet, readTasks, MODEL_ID } from './lib/read.js';
 import { createTask, setApproval, COLUMNS } from './lib/write.js';
 import { blastRadius, riskOf, kindOf, labelOf, moduleOf, objById, isJourney } from './lib/impact.js';
 import { modelVersions, modelAt, diffModels } from './lib/history.js';
+import { record as recordUse, fileBytesFor } from './lib/usage.js';
 import { readFindings, writeFinding, setFindingStatus, findingsByTarget, openOnly, findingsSummary,
   KINDS, SEVERITIES } from './lib/findings.js';
 
@@ -121,6 +122,45 @@ function riskText(risk: any): string {
   for (const p of risk.parts) L.push(`  ${p.n} x ${p.w} = ${p.n * p.w}  ${p.l} — ${p.why}`);
   L.push(`  (share of product, not a raw score: the same points mean "most of it" in a small product and "a corner" in a large one)`);
   return L.join('\n');
+}
+
+/**
+ * The model objects an answer actually covered.
+ *
+ * Not the ids in the arguments: `navigate sf-x` answers with everything that
+ * breaks if sf-x changes, and counting one object there would understate what
+ * the answer did by a factor of ten. Not the ids in the text either — answers
+ * name things in words, on purpose. The covered set is the walk itself.
+ */
+function idsMentioned(args: Record<string, unknown>, text: string, project: string, model?: any): string[] {
+  const out = new Set<string>();
+  const add = (v: unknown) => { if (typeof v === 'string' && kindOf(v)) out.add(v); };
+  add(args.id);
+  if (Array.isArray(args.ids)) args.ids.forEach(add);
+  if (Array.isArray(args.touches)) args.touches.forEach(add);
+
+  const known = modelIdSet(path.join(project, '.gitmir', 'model'));
+  for (const m of String(text || '').matchAll(MODEL_ID)) if (known.has(m[0])) out.add(m[0]);
+
+  // An answer that walked a radius covered the radius.
+  if (model && out.size) {
+    try {
+      const br = blastRadius([...out].filter((id) => objById(id, model)), model);
+      for (const id of br.dist.keys()) out.add(id);
+    } catch { /* the count is a nicety; the answer is not */ }
+  }
+  return [...out];
+}
+
+/** What was asked, in a line somebody can read back a month later. */
+function describeCall(name: string, args: Record<string, unknown>): string {
+  const bits = [name.replace(/^gitmir_/, '')];
+  for (const k of ['id', 'task', 'dimension', 'q', 'name', 'column', 'status']) {
+    const v = args[k];
+    if (typeof v === 'string' && v) bits.push(`${k}=${v}`);
+  }
+  if (Array.isArray(args.ids) && args.ids.length) bits.push(`ids=${args.ids.length}`);
+  return bits.join(' ');
 }
 
 function impactText(ids: string[], m: any, heading: string, project?: string): string {
@@ -1067,6 +1107,25 @@ async function handle(msg: any): Promise<void> {
           return result(id, { content: [{ type: 'text', text: `Not a directory: ${project}` }], isError: true });
         }
         const out = await tool.run(args, project);
+        // One line per answer served. The comparison it records is a fact about
+        // this repository — these objects live in these files, the files are this
+        // big — not a claim about what an agent would otherwise have done.
+        if (!out.isError) {
+          try {
+            const l = load(project);
+            const ids = idsMentioned(args, out.text, project, l.ok ? l.model : null);
+            const reach = (ids.length && l.ok) ? fileBytesFor(project, ids, l.model) : { files: 0, bytes: 0 };
+            recordUse(project, {
+              tool: name,
+              q: describeCall(name, args),
+              served: Buffer.byteLength(out.text || '', 'utf8'),
+              ids,
+              wouldFiles: reach.files,
+              wouldBytes: reach.bytes,
+              by: 'agent',
+            });
+          } catch { /* the diary never blocks the answer */ }
+        }
         return result(id, { content: [{ type: 'text', text: out.text }], isError: !!out.isError });
       } catch (e: unknown) {
         log('tool failed:', name, e instanceof Error ? e.stack : String(e));
