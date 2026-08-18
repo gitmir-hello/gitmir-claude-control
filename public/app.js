@@ -1474,6 +1474,9 @@ function countLinks(m){
 // that a diagram somebody can drag into a preferred shape can be made to say
 // anything.
 let designData = null, designFor = null, designAdd = null, designOpen = null;
+// Whether the picture is in declaring mode. Kept out here so switching views and
+// back does not silently drop you out of it mid-thought.
+let designOn = false;
 
 async function loadDesign(pathStr, force){
   if(!force && designData && designFor===pathStr) return designData;
@@ -1514,9 +1517,14 @@ async function renderDesign(view, m, seq){
        '</div>';
 
   h += '<div class="dg-bar">'+
-       '<button class="run dg-new">＋ Add an element</button>'+
+       '<button class="'+(designOn?'run':'ghost')+' dg-mode">'+(designOn?'✎ Drawing on the map':'✎ Draw on the map')+'</button>'+
+       '<button class="'+(designOn?'ghost':'run')+' dg-new">＋ Add an element</button>'+
        (c.total-c.present > 0
-         ? '<button class="ghost dg-tasks">Turn '+(c.total-c.present)+' into tasks →</button>'
+         ? '<button class="ghost dg-tasks">'+(c.total-c.present)+' tasks, one each →</button>'+
+           '<button class="ghost dg-slice">One task for the lot →</button>'
+         : '')+
+       (designOn
+         ? '<span class="dg-hint">Press a card and pull to another to say what moves between them. Press empty space to add an element there. Nothing is placed by hand — the layout is recomputed.</span>'
          : '')+
        '<span class="dg-note">Checks are written from what you declare. Rebuild the model when the work is done — they are read from it, not from the diff.</span>'+
        '</div>';
@@ -1532,9 +1540,16 @@ async function renderDesign(view, m, seq){
     // renderHud takes a finished scene; hudRenderSpec takes a graph and builds one.
     // Handing a scene to the second produced a picture with no edges and no rows,
     // because it was being read as a spec that happened to have none.
-    renderHud(el, hudSceneDesign(d.items, m, c, {
+    const scene = hudSceneDesign(d.items, m, c, {
       onSelect:(id)=>{ if(id && kindOf(id)) openContextPopup(kindOf(id), id); },
-    }), seq);
+    });
+    // Declaring happens on the picture: press a card and pull to another to say what
+    // moves between them, press empty space to put a new element about there. The
+    // position is not kept — it only decides where the question is asked.
+    scene.onLink = (fromId, toId) => declareLink(fromId, toId, view, m, seq);
+    scene.onAddAt = () => openAdder(view, designData || d, m, seq);
+    renderHud(el, scene, seq);
+    if(window.__HUD_API__ && window.__HUD_API__.design) window.__HUD_API__.design(designOn);
   }
 
   // --- the elements themselves
@@ -1566,7 +1581,7 @@ async function renderDesign(view, m, seq){
         const row=document.createElement('div');
         row.className='dg-link '+(l.held?'held':'open');
         row.innerHTML='<span class="dg-l-k">'+esc(l.label)+'</span>'+
-          '<span class="dg-l-t">'+esc(labelOf(l.to,m)||l.to)+'</span>'+
+          '<span class="dg-l-t">'+esc(l.kind==='field' ? (l.fieldName||l.to) : (labelOf(l.to,m)||l.to))+'</span>'+
           '<span class="dg-l-s">'+(l.held?'in the model':'not in the model yet')+'</span>'+
           '<button class="dg-l-x" data-k="'+esc(l.kind)+'" data-to="'+esc(l.to)+'" title="Remove">✕</button>';
         lw.appendChild(row);
@@ -1583,9 +1598,26 @@ async function renderDesign(view, m, seq){
     lw.querySelectorAll('.dg-l-x').forEach(b=>b.addEventListener('click',()=>
       dropLink(it, b.dataset.k, b.dataset.to, view, m, seq)));
     card.querySelector('.dg-addlink').appendChild(linkAdder(it, d, m, view, seq));
+    if(it.dim==='entities') card.querySelector('.dg-addlink').appendChild(fieldAdder(it, view, m, seq));
   }
 
   view.querySelector('.dg-new').addEventListener('click', ()=>openAdder(view, d, m, seq));
+  view.querySelector('.dg-mode').addEventListener('click', ()=>{
+    designOn = !designOn;
+    if(window.__HUD_API__ && window.__HUD_API__.design) window.__HUD_API__.design(designOn);
+    renderDesign(view, m, seq);
+  });
+  const sb = view.querySelector('.dg-slice');
+  if(sb) sb.addEventListener('click', async ()=>{
+    const title = prompt('What is this piece of work called?', 'Build what is declared on the map');
+    if(title===null) return;
+    sb.disabled = true; sb.textContent = 'Writing…';
+    const r = await fetch('/api/design/tasks',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({path:selected, slice:true, title})}).then(x=>x.json()).catch(()=>null);
+    if(r && r.ok && r.count){ toast('One task written to tasks/todo ✓'); refreshTasks(selected); }
+    else toast('Could not write the task', true);
+    renderDesign(view, m, seq);
+  });
   const tb = view.querySelector('.dg-tasks');
   if(tb) tb.addEventListener('click', async ()=>{
     tb.disabled = true; tb.textContent = 'Writing…';
@@ -1706,6 +1738,67 @@ function linkAdder(it, d, m, view, seq){
     renderDesign(view, m, seq);
   });
   return wrap;
+}
+
+// Fields on a business object. This is the level a change actually lands on —
+// "the order carries a discount" is a field, and a design that can only declare
+// whole objects cannot say it.
+function fieldAdder(it, view, m, seq){
+  const wrap = document.createElement('div');
+  wrap.innerHTML =
+    '<div class="dg-lf">'+
+      '<span class="dg-lf-l">has a field</span>'+
+      '<input class="dg-ff-n" placeholder="discountCents">'+
+      '<input class="dg-ff-t" placeholder="type — optional">'+
+      '<button class="ghost dg-ff-go">Declare</button>'+
+    '</div>';
+  wrap.querySelector('.dg-ff-go').addEventListener('click', async ()=>{
+    const name = wrap.querySelector('.dg-ff-n').value.trim();
+    if(!name) return;
+    await fetch('/api/design/field',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({path:selected, entityId:it.id, name, type:wrap.querySelector('.dg-ff-t').value.trim()})});
+    renderDesign(view, m, seq);
+  });
+  return wrap;
+}
+
+// A link pulled on the picture. Which link it is has to be asked — "writes" and
+// "reads" look identical as a gesture, and guessing would put a fact in the model
+// that nobody stated.
+async function declareLink(fromId, toId, view, m, seq){
+  const d = designData; if(!d || !fromId || !toId) return;
+  const it = (d.items||[]).find(x=>x.id===fromId);
+  if(!it){ toast('Links are pulled from something you declared, not from what already exists', true); return; }
+  const fromKind = kindOf(fromId), toKind = kindOf(toId);
+  const usable = (d.links||[]).filter(L => (L.from||[]).includes(fromKind) && (L.to||[]).includes(toKind));
+  if(!usable.length){
+    toast('A '+hudTypeWordSafe(fromId)+' cannot point at a '+hudTypeWordSafe(toId)+' directly', true);
+    return;
+  }
+  if(usable.length === 1) return saveLink(it, usable[0], toId, view, m, seq);
+  // More than one meaning: ask, in the words the panel uses.
+  const ov = document.createElement('div'); ov.className='ov show';
+  ov.innerHTML = '<div class="ctx-modal dg-pick">'+
+    '<div class="ctx-head"><div class="ctx-title">What does '+esc(it.object.name||fromId)+' do with '+
+      esc(labelOf(toId,m)||toId)+'?</div></div>'+
+    '<div class="dg-pick-b">'+usable.map(L=>'<button class="dg-pick-o" data-k="'+esc(L.key)+'">'+esc(L.label)+'</button>').join('')+'</div>'+
+    '<div class="ctx-actions"><button class="del dg-pick-x">Cancel</button></div></div>';
+  mountOverlay(ov);
+  const close=()=>{ ov.classList.remove('show'); ov.innerHTML=''; };
+  ov.querySelector('.dg-pick-x').addEventListener('click', close);
+  ov.querySelectorAll('.dg-pick-o').forEach(b=>b.addEventListener('click',()=>{
+    const L = usable.find(x=>x.key===b.dataset.k); close(); saveLink(it, L, toId, view, m, seq);
+  }));
+}
+
+async function saveLink(it, L, to, view, m, seq){
+  const object = { ...it.object };
+  if(L.list){ const cur = Array.isArray(object[L.field]) ? object[L.field] : [];
+    if(!cur.includes(to)) object[L.field] = cur.concat(to); }
+  else object[L.field] = to;
+  await fetch('/api/design',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({path:selected, id:it.id, dim:it.dim, object, note:it.note})});
+  renderDesign(view, m, seq);
 }
 
 async function dropLink(it, key, to, view, m, seq){

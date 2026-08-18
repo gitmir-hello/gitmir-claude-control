@@ -2691,6 +2691,14 @@ function nodeAt(sx, sy) {
 
 /* --- drilling through levels ---------------------------------------------- */
 
+// Design mode: the picture becomes a place to declare things rather than only to
+// read them. Dragging from a card pulls a link; clicking empty space asks for a new
+// element there. Positions are still never stored — the click only says where the
+// question was asked, and the layout is recomputed from what was declared.
+let designMode = false;
+let linkFrom = null;          // the card a link is being pulled from
+let linkOver = null;          // the card the pointer is over while pulling
+
 const drillPath = [];        // the chain of opened containers, outermost first
 let autoFrame = null;        // framing held until the animation finishes
 
@@ -2802,6 +2810,13 @@ on(view, 'pointerdown', (ev) => {
   // there is no empty background left to grab, so the picture could not be moved
   // at all. Positions here are computed from the graph anyway; dragging one node
   // out of place says nothing and loses the layout's meaning.
+  // In design mode a press landing on a card starts a link instead of a pan. Empty
+  // background still pans, so the picture never becomes untouchable.
+  if (designMode && !buttonAt(lx0, ly0)) {
+    const nd = nodeAt(lx0, ly0);
+    if (nd) { linkFrom = nd; linkOver = null; panning = false; setCursor('pointing'); return; }
+  }
+
   panning = true;
   panCamX = cam.tx;
   panCamY = cam.ty;
@@ -2829,6 +2844,13 @@ on(view, 'pointermove', (ev) => {
     return;
   }
 
+  if (linkFrom) {
+    const over = nodeAt(lx, ly);
+    linkOver = over && over !== linkFrom ? over : null;
+    setCursor('pointing');
+    return;
+  }
+
   if (panning) {
     cam.tx = panCamX - (lx - panStartX) / cam.scale;
     cam.ty = panCamY - (ly - panStartY) / cam.scale;
@@ -2853,6 +2875,23 @@ on(view, 'pointermove', (ev) => {
 
 const endPointer = (ev) => {
   if (pointerConsumed) { pointerConsumed = false; return; }
+
+  if (linkFrom) {
+    const [lxl, lyl] = ev && ev.clientX != null ? localXY(ev) : [pointer.x, pointer.y];
+    const to = nodeAt(lxl, lyl);
+    const from = linkFrom;
+    linkFrom = null; linkOver = null;
+    pointer.down = false; panning = false;
+    if (to && to !== from && SCENE.onLink) {
+      SCENE.onLink(from.src && from.src.modelId, to.src && to.src.modelId);
+    } else if ((!to || to === from) && !pointer.moved && SCENE.onNodeSelect) {
+      // Press and release on one card still means "what is this", mode or no mode.
+      selected = from;
+      SCENE.onNodeSelect(from);
+    }
+    setCursor('');
+    return;
+  }
   if (pointer.down && !pointer.moved) {
     // pointerleave fires this without an event of its own, so fall back to the
     // last position the pointer was known to be at.
@@ -2879,8 +2918,12 @@ const endPointer = (ev) => {
     } else if (selected) {
       selected = null;
     } else {
-      // A click on empty background means back up a level.
-      drillOut();
+      // A click on empty background means back up a level — unless this is the mode
+      // for declaring things, where it means "put a new one about here".
+      if (designMode && SCENE.onAddAt) {
+        const w = screenToWorld(lxu, lyu);
+        SCENE.onAddAt(w.x, w.y, lxu, lyu);
+      } else drillOut();
     }
   }
   pointer.down = false;
@@ -3202,6 +3245,21 @@ function drawLevel(ctx, level, t, dt) {
   if (deferred) drawNode(ctx, deferred, t, dt);
 
   // Now that the panels are down, the labels go on top of them.
+  // The link being pulled, drawn over the cards so it is never lost behind one.
+  if (linkFrom) {
+    const p0 = worldToScreen(linkFrom.x, linkFrom.y);
+    const p1 = linkOver ? worldToScreen(linkOver.x, linkOver.y) : { x: pointer.x, y: pointer.y };
+    ctx.save();
+    ctx.strokeStyle = rgba(linkOver ? C.green : C.cyan, linkOver ? 0.95 : 0.6);
+    ctx.lineWidth = 2;
+    ctx.setLineDash(linkOver ? [] : [6, 5]);
+    ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(p1.x, p1.y, linkOver ? 6 : 4, 0, Math.PI * 2);
+    ctx.fillStyle = rgba(linkOver ? C.green : C.cyan, 0.9); ctx.fill();
+    ctx.restore();
+  }
+
   flushEdgeLabels(ctx);
 }
 
@@ -3323,6 +3381,10 @@ Object.assign(HUD_API, {
     if (OPTS.onDestroy) { try { OPTS.onDestroy(); } catch (e) {} }
   },
   resize() { resize(); fitView(); },
+  // Declaring mode, switched from the panel beside the canvas. Nothing about the
+  // layout changes with it — only what a press means.
+  design(on) { designMode = !!on; if (!on) { linkFrom = null; linkOver = null; } },
+  designing() { return designMode; },
 });
 return HUD_API;
 };

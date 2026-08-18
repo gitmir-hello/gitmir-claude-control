@@ -94,7 +94,7 @@ import { readFindings, writeFinding, setFindingStatus, findingsSummary } from '.
 import { readUsage, summarise, modelBytes, sourceBytes, record as recordUse, fileBytesFor } from './lib/usage.js';
 import { attention, caught, nextSkill } from './lib/attention.js';
 import { readDesign, writeItem, removeItem, designAsModel, takenIds, conformance,
-  tasksFrom, newId, LINKS } from './lib/design.js';
+  tasksFrom, taskForSlice, fieldId, newId, LINKS } from './lib/design.js';
 
 // ---------- model ids carried by tasks ----------
 
@@ -1148,6 +1148,34 @@ const server = http.createServer(async (req, res) => {
       const r = writeItem(p, { id, dim: body.dim, object: body.object, note: body.note });
       return sendJSON(res, r.ok ? 200 : 400, r.ok ? { ok: true, item: r.item } : { error: r.why });
     }
+    // A field on a declared or existing business object. Fields are the level a
+    // change actually lands on: "the order carries a discount" cannot be said by
+    // declaring whole objects.
+    if (req.method === 'POST' && url.pathname === '/api/design/field') {
+      const body = await readBody(req);
+      const p = String(body.path || '');
+      const on = String(body.entityId || '');
+      const name = String(body.name || '').trim();
+      if (!p || !on || !name) return sendJSON(res, 400, { error: 'need path, entityId and name' });
+      const items = readDesign(p).items;
+      let it = items.find((x) => x.id === on);
+      if (!it) {
+        // Declaring a field on an object that already exists: the object joins the
+        // design carrying only the field, which is exactly what was asked for.
+        const m = readModel(p);
+        const real = m.exists ? ((m.model as any).entities || []).find((e: any) => e.id === on) : null;
+        if (!real) return sendJSON(res, 400, { error: `No business object ${on}` });
+        it = { id: on, dim: 'entities', object: { id: on, name: real.name, moduleId: real.moduleId, fields: [] }, note: '', at: new Date().toISOString() };
+      }
+      const fields = Array.isArray(it.object.fields) ? it.object.fields.slice() : [];
+      const fid = fieldId(on, name);
+      if (!fields.some((f: any) => f && f.id === fid)) {
+        fields.push({ id: fid, name, type: String(body.type || '').trim() || undefined,
+                      description: String(body.description || '').trim() || undefined });
+      }
+      const r = writeItem(p, { ...it, object: { ...it.object, fields } });
+      return sendJSON(res, r.ok ? 200 : 400, r.ok ? { ok: true, item: r.item, fieldId: fid } : { error: r.why });
+    }
     if (req.method === 'POST' && url.pathname === '/api/design/remove') {
       const body = await readBody(req);
       const p = String(body.path || '');
@@ -1167,7 +1195,13 @@ const server = http.createServer(async (req, res) => {
       const items = readDesign(p).items;
       const only: string[] = Array.isArray(body.ids) ? body.ids.map(String) : [];
       const wanted = only.length ? items.filter((i) => only.includes(i.id)) : items;
-      const drafts = tasksFrom(wanted, model);
+      // One task for the lot, or one each. A slice drawn as six elements is one
+      // piece of work; six tasks for it is six times the ceremony and one shared
+      // thing nobody owns.
+      const asSlice = body.slice === true;
+      const drafts = asSlice
+        ? [taskForSlice(wanted, model, typeof body.title === 'string' ? body.title : '')].filter(Boolean) as any[]
+        : tasksFrom(wanted, model);
       const written: string[] = [];
       for (const d of drafts) {
         const md = [
@@ -1175,7 +1209,7 @@ const server = http.createServer(async (req, res) => {
           d.body, '',
           `Touches: ${d.touches.join(', ')}`, '',
           '## Verify', '',
-          ...d.verify.map((v) => `- [ ] ${v}`), '',
+          ...d.verify.map((v: string) => `- [ ] ${v}`), '',
           '_Written from the design on the product map. Rebuild the model when the work is done —',
           'these checks are read from it, not from the diff._', '',
         ].join('\n');
@@ -2154,6 +2188,17 @@ const HTML = /* html */ `<!doctype html>
   .hm-e-t{font-family:var(--font-mono); font-size:10.5px; color:var(--ink-3); text-align:right}
   .hm-note{font-size:12px; color:var(--ink-3); margin-top:11px; line-height:1.6}
   @media (max-width:900px){ .hm-e{grid-template-columns:1fr; gap:2px} .hm-e-n,.hm-e-t{text-align:left} }
+  .dg-lf-l{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.06em; text-transform:uppercase;
+    color:var(--ink-3); align-self:center}
+  .dg-lf input{background:rgba(5,10,22,.8); border:1px solid var(--line); color:var(--ink-1);
+    padding:6px 10px; border-radius:0; font-size:12.5px; min-width:130px}
+  .dg-lf input:focus{outline:none; border-color:rgba(96,232,255,.5)}
+  .dg-hint{flex:1 1 320px; font-size:12.5px; color:#8fe8ff; line-height:1.55}
+  .dg-pick{max-width:560px}
+  .dg-pick-b{display:flex; flex-wrap:wrap; gap:8px; padding:16px 0 4px}
+  .dg-pick-o{cursor:pointer; border:1px solid var(--line); background:rgba(10,18,36,.6); color:var(--ink-1);
+    padding:10px 16px; border-radius:0; font-size:13.5px}
+  .dg-pick-o:hover{border-color:rgba(96,232,255,.5); color:var(--ink-0)}
   .dg-sum{display:flex; flex-wrap:wrap; gap:10px; margin:12px 0 14px}
   .dg-k{flex:1 1 170px; border:1px solid var(--line); background:rgba(10,18,36,.45); padding:12px 15px}
   .dg-k b{display:block; font-size:22px; color:var(--ink-0); font-variant-numeric:tabular-nums}
