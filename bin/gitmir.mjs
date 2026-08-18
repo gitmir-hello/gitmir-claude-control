@@ -71,13 +71,17 @@ function openBrowser(url) {
  * Candidates rather than a shell, so a path with a space in it stays one argument.
  */
 function runClaude(args, opts = {}) {
-  const names = process.platform === 'win32' ? ['claude.cmd', 'claude.exe', 'claude'] : ['claude'];
-  let last;
-  for (const name of names) {
-    try { return execFileSync(name, args, opts); }
-    catch (e) { last = e; if (e.code !== 'ENOENT') throw e; }
-  }
-  throw last;
+  if (process.platform !== 'win32') return execFileSync('claude', args, opts);
+
+  // On Windows the Claude CLI is claude.cmd, and since the 2024 command-injection
+  // fix Node refuses to execFile a .cmd at all — it fails with EINVAL rather than
+  // running it. Reported from a real machine as `spawnSync claude.cmd EINVAL`.
+  //
+  // So it has to go through cmd.exe, which means the quoting is ours to get right:
+  // with shell:true Node escapes nothing, and a Windows home directory is one
+  // space away from being two arguments.
+  const quote = (a) => (/[\s"^&|<>()%!]/.test(a) ? `"${String(a).replace(/"/g, '""')}"` : a);
+  return execFileSync('claude', args.map(quote), { ...opts, shell: true });
 }
 
 function git(args, opts = {}) {
@@ -222,7 +226,12 @@ function mcp(sub) {
         console.log('');
         return;
       }
-      die(`claude could not register it:\n    ${said.split('\n')[0] || String(e.message || e)}`);
+      // Whatever went wrong, leave the person with something they can run. The
+      // command below is what this function was trying to do, in a form they can
+      // paste into their own shell where the quoting is the shell's problem.
+      const manual = `claude mcp add -s ${scope} gitmir -- node "${path.join(DIR, 'mcp.ts')}"`;
+      die(`claude could not register it:\n    ${said.split('\n')[0] || String(e.message || e)}\n\n` +
+          `    Run this yourself — it is the same registration:\n      ${manual}`);
     }
     console.log('');
     if (scope === 'user') {
