@@ -80,8 +80,15 @@ function runClaude(args, opts = {}) {
   // So it has to go through cmd.exe, which means the quoting is ours to get right:
   // with shell:true Node escapes nothing, and a Windows home directory is one
   // space away from being two arguments.
+  // Not `shell: true`: Node deprecated passing args that way (DEP0190) precisely
+  // because it concatenates without escaping, and it prints that warning at the
+  // user. Call cmd.exe outright with one command line we quoted ourselves, and
+  // tell Node not to re-quote it on the way past.
   const quote = (a) => (/[\s"^&|<>()%!]/.test(a) ? `"${String(a).replace(/"/g, '""')}"` : a);
-  return execFileSync('claude', args.map(quote), { ...opts, shell: true });
+  const line = ['claude', ...args.map(quote)].join(' ');
+  // /d skips AutoRun scripts, /s makes cmd strip exactly the outer pair of quotes.
+  return execFileSync('cmd.exe', ['/d', '/s', '/c', `"${line}"`],
+    { ...opts, windowsVerbatimArguments: true });
 }
 
 function git(args, opts = {}) {
