@@ -639,6 +639,9 @@ const VIEW_HEAD = {
   spec:       ['Where the code does not do what the product says',
                'Every known deviation between the written rules and the running code, on the objects it sits on — so a change that touches one cannot be planned in ignorance of it.',
                'Accepting one records who decided and why. That is the difference between a product with known limits and a product with surprises.'],
+  design:     ['What the product should become',
+               'Elements you declare here are the same shape as the model, so the map draws them beside what exists and every declaration can be checked against the rebuilt model.',
+               'Add an element, say what data moves where, then turn it into tasks. The checks come from what you declared — code appearing is not the same as the thing you drew existing.'],
   changed:    ['How the product changed between two dates',
                'What the product gained, lost and renamed over a period — read from the versions of the model your repository already has.',
                'Pick two versions. Anything under "no longer in the model" is either finished work or a rebuild that lost its grip.'],
@@ -717,6 +720,8 @@ const MODEL_GROUPS = [
     views:[{key:'ownership',label:'Ownership'}] },
   { key:'trust', label:'How much to trust it', hint:'Where each answer came from, and which parts of the model to doubt.',
     views:[{key:'confidence',label:'Confidence'}] },
+  { key:'build', label:'What we are building', hint:'What the product should become, declared here — and how much of it exists yet.',
+    views:[{key:'design',label:'Design'}] },
   { key:'done',  label:'What actually happened', hint:'The product changing, in the order it changed.',
     views:[{key:'spec',label:'Spec vs code'},{key:'changed',label:'What changed'},{key:'mismatch',label:'Intended vs done'},{key:'timeline',label:'Timeline'},{key:'overview',label:'Overview'}] },
 ];
@@ -1459,6 +1464,261 @@ function countLinks(m){
   return n;
 }
 
+// What the product should become, declared on the map.
+//
+// Not a drawing tool. A drawing tool makes boxes, and nothing downstream can check
+// anything against a box. Here every element is the same shape as a model object —
+// same dimension, same id prefix, same relationship fields — so the moment the code
+// catches up, the declaration is checkable by looking it up rather than by reading
+// a picture. Positions are computed, as everywhere else: the product's own rule is
+// that a diagram somebody can drag into a preferred shape can be made to say
+// anything.
+let designData = null, designFor = null, designAdd = null, designOpen = null;
+
+async function loadDesign(pathStr, force){
+  if(!force && designData && designFor===pathStr) return designData;
+  try{
+    designData = await fetch('/api/design?path='+encodeURIComponent(pathStr)).then(r=>r.json());
+    designFor = pathStr;
+  }catch{ designData = { ok:false, items:[], conformance:{rows:[],total:0,present:0,differs:0,missing:0}, links:[] }; }
+  return designData;
+}
+
+const DESIGN_KINDS = [
+  ['function',  'Action',        'sf',   'Something the product does — a server function.'],
+  ['entity',    'Business object','ent', 'A thing the product is about, with fields.'],
+  ['route',     'Endpoint',      'rt',   'A contract something outside calls.'],
+  ['frontend',  'Screen',        'fe',   'What a person sees.'],
+  ['event',     'Event',         'ev',   'A signal one part raises and another reacts to.'],
+  ['process',   'Journey',       'proc', 'A path a person walks, step by step.'],
+  ['module',    'Area',          'mod',  'A part of the product, in the business’s words.'],
+];
+
+async function renderDesign(view, m, seq){
+  if(modelSrc){ view.innerHTML=viewHead('design')+'<div class="model-empty">A shared model is somebody else’s snapshot. Declare against your own project.</div>'; return; }
+  view.innerHTML=viewHead('design')+'<div class="model-empty">Reading what is declared…</div>';
+  const d = await loadDesign(selected, true);
+  if(seq!=null && !viewAlive(seq)) return;
+
+  const c = d.conformance || {rows:[],total:0,present:0,differs:0,missing:0};
+  const byId = new Map((d.items||[]).map(i=>[i.id,i]));
+  const st = new Map((c.rows||[]).map(r=>[r.id,r]));
+
+  let h = viewHead('design');
+
+  h += '<div class="dg-sum">'+
+       '<div class="dg-k"><b>'+c.total+'</b><span>declared here</span></div>'+
+       '<div class="dg-k ok"><b>'+c.present+'</b><span>built, and doing what was declared</span></div>'+
+       '<div class="dg-k'+(c.differs?' warn':'')+'"><b>'+c.differs+'</b><span>built, but not doing all of it</span></div>'+
+       '<div class="dg-k'+(c.missing?' bad':'')+'"><b>'+c.missing+'</b><span>not built yet</span></div>'+
+       '</div>';
+
+  h += '<div class="dg-bar">'+
+       '<button class="run dg-new">＋ Add an element</button>'+
+       (c.total-c.present > 0
+         ? '<button class="ghost dg-tasks">Turn '+(c.total-c.present)+' into tasks →</button>'
+         : '')+
+       '<span class="dg-note">Checks are written from what you declare. Rebuild the model when the work is done — they are read from it, not from the diff.</span>'+
+       '</div>';
+
+  h += '<div class="dg-form" id="dgForm"></div>';
+  h += (d.items||[]).length ? '<div class="proc-diagram" id="dgMap"></div>' : '';
+  h += '<div class="dg-list"></div>';
+  view.innerHTML = h;
+
+  // --- the picture, if there is anything to draw
+  if((d.items||[]).length && window.hudSceneDesign){
+    const el = view.querySelector('#dgMap');
+    // renderHud takes a finished scene; hudRenderSpec takes a graph and builds one.
+    // Handing a scene to the second produced a picture with no edges and no rows,
+    // because it was being read as a spec that happened to have none.
+    renderHud(el, hudSceneDesign(d.items, m, c, {
+      onSelect:(id)=>{ if(id && kindOf(id)) openContextPopup(kindOf(id), id); },
+    }), seq);
+  }
+
+  // --- the elements themselves
+  const list = view.querySelector('.dg-list');
+  if(!(d.items||[]).length){
+    list.innerHTML = '<div class="model-empty">Nothing declared yet. Add an element and say what data moves where — '+
+      'it becomes a task with checks, and the map draws it beside what already exists.</div>';
+  }
+  for(const it of (d.items||[])){
+    const r = st.get(it.id) || {state:'missing', links:[]};
+    const card = document.createElement('div');
+    card.className = 'dg-card ' + r.state;
+    const word = {present:'built', differs:'partly built', missing:'not built yet'}[r.state];
+    card.innerHTML =
+      '<div class="dg-top"><span class="dg-state '+r.state+'">'+word+'</span>'+
+        '<span class="dg-name">'+esc(it.object.name||it.id)+'</span>'+
+        '<span class="dg-kind">'+esc(hudTypeWordSafe(it.id))+'</span>'+
+        '<code class="dg-id">'+esc(it.id)+'</code>'+
+        '<button class="dg-x" title="Remove this declaration">✕</button></div>'+
+      (it.object.description? '<div class="dg-desc">'+esc(it.object.description)+'</div>':'')+
+      (it.note? '<div class="dg-why"><span>why</span>'+esc(it.note)+'</div>':'')+
+      '<div class="dg-links"></div>'+
+      '<div class="dg-addlink"></div>';
+    list.appendChild(card);
+
+    const lw = card.querySelector('.dg-links');
+    if((r.links||[]).length){
+      for(const l of r.links){
+        const row=document.createElement('div');
+        row.className='dg-link '+(l.held?'held':'open');
+        row.innerHTML='<span class="dg-l-k">'+esc(l.label)+'</span>'+
+          '<span class="dg-l-t">'+esc(labelOf(l.to,m)||l.to)+'</span>'+
+          '<span class="dg-l-s">'+(l.held?'in the model':'not in the model yet')+'</span>'+
+          '<button class="dg-l-x" data-k="'+esc(l.kind)+'" data-to="'+esc(l.to)+'" title="Remove">✕</button>';
+        lw.appendChild(row);
+      }
+    } else {
+      lw.innerHTML='<div class="dg-nolink">No data declared to move in or out of this yet.</div>';
+    }
+
+    card.querySelector('.dg-x').addEventListener('click', async ()=>{
+      await fetch('/api/design/remove',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({path:selected,id:it.id})});
+      renderDesign(view, m, seq);
+    });
+    lw.querySelectorAll('.dg-l-x').forEach(b=>b.addEventListener('click',()=>
+      dropLink(it, b.dataset.k, b.dataset.to, view, m, seq)));
+    card.querySelector('.dg-addlink').appendChild(linkAdder(it, d, m, view, seq));
+  }
+
+  view.querySelector('.dg-new').addEventListener('click', ()=>openAdder(view, d, m, seq));
+  const tb = view.querySelector('.dg-tasks');
+  if(tb) tb.addEventListener('click', async ()=>{
+    tb.disabled = true; tb.textContent = 'Writing…';
+    const r = await fetch('/api/design/tasks',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({path:selected})}).then(x=>x.json()).catch(()=>null);
+    if(r && r.ok){ toast(r.count+' task'+(r.count===1?'':'s')+' written to tasks/todo ✓'); refreshTasks(selected); }
+    else toast('Could not write the tasks', true);
+    renderDesign(view, m, seq);
+  });
+  if(designAdd) openAdder(view, d, m, seq);
+}
+
+// hudTypeWord lives in the scene file and is not exported; this is the same answer
+// for the one place the list needs it.
+function hudTypeWordSafe(id){
+  const k = kindOf(id);
+  return ({module:'area', entity:'business object', function:'action', route:'endpoint',
+           frontend:'screen', event:'event', process:'journey', statusFlow:'lifecycle',
+           reaction:'reaction', serverUnit:'unit', field:'field'})[k] || k || '';
+}
+
+function openAdder(view, d, m, seq){
+  designAdd = true;
+  const box = view.querySelector('#dgForm');
+  const areas = (m.modules||[]).map(x=>'<option value="'+esc(x.id)+'">'+esc(x.name||x.id)+'</option>').join('');
+  box.innerHTML =
+    '<div class="dg-f-h">A new element</div>'+
+    '<div class="dg-f-row">'+
+      '<label>What is it<select class="dg-f-kind">'+
+        DESIGN_KINDS.map(([k,l])=>'<option value="'+k+'">'+l+'</option>').join('')+'</select></label>'+
+      '<label>Name<input class="dg-f-name" placeholder="applyCoupon"></label>'+
+      '<label>Area<select class="dg-f-area"><option value="">—</option>'+areas+'</select></label>'+
+    '</div>'+
+    '<div class="dg-f-row wide">'+
+      '<label>What it does<input class="dg-f-desc" placeholder="Applies a coupon to an order before payment."></label>'+
+    '</div>'+
+    '<div class="dg-f-row wide">'+
+      '<label>Why you want it<input class="dg-f-note" placeholder="Finance needs a trace of every discount."></label>'+
+    '</div>'+
+    '<div class="dg-f-hint">'+esc(DESIGN_KINDS[0][3])+'</div>'+
+    '<div class="dg-f-act"><button class="run dg-f-go">Declare it</button>'+
+      '<button class="ghost dg-f-cancel">Cancel</button><span class="dg-f-err"></span></div>';
+  const kindEl = box.querySelector('.dg-f-kind');
+  kindEl.addEventListener('change', ()=>{
+    const k = DESIGN_KINDS.find(x=>x[0]===kindEl.value);
+    box.querySelector('.dg-f-hint').textContent = k ? k[3] : '';
+  });
+  box.querySelector('.dg-f-cancel').addEventListener('click', ()=>{ designAdd=null; box.innerHTML=''; });
+  box.querySelector('.dg-f-go').addEventListener('click', async ()=>{
+    const kind = kindEl.value;
+    const name = box.querySelector('.dg-f-name').value.trim();
+    if(!name){ box.querySelector('.dg-f-err').textContent = 'It needs a name — everything else refers to it by that.'; return; }
+    const dim = ({function:'serverFunctions',entity:'entities',route:'apiRoutes',frontend:'frontendUnits',
+                  event:'events',process:'processes',module:'modules'})[kind];
+    const object = { name, description: box.querySelector('.dg-f-desc').value.trim() };
+    const area = box.querySelector('.dg-f-area').value;
+    if(area && kind!=='module') object.moduleId = area;
+    const r = await fetch('/api/design',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({path:selected, kind, dim, object, note: box.querySelector('.dg-f-note').value.trim()})})
+      .then(x=>x.json()).catch(()=>null);
+    if(!r || !r.ok){ box.querySelector('.dg-f-err').textContent = (r&&r.error)||'Could not save it.'; return; }
+    designAdd = null;
+    renderDesign(view, m, seq);
+  });
+}
+
+// Declaring what moves. The choice of link kinds is filtered by what this element
+// is: an endpoint does not write a field, and offering that is how a model fills up
+// with things that cannot be true.
+function linkAdder(it, d, m, view, seq){
+  const wrap = document.createElement('div');
+  const kind = kindOf(it.id);
+  const usable = (d.links||[]).filter(L => (L.from||[]).includes(kind));
+  if(!usable.length){
+    wrap.innerHTML = '<div class="dg-nolink">Nothing moves in or out of a '+esc(hudTypeWordSafe(it.id))+' directly.</div>';
+    return wrap;
+  }
+  wrap.innerHTML =
+    '<div class="dg-lf">'+
+      '<select class="dg-lf-k">'+usable.map(L=>'<option value="'+esc(L.key)+'">'+esc(L.label)+'</option>').join('')+'</select>'+
+      '<select class="dg-lf-t"></select>'+
+      '<button class="ghost dg-lf-go">Declare</button>'+
+    '</div>';
+  const kEl = wrap.querySelector('.dg-lf-k'), tEl = wrap.querySelector('.dg-lf-t');
+  const fill = ()=>{
+    const L = usable.find(x=>x.key===kEl.value) || usable[0];
+    const want = new Set(L.to);
+    const opts = [];
+    // Targets from the model and from the design alike: you can declare a link to
+    // something else that has also only been declared, which is the normal case
+    // when a slice of product is drawn all at once.
+    const pools = [['model', m], ['design', d.design||{}]];
+    for(const [src, mm] of pools){
+      for(const dim of ['entities','serverFunctions','apiRoutes','frontendUnits','events']){
+        for(const o of (mm[dim]||[])){
+          if(want.has('field') && dim==='entities'){
+            for(const f of (o.fields||[])) opts.push([f.id, (o.name||o.id)+'.'+(f.name||f.id), src]);
+          }
+          if(want.has(kindOf(o.id))) opts.push([o.id, labelOf(o.id,m)||o.name||o.id, src]);
+        }
+      }
+    }
+    const seen=new Set();
+    tEl.innerHTML = opts.filter(([id])=>{ if(seen.has(id))return false; seen.add(id); return id!==it.id; })
+      .map(([id,label,src])=>'<option value="'+esc(id)+'">'+esc(label)+(src==='design'?'  (declared)':'')+'</option>').join('')
+      || '<option value="">nothing of that kind exists yet</option>';
+  };
+  kEl.addEventListener('change', fill); fill();
+  wrap.querySelector('.dg-lf-go').addEventListener('click', async ()=>{
+    const L = usable.find(x=>x.key===kEl.value); const to = tEl.value;
+    if(!L || !to) return;
+    const object = { ...it.object };
+    if(L.list){ const cur = Array.isArray(object[L.field]) ? object[L.field] : [];
+      if(!cur.includes(to)) object[L.field] = cur.concat(to); }
+    else object[L.field] = to;
+    await fetch('/api/design',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({path:selected, id:it.id, dim:it.dim, object, note:it.note})});
+    renderDesign(view, m, seq);
+  });
+  return wrap;
+}
+
+async function dropLink(it, key, to, view, m, seq){
+  const d = designData || {links:[]};
+  const L = (d.links||[]).find(x=>x.key===key); if(!L) return;
+  const object = { ...it.object };
+  if(L.list) object[L.field] = (object[L.field]||[]).filter(x=>x!==to);
+  else delete object[L.field];
+  await fetch('/api/design',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({path:selected, id:it.id, dim:it.dim, object, note:it.note})});
+  renderDesign(view, m, seq);
+}
+
 // Where the code does not do what the product says it does.
 //
 // Kept out of the model on purpose: the model is derived from code and rebuilt
@@ -1799,6 +2059,7 @@ async function renderModelView(){
   if(modelView==='mismatch') return renderMismatch(view, m, seq);
   if(modelView==='changed') return renderChanged(view, m, seq);
   if(modelView==='spec') return renderSpec(view, m, seq);
+  if(modelView==='design') return renderDesign(view, m, seq);
   view.innerHTML='';
   const box=document.createElement('div'); view.appendChild(box);
   if(modelView==='map'){

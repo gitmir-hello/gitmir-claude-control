@@ -285,6 +285,30 @@ own. They are served as MCP prompts too, so most clients surface them as slash c
 
 ---
 
+## Drawing what it should become
+
+The map is not only a picture of what exists. Declare an element on it — an action, a
+business object, an endpoint, a screen, an event — say what data moves in and out of it,
+and it is drawn beside the real thing in a colour that says it is not built yet.
+
+Declarations are the same shape as the model: same dimensions, same id prefixes, same
+relationship fields. That is what makes them checkable. Turning a design into tasks writes
+the checks from what was declared —
+
+```
+- [ ] `sf-apply-coupon` exists in .gitmir/model after a rebuild
+- [ ] the model records that applyCoupon writes Order.total
+- [ ] the model records that applyCoupon raises CouponApplied
+```
+
+— so a task cannot be called done because code appeared. The relationship has to be in the
+rebuilt model. Your agent reads the same thing over MCP with `gitmir_design`: what it is
+supposed to build before it starts, and how much of what it drew is real afterwards.
+
+Nothing is hand-placed. You say what exists and what moves; the layout is computed, as it
+is for the model — a picture somebody can drag into a preferred shape can be made to say
+anything.
+
 ## Where the code disagrees with the product
 
 Your agent reads the spec against the code and finds fifteen places they disagree. It

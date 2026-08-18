@@ -93,6 +93,8 @@ import { modelVersions, modelAt, diffModels } from './lib/history.js';
 import { readFindings, writeFinding, setFindingStatus, findingsSummary } from './lib/findings.js';
 import { readUsage, summarise, modelBytes, sourceBytes, record as recordUse, fileBytesFor } from './lib/usage.js';
 import { attention, caught, nextSkill } from './lib/attention.js';
+import { readDesign, writeItem, removeItem, designAsModel, takenIds, conformance,
+  tasksFrom, newId, LINKS } from './lib/design.js';
 
 // ---------- model ids carried by tasks ----------
 
@@ -1115,6 +1117,73 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 404, { error: 'not found' });
       }
     }
+    // What the product should become, drawn before it exists. Model-shaped on
+    // purpose: the map, the radius and the version comparison all work on it
+    // without being taught anything about designs.
+    if (req.method === 'GET' && url.pathname === '/api/design') {
+      const p = url.searchParams.get('path') || '';
+      if (!p) return sendJSON(res, 400, { error: 'no path' });
+      const d = readDesign(p);
+      const m = readModel(p);
+      const model = m.exists ? m.model : {};
+      return sendJSON(res, 200, {
+        ok: true,
+        items: d.items,
+        design: designAsModel(d.items),
+        conformance: conformance(d.items, model),
+        links: LINKS,
+      });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/design') {
+      const body = await readBody(req);
+      const p = String(body.path || '');
+      if (!p) return sendJSON(res, 400, { error: 'no path' });
+      const m = readModel(p);
+      const model = m.exists ? m.model : {};
+      const existing = readDesign(p).items;
+      // An id is allocated here rather than in the browser: only this side can see
+      // everything the model and the design have already spoken for.
+      const id = String(body.id || '') || newId(String(body.kind || 'function'),
+        String((body.object && body.object.name) || ''), takenIds(model, existing));
+      const r = writeItem(p, { id, dim: body.dim, object: body.object, note: body.note });
+      return sendJSON(res, r.ok ? 200 : 400, r.ok ? { ok: true, item: r.item } : { error: r.why });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/design/remove') {
+      const body = await readBody(req);
+      const p = String(body.path || '');
+      if (!p) return sendJSON(res, 400, { error: 'no path' });
+      const r = removeItem(p, String(body.id || ''));
+      return sendJSON(res, r.ok ? 200 : 400, r.ok ? { ok: true } : { error: r.why });
+    }
+    // Turning a design into work. The checks come from the declared relationships,
+    // so the task cannot be called done because code appeared — the relationship
+    // has to be in the rebuilt model.
+    if (req.method === 'POST' && url.pathname === '/api/design/tasks') {
+      const body = await readBody(req);
+      const p = String(body.path || '');
+      if (!p) return sendJSON(res, 400, { error: 'no path' });
+      const m = readModel(p);
+      const model = m.exists ? m.model : {};
+      const items = readDesign(p).items;
+      const only: string[] = Array.isArray(body.ids) ? body.ids.map(String) : [];
+      const wanted = only.length ? items.filter((i) => only.includes(i.id)) : items;
+      const drafts = tasksFrom(wanted, model);
+      const written: string[] = [];
+      for (const d of drafts) {
+        const md = [
+          `# ${d.title}`, '',
+          d.body, '',
+          `Touches: ${d.touches.join(', ')}`, '',
+          '## Verify', '',
+          ...d.verify.map((v) => `- [ ] ${v}`), '',
+          '_Written from the design on the product map. Rebuild the model when the work is done —',
+          'these checks are read from it, not from the diff._', '',
+        ].join('\n');
+        written.push(createTask(p, d.title, md));
+      }
+      return sendJSON(res, 200, { ok: true, written, count: written.length });
+    }
+
     // Everything the first screen needs, in one answer. Four round-trips to draw
     // one page is the kind of thing that makes a fast tool feel slow.
     if (req.method === 'GET' && url.pathname === '/api/overview') {
@@ -2085,6 +2154,64 @@ const HTML = /* html */ `<!doctype html>
   .hm-e-t{font-family:var(--font-mono); font-size:10.5px; color:var(--ink-3); text-align:right}
   .hm-note{font-size:12px; color:var(--ink-3); margin-top:11px; line-height:1.6}
   @media (max-width:900px){ .hm-e{grid-template-columns:1fr; gap:2px} .hm-e-n,.hm-e-t{text-align:left} }
+  .dg-sum{display:flex; flex-wrap:wrap; gap:10px; margin:12px 0 14px}
+  .dg-k{flex:1 1 170px; border:1px solid var(--line); background:rgba(10,18,36,.45); padding:12px 15px}
+  .dg-k b{display:block; font-size:22px; color:var(--ink-0); font-variant-numeric:tabular-nums}
+  .dg-k span{font-size:12px; color:var(--ink-3); line-height:1.45; display:block; margin-top:3px}
+  .dg-k.ok b{color:#7fe8b8} .dg-k.warn b{color:#ffc073} .dg-k.bad b{color:#b08cff}
+  .dg-k.warn{border-color:rgba(255,178,78,.4)} .dg-k.bad{border-color:rgba(150,130,255,.45)}
+  .dg-bar{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px}
+  .dg-note{font-size:12px; color:var(--ink-3); line-height:1.55; flex:1 1 320px}
+  .dg-form:not(:empty){border:1px solid rgba(96,232,255,.32); border-left-width:3px; background:rgba(47,216,255,.05);
+    padding:18px 20px; margin-bottom:16px}
+  .dg-f-h{font-size:15px; color:var(--ink-0); margin-bottom:12px}
+  .dg-f-row{display:flex; gap:12px; flex-wrap:wrap; margin-bottom:10px}
+  .dg-f-row.wide label{flex:1 1 100%}
+  .dg-f-row label{display:flex; flex-direction:column; gap:5px; flex:1 1 200px;
+    font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-3)}
+  .dg-f-row input,.dg-f-row select{background:rgba(5,10,22,.8); border:1px solid var(--line); color:var(--ink-1);
+    padding:8px 11px; border-radius:0; font-size:13px}
+  .dg-f-row input:focus,.dg-f-row select:focus{outline:none; border-color:rgba(96,232,255,.5)}
+  .dg-f-hint{font-size:12.5px; color:var(--ink-3); margin:2px 0 12px}
+  .dg-f-act{display:flex; align-items:center; gap:10px}
+  .dg-f-err{font-size:12.5px; color:#ff8ba1}
+  .dg-list{display:flex; flex-direction:column; gap:10px; margin-top:14px}
+  .dg-card{border:1px solid var(--line); border-left-width:3px; background:rgba(10,18,36,.45); padding:14px 16px}
+  .dg-card.missing{border-left-color:rgba(150,130,255,.7)}
+  .dg-card.differs{border-left-color:rgba(255,178,78,.7)}
+  .dg-card.present{border-left-color:rgba(96,246,176,.6)}
+  .dg-top{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+  .dg-state{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.09em; text-transform:uppercase;
+    border:1px solid var(--line); padding:2px 7px; color:var(--ink-3)}
+  .dg-state.missing{border-color:rgba(150,130,255,.6); color:#bcaaff}
+  .dg-state.differs{border-color:rgba(255,178,78,.55); color:#ffc073}
+  .dg-state.present{border-color:rgba(96,246,176,.5); color:#7fe8b8}
+  .dg-name{font-size:15px; color:var(--ink-0)}
+  .dg-kind{font-size:12px; color:var(--ink-3)}
+  .dg-id{font-family:var(--font-mono); font-size:10.5px; color:var(--ink-3)}
+  .dg-x{margin-left:auto; cursor:pointer; background:none; border:1px solid var(--line); color:var(--ink-3);
+    padding:2px 8px; border-radius:0; font-size:12px}
+  .dg-x:hover{border-color:rgba(255,64,96,.5); color:#ff8ba1}
+  .dg-desc{font-size:13px; color:var(--ink-2); line-height:1.6; margin-top:7px}
+  .dg-why{font-size:12.5px; color:var(--ink-3); line-height:1.6; margin-top:5px}
+  .dg-why span{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.08em; text-transform:uppercase; margin-right:8px}
+  .dg-links{display:flex; flex-direction:column; gap:4px; margin-top:10px}
+  .dg-link{display:flex; align-items:baseline; gap:10px; padding:6px 11px; border-left:2px solid var(--line);
+    background:rgba(5,10,22,.4); font-size:12.5px}
+  .dg-link.held{border-left-color:rgba(96,246,176,.55)}
+  .dg-link.open{border-left-color:rgba(150,130,255,.6)}
+  .dg-l-k{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.06em; text-transform:uppercase;
+    color:var(--ink-3); min-width:110px}
+  .dg-l-t{color:var(--ink-1)}
+  .dg-l-s{margin-left:auto; font-size:11.5px; color:var(--ink-3)}
+  .dg-link.open .dg-l-s{color:#bcaaff}
+  .dg-l-x{cursor:pointer; background:none; border:none; color:var(--ink-3); padding:0 2px; border-radius:0}
+  .dg-l-x:hover{color:#ff8ba1}
+  .dg-nolink{font-size:12.5px; color:var(--ink-3); margin-top:8px}
+  .dg-lf{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; padding-top:10px; border-top:1px solid var(--line)}
+  .dg-lf select{background:rgba(5,10,22,.8); border:1px solid var(--line); color:var(--ink-1);
+    padding:6px 10px; border-radius:0; font-size:12.5px; max-width:280px}
+  .dg-lf select:focus{outline:none; border-color:rgba(96,232,255,.5)}
   .sp-sum{display:flex; flex-wrap:wrap; gap:10px; margin:12px 0 14px}
   .sp-k{flex:1 1 140px; border:1px solid var(--line); background:rgba(10,18,36,.45); padding:12px 14px}
   .sp-k b{display:block; font-size:22px; color:var(--ink-0); font-variant-numeric:tabular-nums}

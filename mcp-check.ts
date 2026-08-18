@@ -40,6 +40,7 @@ examples/refund-shop, which ships with this repository.
   flag              record a finding (writes into the project)
   findings          where the code disagrees with the product
   attention         what needs a person, worked out from the model
+  design            what the product should become, and how much of it exists
   accept <id>       record a decision to live with one
   history           how the product changed over the last 30 days
   versions          every version of the model this project has
@@ -212,6 +213,7 @@ switch (cmd) {
     })); break;
   case 'findings': head('Where the code disagrees with the product'); show(await call('gitmir_findings', { status: arg || 'open' })); break;
   case 'attention': head('What needs a person');                    show(await call('gitmir_attention', {})); break;
+  case 'design':    head('What the product should become');          show(await call('gitmir_design', {})); break;
   case 'accept':   head('Deciding to live with one');
     show(await call('gitmir_accept_finding', { id: argv[2], status: 'accepted', by: 'mcp-check', why: 'Proving the decision path records a name and a reason.' })); break;
   case 'history':  head('How the product changed');           show(await call('gitmir_history', arg ? { days: Number(arg) } : {})); break;

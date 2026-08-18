@@ -58,6 +58,11 @@ const HUD_PALETTE = {
   // Known, and decided. A product with declared limits is not a product with
   // surprises, and the picture should not read them the same.
   gm_accepted:  { color: [190, 150, 90],  accent: [255, 226, 170], glow: 0.80 },
+  // Declared but not built. Deliberately not the colour of anything real: the
+  // whole point of drawing on this map is that you can tell at a glance which of
+  // it exists and which is a decision somebody has not carried out yet.
+  gm_proposed:  { color: [150, 130, 255], accent: [220, 210, 255], glow: 1.20 },
+  gm_partial:   { color: [255, 178, 78],  accent: [255, 226, 170], glow: 1.10 },
 };
 
 // Findings, by the model id they sit on. Set once per render from the dashboard;
@@ -124,7 +129,7 @@ function hudTypeWord(id) {
   const k = kindOf(id);
   return ({ entity: 'OBJECT', function: 'FUNCTION', route: 'ENDPOINT', frontend: 'SCREEN',
     event: 'EVENT', process: 'JOURNEY', statusFlow: 'LIFECYCLE', reaction: 'REACTION',
-    serverUnit: 'SERVICE', module: 'AREA' })[k] || 'OBJECT';
+    serverUnit: 'SERVICE', module: 'AREA', field: 'FIELD' })[k] || 'OBJECT';
 }
 
 /** One model object as a scene node: what it is, and enough of it to recognise. */
@@ -635,6 +640,70 @@ function hudSceneDataFlow(m, hooks) {
   return hudScene({
     title: 'DATA FLOW',
     subtitle: 'WHICH AREA MOVES DATA TO WHICH — OPEN ONE FOR THE CHAIN INSIDE IT',
+    nodes, edges, m, hooks,
+  });
+}
+
+
+/* -----------------------------------------------------------------------------
+ * The design — what the product should become.
+ *
+ * Drawn beside what exists, in the same picture, because the question the map has
+ * to answer is not "what did we draw" but "how much of it is real". Declared
+ * elements carry their own colour and say their state in a row; the model objects
+ * they reach into are drawn as they are.
+ * -------------------------------------------------------------------------- */
+function hudSceneDesign(items, m, conf, hooks) {
+  const state = new Map((conf && conf.rows || []).map((r) => [r.id, r]));
+  const nodes = [];
+  const edges = [];
+  const seen = new Set();
+
+  const stateWord = { present: 'BUILT', differs: 'PARTLY BUILT', missing: 'NOT BUILT YET' };
+
+  for (const it of items) {
+    const r = state.get(it.id) || { state: 'missing', links: [] };
+    const rows = [['STATE', stateWord[r.state] || 'NOT BUILT YET']];
+    if (it.object.moduleId) rows.push(['AREA', hudTitle(labelOf(it.object.moduleId, m) || it.object.moduleId)]);
+    rows.push(['KIND', hudTypeWord(it.id)]);
+    if (r.links && r.links.length) {
+      rows.push(['DECLARED', r.links.filter((l) => l.held).length + ' of ' + r.links.length + ' hold']);
+    }
+    nodes.push({
+      id: it.id, modelId: it.id,
+      kind: r.state === 'present' ? 'gm_entity' : r.state === 'differs' ? 'gm_partial' : 'gm_proposed',
+      title: hudTitle(it.object.name || it.id),
+      tag: 'DESIGN',
+      rows,
+      detailText: it.object.description || it.note || '',
+    });
+    seen.add(it.id);
+  }
+
+  // The model objects a design reaches into, so a declaration lands on something
+  // rather than pointing off the edge of the picture.
+  for (const it of items) {
+    const r = state.get(it.id);
+    for (const l of (r && r.links) || []) {
+      if (!seen.has(l.to)) {
+        const o = objById(l.to, m);
+        nodes.push({
+          id: l.to, modelId: l.to,
+          kind: o ? (HUD_KINDS_LABEL[kindOf(l.to)] || 'gm_function') : 'gm_wrong',
+          title: hudTitle(o ? (labelOf(l.to, m) || l.to) : l.to),
+          tag: o ? hudTypeWord(l.to) : 'NOT IN MODEL',
+          rows: o ? [['TYPE', hudTypeWord(l.to)]] : [['MISSING', 'NOT IN THE MODEL']],
+          detailText: o ? (o.description || '') : 'Declared here, but the model has no such object.',
+        });
+        seen.add(l.to);
+      }
+      edges.push([it.id, l.to, l.held ? l.label : l.label + ' (not yet)']);
+    }
+  }
+
+  return hudScene({
+    title: 'WHAT WE ARE BUILDING',
+    subtitle: 'DECLARED ON THIS MAP — DRAWN BESIDE WHAT ALREADY EXISTS',
     nodes, edges, m, hooks,
   });
 }

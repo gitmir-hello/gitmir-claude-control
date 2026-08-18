@@ -29,6 +29,7 @@ import { blastRadius, riskOf, kindOf, labelOf, moduleOf, objById, isJourney } fr
 import { modelVersions, modelAt, diffModels } from './lib/history.js';
 import { record as recordUse, fileBytesFor } from './lib/usage.js';
 import { attention, caught, nextSkill } from './lib/attention.js';
+import { readDesign, conformance } from './lib/design.js';
 import { readFindings, writeFinding, setFindingStatus, findingsByTarget, openOnly, findingsSummary,
   KINDS, SEVERITIES } from './lib/findings.js';
 
@@ -667,6 +668,48 @@ const TOOLS: Tool[] = [
       }
       L.push('');
       L.push(`Compared ${from.slice(0, 7)} against ${to.slice(0, 7)}; ${vs.length} versions exist, oldest ${vs[vs.length - 1].date}.`);
+      return { text: L.join('\n') };
+    },
+  },
+
+  {
+    name: 'gitmir_design',
+    annotations: READS,
+    title: 'What the product is supposed to become',
+    description:
+      'What somebody declared on the product map that the code does not have yet, and how much ' +
+      'of it exists. Call this before starting work — it says what you are supposed to build and ' +
+      'what each element has to end up doing — and again after finishing, once the model has been ' +
+      'rebuilt, to check that what you built is what was drawn. An element counts as done only ' +
+      'when the model records every relationship the design declared for it; code appearing is ' +
+      'not the same thing.',
+    inputSchema: { type: 'object', properties: { ...PROJECT_ARG } },
+    run(_args: Record<string, unknown>, project: string) {
+      const items = readDesign(project).items;
+      if (!items.length) {
+        return { text: 'Nothing is declared for this project. The Design view on the dashboard is where somebody draws what the product should become; until then there is nothing to build against.' };
+      }
+      const l = load(project);
+      const model = l.ok ? l.model : {};
+      const c = conformance(items, model);
+      const L: string[] = [];
+      L.push(`${c.total} element(s) declared: ${c.present} built and doing what was declared, ` +
+             `${c.differs} built but not doing all of it, ${c.missing} not built yet.`);
+      if (!l.ok) L.push('(No model here yet, so nothing can be counted as built.)');
+      L.push('');
+      for (const r of c.rows) {
+        const word = { present: 'DONE', differs: 'PARTLY DONE', missing: 'NOT BUILT' }[r.state];
+        L.push(`[${word}] ${r.name}  (${r.id}, ${r.dim.replace(/s$/, '')})`);
+        if (r.note) L.push(`  why: ${r.note}`);
+        for (const link of r.links) {
+          L.push(`  must ${link.label} ${link.to}${link.held ? '   — the model records this' : '   — NOT in the model'}`);
+        }
+        L.push('');
+      }
+      if (c.present < c.total) {
+        L.push('When you have written the code: rebuild the model with the gitmir-model skill, then call this');
+        L.push('again. These states are read from the model, so they only move when the model does.');
+      }
       return { text: L.join('\n') };
     },
   },
