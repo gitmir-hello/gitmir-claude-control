@@ -93,6 +93,9 @@ import { modelVersions, modelAt, diffModels } from './lib/history.js';
 import { readFindings, writeFinding, setFindingStatus, findingsSummary } from './lib/findings.js';
 import { readUsage, summarise, modelBytes, sourceBytes, record as recordUse, fileBytesFor } from './lib/usage.js';
 import { attention, caught, nextSkill } from './lib/attention.js';
+import { snapshot as auditSnapshot, transitions as auditTransitions, record as auditRecord,
+  readEvents as auditEvents, metrics as auditMetrics, byArea as auditByArea,
+  developerCount as auditDevelopers } from './lib/audit.js';
 import { readDesign, writeItem, removeItem, designAsModel, takenIds, conformance,
   tasksFrom, taskForSlice, fieldId, newId, LINKS } from './lib/design.js';
 
@@ -653,6 +656,87 @@ function countsOf(model: any): Record<string, number> {
     out[d] = ((model && model[d]) || []).length;
   }
   return out;
+}
+
+/* ---------------------------------------------------------------------------
+ * Watching the queue for the change audit.
+ *
+ * relay.ts already watches, but only while the team bridge is connected — which
+ * for a developer running this alone is never. The audit has to work for the
+ * person who installed the open source and told nobody, so it watches here.
+ *
+ * A cheap signature first: names and mtimes across four folders. Reading every
+ * task file of every project twice a second to notice that nothing happened is
+ * how a local tool earns a reputation for heating the laptop.
+ * ------------------------------------------------------------------------ */
+const auditState = new Map<string, { sig: string; snap: Map<string, any>; since: number }>();
+
+// Where a sent audit goes. Overridable so the send path can be exercised against a
+// stub; nothing in the interface offers to change it.
+const AUDIT_ENDPOINT = process.env.GITMIR_AUDIT_ENDPOINT || 'https://ide.gitmir.com/api/audit-request';
+
+let VERSION_CACHE: string | null = null;
+/** The commit this dashboard is running, short. Empty when it was not installed from git. */
+function gitmirVersion(): string {
+  if (VERSION_CACHE !== null) return VERSION_CACHE;
+  try {
+    VERSION_CACHE = execFileSync('git', ['rev-parse', '--short', 'HEAD'],
+      { cwd: import.meta.dirname, encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch { VERSION_CACHE = ''; }
+  return VERSION_CACHE;
+}
+
+function queueSig(projectPath: string): string {
+  const parts: string[] = [];
+  for (const col of ['todo', 'inprogress', 'verify', 'done']) {
+    const dir = path.join(projectPath, 'tasks', col);
+    let names: string[] = [];
+    try { names = fs.readdirSync(dir).filter((f) => f.endsWith('.md')).sort(); } catch { continue; }
+    for (const f of names) {
+      let mt = 0;
+      try { mt = Math.round(fs.statSync(path.join(dir, f)).mtimeMs); } catch {}
+      parts.push(col + '/' + f + ':' + mt);
+    }
+  }
+  return parts.join('|');
+}
+
+/** One pass over one project. Returns how many transitions were written. */
+function auditScan(projectPath: string): number {
+  let st = auditState.get(projectPath);
+  const sig = queueSig(projectPath);
+  if (st && st.sig === sig) return 0;
+  const now = Date.now();
+  const snap = auditSnapshot(projectPath);
+  if (!st) {
+    // First sight of a queue is not a pile of transitions: record where everything
+    // is, and count moves from here. Backfilling from mtimes would date a year of
+    // history to the minute somebody installed this.
+    const known = auditEvents(projectPath).length > 0;
+    auditState.set(projectPath, { sig, snap, since: now });
+    if (!known && snap.size) {
+      auditRecord(projectPath, [...snap.values()].map((t: any) => ({
+        t: new Date(now).toISOString(), change: t.change, task: t.id, from: null, to: t.col,
+        ...(t.attempt != null ? { attempt: t.attempt } : {}), ...(t.kind ? { kind: t.kind } : {}),
+      })));
+      return snap.size;
+    }
+    return 0;
+  }
+  const evs = auditTransitions(st.snap, snap, { since: st.since, now });
+  auditState.set(projectPath, { sig, snap, since: now });
+  return auditRecord(projectPath, evs);
+}
+
+let auditTimer: ReturnType<typeof setInterval> | null = null;
+function startAuditWatch() {
+  clearInterval(auditTimer ?? undefined);
+  auditTimer = setInterval(() => {
+    for (const p of loadProjects()) {
+      try { auditScan(p.path); } catch {}
+    }
+  }, 2000);
+  auditTimer.unref && auditTimer.unref();
 }
 
 const server = http.createServer(async (req, res) => {
@@ -1249,6 +1333,73 @@ const server = http.createServer(async (req, res) => {
 
     // What the object context did — measured. The product is sold on spending
     // less, and until this endpoint existed nothing in it counted anything.
+    /* The change audit: how much of a change was finished on the first pass, and
+     * how much was everything after it.
+     *
+     * `rows` carries the events each number was computed from, because a metric
+     * about how well people and an agent work together is exactly the kind of
+     * number somebody will want to argue with — and they should be able to. */
+    /* Sending the audit onward, from here rather than from the page.
+     *
+     * The browser cannot set an Origin on a cross-site request, and the receiving
+     * end scores a missing Origin as suspicious — a legitimate send would land in
+     * the spam pile. So the page posts here and this posts onward. Three attempts,
+     * because a person who typed their email and pressed a button should not be
+     * told to try again over one dropped connection. */
+    if (req.method === 'POST' && url.pathname === '/api/audit-request') {
+      const body = await readBody(req);
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(body.email || ''))) {
+        return sendJSON(res, 400, { error: 'an email address is needed' });
+      }
+      let last = 'no attempt was made';
+      for (let i = 0; i < 3; i++) {
+        if (i) await new Promise((r) => setTimeout(r, 700 * i));
+        try {
+          const r = await fetch(AUDIT_ENDPOINT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Origin: 'http://localhost:' + PORT },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(12000),
+          });
+          const out: any = await r.json().catch(() => ({}));
+          // A refusal is an answer, not a network fault: retrying a 400 or a 429
+          // three times only makes the rate limit worse.
+          if (r.status >= 400 && r.status < 500) return sendJSON(res, r.status, out.error ? out : { error: 'refused (' + r.status + ')' });
+          if (!r.ok) { last = 'the site answered ' + r.status; continue; }
+          return sendJSON(res, 200, { ok: true, ...out });
+        } catch (e: any) { last = String(e?.message || e); }
+      }
+      return sendJSON(res, 502, { error: last });
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/audit') {
+      const p = url.searchParams.get('path') || '';
+      if (!p) return sendJSON(res, 400, { error: 'no path' });
+      const days = Math.min(180, Math.max(1, Number(url.searchParams.get('days')) || 30));
+      const idle = Math.min(24, Math.max(1, Number(url.searchParams.get('idle')) || 4));
+      // Fold in anything that moved since the last sweep, so opening the screen
+      // never shows a state older than the queue on disk.
+      try { auditScan(p); } catch {}
+      const events = auditEvents(p);
+      const m = auditMetrics(events, { periodDays: days, idleCutoffHours: idle });
+      const model: any = readModel(p).model || {};
+      const areas: Record<string, string> = {};
+      // The dimension is called `modules` in the model and shown as Areas everywhere else.
+      for (const a of (model.modules || model.areas || [])) if (a && a.id) areas[a.id] = a.name || a.id;
+      return sendJSON(res, 200, {
+        ok: true, ...m,
+        idleCutoffHours: idle, periodDays: days,
+        areas: auditByArea(m.rows, areas),
+        // How many, never who — see lib/audit.js. Absent rather than zero when this
+        // is not a git checkout: a reported zero developers reads as a broken sender.
+        developers: auditDevelopers(p, days) || undefined,
+        // Which build produced these numbers, so a metric can be traced to the code
+        // that computed it after the definitions change.
+        version: gitmirVersion(),
+        watching: auditState.has(p),
+      });
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/usage') {
       const p = url.searchParams.get('path') || '';
       if (!p) return sendJSON(res, 400, { error: 'no path' });
@@ -1636,6 +1787,8 @@ server.listen(PORT, '127.0.0.1', () => {
   }
   const addr = `http://localhost:${PORT}`;
   console.log(`\n  GitMir Local  ->  ${addr}\n  (Ctrl+C to stop)\n`);
+  // The audit only has numbers if somebody was watching while the work happened.
+  startAuditWatch();
   const opener = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', addr]]
     : process.platform === 'darwin' ? ['open', [addr]]
     : ['xdg-open', [addr]];
@@ -2661,6 +2814,36 @@ const HTML = /* html */ `<!doctype html>
   .ov-n{font-size:26px; font-weight:700; color:var(--txt)}
   .ov-l{color:var(--dim); font-size:12px; margin-top:2px}
   .ov-sec{font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:var(--dim); margin:18px 0 10px}
+  /* The change audit. Numbers a person will argue with, so each one opens. */
+  .au-bar{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px}
+  .au-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(196px,1fr)); gap:10px}
+  .au-card{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px}
+  .au-card>summary{list-style:none; cursor:pointer}
+  .au-card>summary::-webkit-details-marker{display:none}
+  .au-k{font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--dim)}
+  .au-v{font-size:28px; font-weight:700; color:var(--txt); margin-top:4px; font-variant-numeric:tabular-nums}
+  .au-v small{font-size:14px; font-weight:600; color:var(--dim); margin-left:3px}
+  .au-h{color:var(--dim); font-size:12px; margin-top:4px; line-height:1.45}
+  .au-from{margin-top:10px; padding-top:10px; border-top:1px solid var(--line); color:var(--dim); font-size:12px; line-height:1.6}
+  .au-from b{color:var(--txt); font-weight:600}
+  .au-thin{color:var(--dim); font-size:13px; line-height:1.6; background:var(--panel); border:1px solid var(--line);
+           border-radius:10px; padding:14px; max-width:78ch}
+  .au-rows{display:flex; flex-direction:column; gap:6px}
+  .au-row{display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; background:var(--panel);
+          border:1px solid var(--line); border-radius:10px; padding:10px 12px; font-size:13px}
+  .au-row .n{color:var(--dim); font-variant-numeric:tabular-nums; white-space:nowrap}
+  .au-tab{width:100%; border-collapse:collapse; font-size:12.5px}
+  .au-tab th{text-align:left; color:var(--dim); font-weight:500; padding:6px 10px 6px 0; white-space:nowrap}
+  .au-tab td{padding:6px 10px 6px 0; border-top:1px solid var(--line); font-variant-numeric:tabular-nums}
+  .au-priv{color:var(--dim); font-size:12px; line-height:1.6; margin-top:16px; max-width:78ch}
+  .au-form{display:grid; gap:10px; max-width:520px; margin-top:12px}
+  .au-form input,.au-form textarea{background:var(--panel); border:1px solid var(--line); border-radius:8px;
+    padding:9px 11px; color:var(--txt); font:inherit; font-size:13px; width:100%}
+  .au-form textarea{min-height:72px; resize:vertical}
+  .au-pay{background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px;
+    font-family:var(--font-mono); font-size:11.5px; line-height:1.5; max-height:260px; overflow:auto; white-space:pre; color:var(--dim)}
+  .au-err{color:#e0654e; font-size:12.5px}
+  .au-hp{position:absolute; left:-9999px; width:1px; height:1px; opacity:0}
   .ov-mods{display:flex; flex-direction:column; gap:6px}
   .ov-mod{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; font-size:14px}
   .ov-mod span{display:block; color:var(--dim); font-size:12px; margin-top:2px}

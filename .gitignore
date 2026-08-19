@@ -4,6 +4,10 @@
 # including the shipped example, where they would be one developer's test run.
 examples/*/.gitmir/usage.jsonl
 examples/*/.gitmir/footprint.json
+# Same for the change audit: whoever runs the example generates their own events,
+# and shipping one machine's queue history as though it were the example's is a lie
+# about a screen whose whole value is that the numbers are yours.
+examples/*/.gitmir/audit/
 projects.json
 team.json
 .claude/

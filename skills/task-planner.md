@@ -49,6 +49,7 @@ Create `tasks/todo/NNN-<slug>.md` (zero-padded number prefix so they run in orde
     # <short task title>
 
     Type: build
+    Change: refunds
     Touches: ent-order, sf-refund-order, ev-order-refunded
 
     ## Context
@@ -62,6 +63,30 @@ Create `tasks/todo/NNN-<slug>.md` (zero-padded number prefix so they run in orde
 
     ## Verify
     <the numbered steps that prove it works — see below. MANDATORY.>
+
+## The `Change:` line
+
+One short slug naming **the request all these tasks came from**, identical on
+every task in the batch. Lowercase, hyphens, a few words: `refunds`,
+`checkout-guest-mode`, `invoice-pdf`.
+
+This is what makes the work measurable. A request rarely produces one task: it
+produces a task, then a fix task after the person says "not like that", then
+another after review. Grouped by `Change:`, that reads as one change with three
+rounds — which is the truth. Ungrouped it reads as three unrelated tasks, and the
+one number worth knowing (how much of this was finished on the first pass, and how
+much was the person pushing the agent to the finish) cannot be computed at all.
+
+Rules that matter:
+
+- **Same request, same slug** — including for fix tasks written later, and
+  including when the person changes their mind mid-way. A changed mind is part of
+  the same change; that is exactly what the measurement is for.
+- **New request, new slug** — even if it touches the same objects.
+- Never put a person's name, a ticket assignee or a machine in it. The record this
+  feeds cuts work by process and by area, never by person.
+
+Omit the line only if you genuinely cannot tell what the request was.
 
 ## The `Touches:` line
 

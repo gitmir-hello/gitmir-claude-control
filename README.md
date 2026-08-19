@@ -100,6 +100,43 @@ against 299 KB of source — and you can open the record and check every line.
 The record never leaves the machine. It is the file that lets you verify the
 no-telemetry claim rather than take it.
 
+---
+
+## How much of a change was first-pass work
+
+A request rarely lands in one pass. It lands, somebody says *that is not what I
+meant*, and the rest is a person walking the agent to the finish. Those two halves
+cost differently, and are almost always reported as one number: "the feature took
+four days".
+
+The **Audit** tab separates them, from nothing but the moves your tasks make
+between `todo → in progress → verify → done`:
+
+```
+FIRST-PASS RATIO       50%      ITERATIONS PER CHANGE  0.5
+AFTER THE FIRST PASS  7.3h      REVIEW CYCLES            8
+FIRST PASS            2.7h      LATE DISCOVERIES         2
+
+WHERE THE TIME CONCENTRATES
+  Search           4.8h after first pass · 2 changes
+  Billing rules    2.3h after first pass · 1 change
+```
+
+Every number opens to show what it was computed from, and the screen states the
+rules it applied rather than assuming you trust them: which changes were in the
+sample, and how many stretches the idle cutoff refused to count — because a queue
+move cannot tell a night from six hours of unbroken work, and pretending otherwise
+would be the easiest place in this product to lie.
+
+Below four changes it says *not enough data* in words instead of showing a
+confident `0%`.
+
+**It cuts by area of the product, never by person.** There is no per-person number
+in the screen, the API, the export, or `.gitmir/audit/events.jsonl` — which
+carries no name, no email and no machine. That is not a default; it is the design.
+
+**→ [Every definition, and what each one refuses to claim](docs/CHANGE-AUDIT.md)**
+
 ## What you get
 
 **1 · Understand the product.** Ask what checkout depends on, where a business rule is

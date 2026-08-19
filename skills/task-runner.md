@@ -138,6 +138,9 @@ quietly misleads every session after this one, and the dashboard will show it as
         # Fix: <what is broken, in a few words>
 
         Type: fix
+        Change: <copy the parent task's `Change:` line VERBATIM — a fix is part of
+                 the same change, not a new one. If the parent has no Change: line,
+                 omit it here too.>
         Fixes: <the original task's id — its filename WITHOUT the .md suffix,
                 e.g. 001-add-refund-button — this is what links the two>
         Attempt: 1
@@ -161,6 +164,11 @@ quietly misleads every session after this one, and the dashboard will show it as
 
 A failed verification is **not** a reason to stop — it is ordinary queue work. Write the
 fix task and carry on with the loop.
+
+`Change:` and `Attempt:` are copied for different reasons and must not be confused:
+`Attempt:` counts how many times you have tried this same failure, and stops you at
+three. `Change:` never increases — it is the name of the request, and it stays the
+same through every fix, so the whole round can be counted as one change afterwards.
 
 **Do not loop forever.** Copy `Attempt:` from the fix task you are repairing and
 increase it by one. If a third attempt at the same failure fails, stop (stop reason 3),

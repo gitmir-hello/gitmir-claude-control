@@ -323,7 +323,7 @@ function parseCriteriaResults(md: string): CritResult[] {
 // `Type:`, `Fixes:` and `Attempt:` headers the planner/runner write, lifted into
 // structured fields so the web view never has to parse a task body.
 /** Structured task metadata the relay server reads — the key names are a contract. */
-interface TaskMeta { kind?: string; fixes?: string; attempt?: number }
+interface TaskMeta { kind?: string; fixes?: string; attempt?: number; change?: string }
 function parseMeta(md: string): TaskMeta {
   const head = String(md || '').split('\n').slice(0, 12).join('\n');
   const kind = (head.match(/^\s*Type:\s*(build|verify|fix)\s*$/im) || [])[1];
@@ -335,6 +335,11 @@ function parseMeta(md: string): TaskMeta {
   // the task the web app already has.
   if (fixesRaw) meta.fixes = fixesRaw.replace(/\.md$/i, '').trim().slice(0, 200);
   if (!Number.isNaN(attempt)) meta.attempt = attempt;
+  // Which request this task belongs to. `Fixes:` says which task is being fixed;
+  // `Change:` says what the whole round was about, and survives a developer saying
+  // "you misunderstood" — which produces a new task that fixes nothing.
+  const changeRaw = (head.match(/^\s*Change:\s*(.+?)\s*$/im) || [])[1];
+  if (changeRaw) meta.change = changeRaw.replace(/\.md$/i, '').trim().slice(0, 200);
   return meta;
 }
 

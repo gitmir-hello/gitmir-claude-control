@@ -163,6 +163,7 @@ const IPATH = {
   tasks:    "M9 11l3 3 8-8M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11",
   schema:   "M5 4h5v4H5zM14 4h5v4h-5zM9 16h6v4H9zM7 8v4h10V8M12 12v4",
   columns:  "M4 4h7v16H4zM13 4h7v16h-7z",
+  gauge:    "M4 20V10M10 20V4M16 20v-7M22 20V8M3 20h18",
   user:     "M20 21a8 8 0 0 0-16 0M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
   eye:      "M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
   refresh:  "M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5",
@@ -275,6 +276,7 @@ const RAIL = [
   { tab:'tasks',    ic:'tasks',    l:'Tasks' },
   { tab:'model',    ic:'schema',   l:'Model',   badge:'modelBadge' },
   { tab:'queue',    ic:'columns',  l:'Queue',   badge:'queueBadge' },
+  { tab:'audit',    ic:'gauge',    l:'Audit' },
   { tab:'team',     ic:'user',     l:'Team',    badge:'teamBadge' },
   { tab:'preview',  ic:'eye',      l:'Preview', only:'preview' },
 ];
@@ -305,6 +307,7 @@ function setTab(tab){
   if(tab==='home' && selected) renderHome(selected);
   if(tab==='model' && selected) loadModel(selected);
   if(tab==='queue' && selected){ loadQueue(selected); queueTimer=setInterval(()=>{ if(selected && activeTab==='queue') loadQueue(selected); }, 4000); }
+  if(tab==='audit' && selected) renderChangeAudit(document.getElementById('auditView'), null, ++modelViewSeq);
   if(tab==='team'){ renderTeam(); teamPoll(); }
   if(tab==='preview') pvInit();
 }
@@ -320,6 +323,7 @@ function renderDetail(){
   const wrap = document.createElement('div'); wrap.className='detail-wrap';
   wrap.innerHTML =
     '<div class="pane" data-pane="home"><div id="homeView"></div></div>' +
+    '<div class="pane" data-pane="audit"><div id="auditView"></div></div>' +
     '<div class="pane" data-pane="settings">' +
       '<div class="field"><div class="row-lbl"><label>Name</label><span class="saved" id="savedN">saved ✓</span></div>' +
         '<input class="f-name" id="fName"></div>' +
@@ -603,6 +607,9 @@ async function copySkill(name, title){
 // the same place, in the same order: what it is, what it lets you decide, and
 // how to work it. Written once here so no view can quietly ship without them.
 const VIEW_HEAD = {
+  audit:      ['How much of a change was first-pass work',
+               'Every request produces a task, then the rounds after it. This separates the two: what the agent finished before anyone objected, and what it took to get the rest over the line.',
+               'Open any number to see what it was computed from. Time is counted from queue moves, and a gap longer than the idle cutoff is not counted as work.'],
   map:        ['The product as its parts',
                'Start any conversation here: what the product is made of, and what crosses between the parts.',
                'Hover a card for its controls. OPEN goes inside an area, CONTEXT gives you its context and a task.'],
@@ -4172,4 +4179,218 @@ async function drawImpactGraph(box, named, m, seq, task){
     : null;
   renderHud(d, scene, seq);
   if(seq!=null && !viewAlive(seq)) box.innerHTML='';
+}
+
+// ----- Change audit -----
+// The one screen that measures the thing the product is sold on. A request rarely
+// lands in one pass: it lands, somebody says "not like that", and the rest is the
+// person walking the agent to the finish. Both halves are timed separately here,
+// grouped by the request rather than by the person — deliberately, and permanently:
+// there is no per-person cut in this screen, the API or the export, and there is
+// not going to be one.
+let caDays = 7, caIdle = 4, caData = null;
+
+const caHrs = (min)=>{
+  if(!min) return '0<small>m</small>';
+  if(min < 90) return Math.round(min)+'<small>m</small>';
+  const h = min/60;
+  return (h<10 ? h.toFixed(1) : Math.round(h))+'<small>h</small>';
+};
+const caPlain = (min)=> !min ? '0m' : (min<90 ? Math.round(min)+'m' : (min/60<10 ? (min/60).toFixed(1) : Math.round(min/60))+'h');
+
+async function renderChangeAudit(view, m, seq){
+  view.innerHTML = viewHead('audit') + '<div class="au-thin">Reading the queue…</div>';
+  let d;
+  try{
+    const r = await fetch('/api/audit?path='+encodeURIComponent(selected)+'&days='+caDays+'&idle='+caIdle);
+    d = await r.json();
+  }catch(e){ d = {error:String(e&&e.message||e)}; }
+  if(seq!==modelViewSeq) return;
+  caData = d;
+
+  let html = viewHead('audit');
+  html += '<div class="au-bar">';
+  for(const n of [7,30,90]) html += '<button class="epill'+(caDays===n?' on':'')+'" data-days="'+n+'">'+n+' days</button>';
+  html += '<span style="flex:1"></span><span class="au-k">idle cutoff</span>';
+  for(const n of [2,4,8]) html += '<button class="epill'+(caIdle===n?' on':'')+'" data-idle="'+n+'">'+n+'h</button>';
+  html += '</div>';
+
+  if(d.error){ view.innerHTML = html + '<div class="au-thin">Could not read the record: '+esc(d.error)+'</div>'; return; }
+
+  const rows = d.rows||[];
+  // Not enough data is said out loud. A pretty zero here would be the tool lying
+  // about the one thing it exists to measure.
+  if(rows.length < 4){
+    html += '<div class="au-thin">'
+      + (rows.length===0
+          ? 'Nothing has moved through the queue yet in this window. The audit fills itself in as work happens — no setup, nothing to switch on.'
+          : '<b>'+rows.length+' change'+(rows.length===1?'':'s')+' so far.</b> The numbers become meaningful once enough repeated work has gone through the queue. '
+            + 'How much is enough depends on your work, and we do not claim a figure for it.')
+      + '<br><br>What is being collected: every move a task makes between <code>todo → in progress → verify → done</code>, '
+      + 'grouped by the <code>Change:</code> line on the task. Nothing else, and nothing about who did it.</div>';
+    if(rows.length) html += caRowsTable(rows);
+    html += caPrivacy(d);
+    view.innerHTML = html;
+    caBind(view, m, seq);
+    return;
+  }
+
+  const cards = [
+    ['First-pass ratio', Math.round((d.firstPassRatio||0)*100)+'<small>%</small>',
+     'Changes that reached verify once and were accepted — no round trips.',
+     'Of <b>'+d.changes+'</b> changes in the window, <b>'+rows.filter(r=>r.iterations===0&&r.reachedVerify).length+'</b> went through verify once. '
+     + 'A change that never reached verify is not counted either way.'],
+    ['After the first pass', caHrs(d.afterFirstPassMinutes),
+     'Time between the first verify and the change finally settling.',
+     'Summed across <b>'+d.changes+'</b> changes, from each one’s first entry into verify to its last settled done. '
+     + 'Gaps longer than <b>'+d.idleCutoffHours+'h</b> are dropped — a change left overnight is not work.'],
+    ['First pass', caHrs(d.firstPassMinutes),
+     'Time from starting a change to putting it up for verification the first time.',
+     'From the first move into <b>in progress</b> to the first move into <b>verify</b>, per change, summed. Same idle cutoff.'],
+    ['Iterations per change', (d.iterationsPerChange||0).toFixed(1),
+     'How many times work came back from verify.',
+     '<b>'+rows.reduce((s,r)=>s+r.iterations,0)+'</b> returns from verify across <b>'+d.changes+'</b> changes.'],
+    ['Review cycles', String(d.reviewCycles||0),
+     'Every entry into verify, first and repeat.',
+     'Counted as moves into <b>verify</b>. A change reviewed three times contributes three.'],
+    ['Late discoveries', String(d.lateDiscoveries||0),
+     'Work that appeared only after the change had already been put up for review.',
+     'Tasks whose first event is later than their change’s first verify — <b>'+d.lateDiscoveries+'</b> of them.'],
+  ];
+  html += '<div class="au-priv" style="margin:0 0 12px">Over <b>'+d.periodDays+' days</b>, <b>'+d.changes+'</b> change'+(d.changes===1?'':'s')+'. '
+       +  'A change counts if it <i>started</i> inside the window, whole — one that began earlier is left out rather than measured from its middle. '
+       +  'Within a change, a gap longer than the <b>'+d.idleCutoffHours+'h</b> cutoff is not counted as work'
+       +  (d.droppedGaps ? ', which excluded <b>'+d.droppedGaps+' stretch'+(d.droppedGaps===1?'':'es')+'</b> worth '+caPlain(d.droppedMinutes)
+            +  ' — a queue move cannot tell a night from a long unbroken sitting, so neither is counted. Widen the cutoff if your work runs in longer stretches.' : '.')
+       +  '</div>';
+  html += '<div class="au-grid">';
+  for(const [k,v,hint,from] of cards){
+    html += '<details class="au-card"><summary><div class="au-k">'+esc(k)+'</div><div class="au-v">'+v+'</div>'
+         +  '<div class="au-h">'+esc(hint)+'</div></summary>'
+         +  '<div class="au-from">'+from+'</div></details>';
+  }
+  html += '</div>';
+
+  if((d.areas||[]).length){
+    html += '<div class="ov-sec">Where the time concentrates</div><div class="au-rows">';
+    for(const a of d.areas.slice(0,10)){
+      html += '<div class="au-row"><span>'+esc(a.name||a.area)+'</span>'
+           +  '<span class="n">'+caPlain(a.afterFirstPassMinutes)+' after first pass · '+a.changes+' change'+(a.changes===1?'':'s')+'</span></div>';
+    }
+    html += '</div>';
+  }
+
+  html += caRowsTable(rows);
+  html += caPrivacy(d);
+  html += '<div class="ov-sec">Talk it through</div>'
+       +  '<div class="au-thin">These numbers say where time goes. What actually shortens it depends on how your work is shaped — '
+       +  'send the audit and we will read it and write back.<br><br>'
+       +  '<button class="btn" id="au-send">Discuss these results</button></div>'
+       +  '<div id="au-form"></div>';
+
+  view.innerHTML = html;
+  caBind(view, m, seq);
+}
+
+function caRowsTable(rows){
+  let h = '<div class="ov-sec">The changes these came from</div><div class="au-thin" style="max-width:none; overflow-x:auto">'
+        + '<table class="au-tab"><tr><th>Change</th><th>First pass</th><th>After</th><th>Returns</th><th>Reviews</th><th>Late</th><th>Settled</th></tr>';
+  for(const r of rows.slice(0,40)){
+    h += '<tr><td>'+esc(r.change)+'</td><td>'+caPlain(r.firstPassMinutes)+'</td><td>'+caPlain(r.afterFirstPassMinutes)
+      +  '</td><td>'+r.iterations+'</td><td>'+r.reviewCycles+'</td><td>'+r.lateDiscoveries+'</td><td>'+(r.settled?'yes':'not yet')+'</td></tr>';
+  }
+  h += '</table>';
+  if(rows.length>40) h += '<div style="margin-top:8px">Showing the 40 most recent of '+rows.length+'.</div>';
+  return h + '</div>';
+}
+
+function caPrivacy(d){
+  return '<div class="au-priv"><b>What this records.</b> Queue moves only: which task went to which column, when, and the '
+    + '<code>Change:</code> it belongs to. The file is <code>.gitmir/audit/events.jsonl</code> in your project — it carries no name, '
+    + 'no email and no machine, and the audit is cut by area of the model, never by person.<br>'
+    + '<b>What leaves this machine.</b> Nothing, unless you press the button below and send it: then the numbers on this screen '
+    + 'and the fields you type, shown in full before you send. Your code and your model stay here.'
+    + (d.developers>1 ? '<br><b>'+d.developers+' people</b> committed to this repository in the window — counted from git at this moment, as a number only; no name is stored or sent.' : '')
+    + '</div>';
+}
+
+function caBind(view, m, seq){
+  view.querySelectorAll('[data-days]').forEach(b=>b.addEventListener('click',()=>{ caDays=+b.dataset.days; renderChangeAudit(view,m,seq); }));
+  view.querySelectorAll('[data-idle]').forEach(b=>b.addEventListener('click',()=>{ caIdle=+b.dataset.idle; renderChangeAudit(view,m,seq); }));
+  const send = view.querySelector('#au-send');
+  if(send) send.addEventListener('click',()=> caForm(view.querySelector('#au-form')));
+}
+
+// The form that sends the audit. Two rules it must not break: the person sees the
+// exact bytes before they leave, and a failed send never eats what they typed.
+function caForm(host){
+  if(!host || !caData) return;
+  if(host.dataset.open==='1'){ host.innerHTML=''; host.dataset.open='0'; return; }
+  host.dataset.open='1';
+  const opened = Date.now();
+  host.innerHTML =
+    '<div class="au-form">'
+    + '<label class="au-k">Email <span style="color:#e0654e">·</span> required</label><input id="ca-email" type="email" autocomplete="email">'
+    + '<label class="au-k">Name</label><input id="ca-name" autocomplete="name">'
+    + '<label class="au-k">Company</label><input id="ca-co" autocomplete="organization">'
+    + '<label class="au-k">Anything you want us to look at</label><textarea id="ca-note"></textarea>'
+    + '<input class="au-hp" id="ca-hp" tabindex="-1" autocomplete="off" aria-hidden="true">'
+    + '<div class="au-k">Exactly what gets sent</div><div class="au-pay" id="ca-pay"></div>'
+    + '<div class="au-err" id="ca-err" style="display:none"></div>'
+    + '<div style="display:flex; gap:8px"><button class="btn" id="ca-go">Send</button>'
+    + '<button class="btn ghost" id="ca-x">Cancel</button></div>'
+    + '</div>';
+
+  const payload = ()=> ({
+    kind: 'audit',
+    email: (host.querySelector('#ca-email').value||'').trim(),
+    name: (host.querySelector('#ca-name').value||'').trim() || undefined,
+    company: (host.querySelector('#ca-co').value||'').trim() || undefined,
+    note: (host.querySelector('#ca-note').value||'').trim() || undefined,
+    hp: host.querySelector('#ca-hp').value || '',
+    ms: Date.now()-opened,
+    audit: {
+      periodDays: caData.periodDays, changes: caData.changes,
+      developers: caData.developers,   // undefined when this is not a git checkout — the key drops out
+      firstPassRatio: Math.round((caData.firstPassRatio||0)*1000)/1000,
+      firstPassMinutes: Math.round(caData.firstPassMinutes||0),
+      afterFirstPassMinutes: Math.round(caData.afterFirstPassMinutes||0),
+      iterationsPerChange: Math.round((caData.iterationsPerChange||0)*100)/100,
+      reviewCycles: caData.reviewCycles, lateDiscoveries: caData.lateDiscoveries,
+      idleCutoffHours: caData.idleCutoffHours,
+      areas: (caData.areas||[]).slice(0,10).map(a=>({ area:a.area, afterFirstPassMinutes:Math.round(a.afterFirstPassMinutes) })),
+    },
+    gitmir: { version: caData.version||'', generatedAt: new Date().toISOString() },
+  });
+  const paint = ()=>{ host.querySelector('#ca-pay').textContent = JSON.stringify(payload(), null, 2); };
+  paint();
+  host.querySelectorAll('input,textarea').forEach(el=>el.addEventListener('input', paint));
+
+  host.querySelector('#ca-x').addEventListener('click', ()=>{ host.innerHTML=''; host.dataset.open='0'; });
+  host.querySelector('#ca-go').addEventListener('click', async ()=>{
+    const err = host.querySelector('#ca-err'), go = host.querySelector('#ca-go');
+    const body = payload();
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(body.email)){
+      err.style.display='block'; err.textContent='An email address is needed — it is where the answer goes.'; return;
+    }
+    err.style.display='none'; go.disabled=true; go.textContent='Sending…';
+    let out;
+    try{
+      // Sent from the local server, not the browser: the endpoint scores a request
+      // with no Origin as suspicious, and the browser cannot set one cross-site.
+      const r = await fetch('/api/audit-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      out = await r.json();
+      if(!r.ok || !out.ok) throw new Error(out.error||('HTTP '+r.status));
+    }catch(e){
+      go.disabled=false; go.textContent='Send';
+      err.style.display='block';
+      err.textContent = 'It did not go through: '+(e&&e.message||e)+'. Nothing you typed was lost — press Send again.';
+      return;
+    }
+    host.innerHTML = '<div class="au-thin"><b>The results are with us.</b><br><br>'
+      + 'We will look at where your time concentrates and write to <b>'+esc(body.email)+'</b> — with what, in our experience, '
+      + 'actually shortens, and what it takes. Usually within a working day.<br><br>'
+      + 'We received nothing from your code.</div>';
+    host.dataset.open='0';
+  });
 }
