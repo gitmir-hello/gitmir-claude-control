@@ -17,7 +17,9 @@ import { execFile, execFileSync, spawn } from 'node:child_process';
 
 // ---------- the shapes this dashboard actually moves around ----------
 /** A folder the user added, as stored in projects.json. */
-interface Project { name: string; path: string; color?: string; description?: string }
+interface Project { name: string; path: string; color?: string; description?: string;
+  /** What an hour of this team costs, and in what. Local to this machine — see /api/update. */
+  rate?: number; currency?: string }
 /** An entry in skills.json — a prompt kept in its own .md file. */
 interface Skill { name: string; title?: string; desc?: string; file: string; stripFrontmatter?: boolean; prepend?: string }
 type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
@@ -1139,7 +1141,8 @@ const server = http.createServer(async (req, res) => {
       // through would put phantom nodes in the blast radius.
       const known = modelIdSet(path.join(p, '.gitmir', 'model'));
       const heat: Record<string, number> = {};
-      const tasks: { col: string; file: string; n: number; title: string; ids: string[]; declared: boolean; approved: string | null; mtime: number }[] = [];
+      const tasks: { col: string; file: string; n: number; title: string; ids: string[]; declared: boolean;
+        approved: string | null; mtime: number; change: string }[] = [];
       for (const col of ['todo', 'inprogress', 'verify', 'done']) {
         const dir = path.join(p, 'tasks', col);
         let files: string[] = [];
@@ -1158,8 +1161,12 @@ const server = http.createServer(async (req, res) => {
           for (const i of ids) heat[i] = (heat[i] || 0) + 1;
           let mtime = 0; try { mtime = fs.statSync(path.join(dir, f)).mtimeMs; } catch {}
           const ap = /^\s*approved\s*:\s*(.+)$/im.exec(text);
+          // The request this task came from, so the queue can show what that request has
+          // cost so far. Same header the audit groups by.
+          const chg = /^\s*Change:\s*(.+?)\s*$/im.exec(text.split(/\r?\n/).slice(0, 14).join('\n'));
           tasks.push({ col, file: f, n: Number((/^(\d+)/.exec(f) || [])[1]) || 0, title, ids,
-            declared: declaredIds.length > 0, approved: ap ? ap[1].trim().slice(0, 80) : null, mtime });
+            declared: declaredIds.length > 0, approved: ap ? ap[1].trim().slice(0, 80) : null, mtime,
+            change: chg ? chg[1].replace(/\.md$/i, '').trim().slice(0, 200) : '' });
         }
       }
       let history: { id: string; title: string; ts: string; status: string; touched: string[]; files: string[] }[] = [];
@@ -1380,6 +1387,8 @@ const server = http.createServer(async (req, res) => {
       // Fold in anything that moved since the last sweep, so opening the screen
       // never shows a state older than the queue on disk.
       try { auditScan(p); } catch {}
+      const prj = loadProjects().find((x) => x.path === p) || ({} as Project);
+
       const events = auditEvents(p);
       const m = auditMetrics(events, { periodDays: days, idleCutoffHours: idle });
       const model: any = readModel(p).model || {};
@@ -1390,6 +1399,11 @@ const server = http.createServer(async (req, res) => {
         ok: true, ...m,
         idleCutoffHours: idle, periodDays: days,
         areas: auditByArea(m.rows, areas),
+        // What an hour of this team costs, if anyone has said. Without it the screen
+        // shows hours and asks for a rate — an invented one would be the only number on
+        // the page that nobody could check.
+        rate: prj.rate || 0,
+        currency: prj.currency || 'USD',
         // How many, never who — see lib/audit.js. Absent rather than zero when this
         // is not a git checkout: a reported zero developers reads as a broken sender.
         developers: auditDevelopers(p, days) || undefined,
@@ -1669,12 +1683,21 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, { added: true, project });
     }
     if (req.method === 'POST' && url.pathname === '/api/update') {
-      const { path: p, name, description } = await readBody(req);
+      const { path: p, name, description, rate, currency } = await readBody(req);
       const list = loadProjects();
       const item = list.find((x) => x.path === p);
       if (item) {
         if (name !== undefined) item.name = String(name).trim();
         if (description !== undefined) item.description = String(description);
+        // An hourly rate turns the audit's minutes into money. It is kept here, in the
+        // dashboard's own list, and never in `.gitmir/` — that folder is committed, and a
+        // company's blended rate is not something to push to a shared repository by
+        // accident.
+        if (rate !== undefined) {
+          const n = Number(rate);
+          item.rate = Number.isFinite(n) && n > 0 ? Math.min(100000, Math.round(n * 100) / 100) : 0;
+        }
+        if (currency !== undefined) item.currency = String(currency).trim().slice(0, 4).toUpperCase();
         saveProjects(list);
       }
       return sendJSON(res, 200, { ok: !!item });
@@ -2844,6 +2867,38 @@ const HTML = /* html */ `<!doctype html>
     font-family:var(--font-mono); font-size:11.5px; line-height:1.5; max-height:260px; overflow:auto; white-space:pre; color:var(--dim)}
   .au-err{color:#e0654e; font-size:12.5px}
   .au-hp{position:absolute; left:-9999px; width:1px; height:1px; opacity:0}
+  /* The price of a change, in two parts. Cyan is what the first pass cost; red is
+     everything after it. The same bar, at three sizes: the headline, one per change,
+     and a hairline on a queue card. */
+  .pr-wrap{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin-bottom:14px}
+  .pr-top{display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; margin-bottom:12px}
+  .pr-sum{font-size:30px; font-weight:700; color:var(--txt); font-variant-numeric:tabular-nums}
+  .pr-sub{color:var(--dim); font-size:12.5px; line-height:1.5; flex:1 1 260px}
+  .pr-bar{display:flex; height:16px; border-radius:8px; overflow:hidden; background:var(--line)}
+  .pr-bar i{display:block; height:100%}
+  .pr-bar .a{background:linear-gradient(90deg,#1ec8e6,#2fd8ff)}
+  .pr-bar .b{background:linear-gradient(90deg,#e0654e,#ff7a5e)}
+  .pr-key{display:flex; gap:22px; flex-wrap:wrap; margin-top:10px; font-size:12.5px}
+  .pr-key b{font-variant-numeric:tabular-nums; color:var(--txt)}
+  .pr-key .dot{display:inline-block; width:9px; height:9px; border-radius:3px; margin-right:7px; vertical-align:1px}
+  .pr-key .k1 .dot{background:#2fd8ff} .pr-key .k2 .dot{background:#ff7a5e}
+  .pr-key span{color:var(--dim)}
+  .pr-rate{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:12px; padding-top:12px; border-top:1px solid var(--line)}
+  .pr-rate input{background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:6px 10px; width:96px;
+    color:var(--txt); font:inherit; font-size:13px; font-variant-numeric:tabular-nums}
+  .pr-rate select{background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:6px 8px; color:var(--txt); font:inherit; font-size:13px}
+  .pr-rate .h{color:var(--dim); font-size:12px}
+  /* One change: a row bar, thin, in the table. */
+  .pr-mini{display:flex; height:7px; border-radius:4px; overflow:hidden; background:var(--line); min-width:76px}
+  .pr-mini i{display:block; height:100%}
+  .pr-mini .a{background:#2fd8ff} .pr-mini .b{background:#ff7a5e}
+  /* A change whose first pass the idle cutoff refused to measure. Drawing it as
+     100% rework would be a lie told by a bar chart, so it is drawn as unknown. */
+  .pr-mini .u{background:repeating-linear-gradient(115deg,var(--line),var(--line) 3px,transparent 3px,transparent 6px);
+              border:1px solid var(--line); box-sizing:border-box; border-radius:4px}
+  .q-pr{display:flex; align-items:center; gap:7px; margin-top:7px}
+  .q-pr .pr-mini{flex:1}
+  .q-pr .v{font-size:11px; color:#ff9b83; font-variant-numeric:tabular-nums; white-space:nowrap}
   .ov-mods{display:flex; flex-direction:column; gap:6px}
   .ov-mod{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; font-size:14px}
   .ov-mod span{display:block; color:var(--dim); font-size:12px; margin-top:2px}

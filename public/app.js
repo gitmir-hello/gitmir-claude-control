@@ -2445,6 +2445,7 @@ async function loadQueue(pathStr){
   // here without a detour through the Model tab. Both loads are cheap and local; if the
   // model has not been read yet, read it and draw the queue again once it lands.
   await loadChanges(true);
+    await loadQueuePrice(pathStr);
   if(!modelData || modelFor!==pathStr){ loadModel(pathStr).then(()=>{ if(selected===pathStr && activeTab==='queue') loadQueue(pathStr); }); }
   if(!total){ view.innerHTML='<div class="model-empty">No tasks yet.<br>Open <b>Model</b>, click any element in a diagram → <b>＋ Create task</b> (or copy the <b>task-planner</b> skill). Then run <b>📋 task-runner</b> in Claude — it executes them one by one, moving each file todo → inprogress → verify → done — a task is only done once its checks actually pass.</div>'; return; }
   const cols=[['todo','To do','#8aa0ff'],['inprogress','In progress','#ffb86b'],['verify','Verify','#c084fc'],['done','Done','#34f0a6']];
@@ -2457,6 +2458,9 @@ async function loadQueue(pathStr){
       // names, how far that reaches, and whether anyone approved it. Showing it here is
       // the point — the queue is where someone decides what to run next.
       const ci = queueImpact(it.file);
+      // The two prices of the change this task belongs to: one hairline, cyan for
+      // what the first pass cost, red for everything after it.
+      const pr = queuePrice(it.file);
       html+='<div class="q-card q-clk" data-col="'+esc(k)+'" data-file="'+esc(it.file)+'" title="Open full task" style="border-left-color:'+acc+'">'+
         '<div class="q-t">'+esc(it.title)+'</div><div class="q-f">'+esc(it.file)+'</div>'+
         (ci ? '<div class="q-imp">'+
@@ -2464,6 +2468,8 @@ async function loadQueue(pathStr){
                 '<button class="q-risk '+ci.level+'" data-imp="'+esc(it.file)+'" title="Open this in Impact">'+
                   esc(ci.level)+' · '+ci.n+' object'+(ci.n===1?'':'s')+'</button>'+
               '</div>' : '')+
+        (pr ? '<div class="q-pr" title="'+esc(pr.title)+'">'+caBar(pr.first, pr.after, 'pr-mini', pr.unknown)+
+              (pr.label?'<span class="v">'+esc(pr.label)+'</span>':'')+'</div>' : '')+
         '</div>';
     }
     html+='</div></div>';
@@ -2480,6 +2486,39 @@ async function loadQueue(pathStr){
 
 // Risk and object count for one task file, computed only when both the model and the
 // change ledger are already in hand. The queue never waits on either.
+// What the audit knows about the change each queued task belongs to. Read once per
+// queue load, from the same file the Audit tab reads, so the two cannot disagree.
+let qPrice = null, qPriceFor = null, qPriceAt = 0;
+async function loadQueuePrice(pathStr){
+  // The queue redraws every four seconds; re-reading the whole event log that often
+  // to redraw an unchanged hairline would be the most expensive thing on the screen.
+  if(qPriceFor===pathStr && qPrice && Date.now()-qPriceAt < 15000) return qPrice;
+  try{
+    const d = await (await fetch('/api/audit?path='+encodeURIComponent(pathStr)+'&days=180')).json();
+    const by = new Map();
+    for(const r of (d.rows||[])) by.set(r.change, r);
+    qPrice = { by, rate:d.rate||0, cur:d.currency||'USD' };
+  }catch{ qPrice = { by:new Map(), rate:0, cur:'USD' }; }
+  qPriceFor = pathStr; qPriceAt = Date.now();
+  return qPrice;
+}
+function queuePrice(file){
+  if(!qPrice) return null;
+  const t = (changesData && changesData.tasks || []).find(x=>x.file===file);
+  // A task with no Change: line is its own change — the same rule the recorder uses,
+  // so an old queue still lines up with what was written about it.
+  const key = (t && t.change) || file.replace(/\.md$/i,'');
+  const r = qPrice.by.get(key);
+  if(!r || (!r.firstPassMinutes && !r.afterFirstPassMinutes)) return null;
+  const rate = qPrice.rate, cur = qPrice.cur;
+  return {
+    first: r.firstPassMinutes, after: r.afterFirstPassMinutes, unknown: caUnmeasured(r),
+    label: r.afterFirstPassMinutes ? (rate ? caMoney(r.afterFirstPassMinutes, rate, cur) : caPlain(r.afterFirstPassMinutes)) : '',
+    title: 'Change "'+key+'": first pass '+(caUnmeasured(r)?'not measured — it ran longer than the idle cutoff':caPlain(r.firstPassMinutes))+', rework '+caPlain(r.afterFirstPassMinutes)
+         + (rate ? ' — '+caMoney(r.afterFirstPassMinutes, rate, cur)+' of it lost to rework' : '')
+         + ' · '+r.iterations+' return'+(r.iterations===1?'':'s')+' from review',
+  };
+}
 function queueImpact(file){
   if(!modelData || !modelData.model || modelFor!==selected || !changesData || changesFor!==selected) return null;
   const t=(changesData.tasks||[]).find(x=>x.file===file);
@@ -4196,6 +4235,32 @@ const caHrs = (min)=>{
   const h = min/60;
   return (h<10 ? h.toFixed(1) : Math.round(h))+'<small>h</small>';
 };
+// A change has two prices: what the first pass cost, and what everything after it
+// cost. Almost every report adds them together and calls the total "the feature",
+// which is exactly the number that cannot be acted on — you cannot decide anything
+// about a sum whose halves behave differently.
+const CUR = { USD:'$', EUR:'€', GBP:'£', RUB:'₽', PLN:'zł', UAH:'₴', KZT:'₸', GEL:'₾', TRY:'₺', INR:'₹' };
+const caMoney = (min, rate, cur)=>{
+  const v = (min/60)*rate;
+  const s = CUR[cur]||'';
+  const n = v >= 100000 ? Math.round(v/1000)+'k' : v >= 1000 ? (Math.round(v/100)/10)+'k' : Math.round(v);
+  return s ? (s==='zł' ? n+' '+s : s+n) : n+' '+cur;
+};
+/**
+ * The split bar. Cyan first, red after — the order the work happened in.
+ *
+ * `unknown` is for a change whose first pass the idle cutoff refused to measure:
+ * its first half is not zero, it is unmeasured, and drawing that as a bar filled
+ * end to end with rework would be a lie told in the most convincing form available.
+ */
+function caBar(first, after, cls, unknown){
+  if(unknown) return '<div class="'+(cls||'pr-bar')+'"><i class="u" style="width:100%"></i></div>';
+  const tot = Math.max(1, first+after);
+  return '<div class="'+(cls||'pr-bar')+'"><i class="a" style="width:'+(first/tot*100).toFixed(1)+'%"></i>'
+       + '<i class="b" style="width:'+(after/tot*100).toFixed(1)+'%"></i></div>';
+}
+/** True when the cutoff ate this change's first pass rather than it being zero. */
+const caUnmeasured = (r)=> !r.firstPassMinutes && r.droppedGaps > 0;
 const caPlain = (min)=> !min ? '0m' : (min<90 ? Math.round(min)+'m' : (min/60<10 ? (min/60).toFixed(1) : Math.round(min/60))+'h');
 
 async function renderChangeAudit(view, m, seq){
@@ -4228,7 +4293,7 @@ async function renderChangeAudit(view, m, seq){
             + 'How much is enough depends on your work, and we do not claim a figure for it.')
       + '<br><br>What is being collected: every move a task makes between <code>todo → in progress → verify → done</code>, '
       + 'grouped by the <code>Change:</code> line on the task. Nothing else, and nothing about who did it.</div>';
-    if(rows.length) html += caRowsTable(rows);
+    if(rows.length) html += caRowsTable(rows, d.rate, d.currency);
     html += caPrivacy(d);
     view.innerHTML = html;
     caBind(view, m, seq);
@@ -4257,6 +4322,7 @@ async function renderChangeAudit(view, m, seq){
      'Work that appeared only after the change had already been put up for review.',
      'Tasks whose first event is later than their change’s first verify — <b>'+d.lateDiscoveries+'</b> of them.'],
   ];
+  html += caPriceBlock(d);
   html += '<div class="au-priv" style="margin:0 0 12px">Over <b>'+d.periodDays+' days</b>, <b>'+d.changes+'</b> change'+(d.changes===1?'':'s')+'. '
        +  'A change counts if it <i>started</i> inside the window, whole — one that began earlier is left out rather than measured from its middle. '
        +  'Within a change, a gap longer than the <b>'+d.idleCutoffHours+'h</b> cutoff is not counted as work'
@@ -4280,11 +4346,15 @@ async function renderChangeAudit(view, m, seq){
     html += '</div>';
   }
 
-  html += caRowsTable(rows);
+  html += caRowsTable(rows, d.rate, d.currency);
   html += caPrivacy(d);
-  html += '<div class="ov-sec">Talk it through</div>'
-       +  '<div class="au-thin">These numbers say where time goes. What actually shortens it depends on how your work is shaped — '
-       +  'send the audit and we will read it and write back.<br><br>'
+  html += '<div class="ov-sec">What to do with this</div>'
+       +  '<div class="au-thin">Every change above carries two prices, and the red half is the one that moves. '
+       +  'Read it per change to see which requests came back and why; read it by area to see where that concentrates. '
+       +  'That is enough to act on it yourself — the record is yours, in your project, and nothing here is hidden behind us.<br><br>'
+       +  'If you would rather not work it out alone: we build development systems that run at the lowest cost we can get them to, '
+       +  'and we have spent years on the part that produces the red half. Send the audit and we will read it and write back '
+       +  'about what, in our experience, actually shrinks — and what it takes.<br><br>'
        +  '<button class="btn" id="au-send">Discuss these results</button></div>'
        +  '<div id="au-form"></div>';
 
@@ -4292,12 +4362,18 @@ async function renderChangeAudit(view, m, seq){
   caBind(view, m, seq);
 }
 
-function caRowsTable(rows){
+function caRowsTable(rows, rate, cur){
   let h = '<div class="ov-sec">The changes these came from</div><div class="au-thin" style="max-width:none; overflow-x:auto">'
-        + '<table class="au-tab"><tr><th>Change</th><th>First pass</th><th>After</th><th>Returns</th><th>Reviews</th><th>Late</th><th>Settled</th></tr>';
+        + '<table class="au-tab"><tr><th>Change</th><th>Split</th><th>First pass</th><th>Rework</th>'
+        + (rate?'<th>Rework cost</th>':'')+'<th>Returns</th><th>Reviews</th><th>Late</th><th>Settled</th></tr>';
   for(const r of rows.slice(0,40)){
-    h += '<tr><td>'+esc(r.change)+'</td><td>'+caPlain(r.firstPassMinutes)+'</td><td>'+caPlain(r.afterFirstPassMinutes)
-      +  '</td><td>'+r.iterations+'</td><td>'+r.reviewCycles+'</td><td>'+r.lateDiscoveries+'</td><td>'+(r.settled?'yes':'not yet')+'</td></tr>';
+    h += '<tr><td>'+esc(r.change)+'</td>'
+      +  '<td style="width:110px" title="'+(caUnmeasured(r)?'The first pass here ran longer than the idle cutoff, so it was not measured — this is not a change that was all rework':'')+'">'
+      +    caBar(r.firstPassMinutes, r.afterFirstPassMinutes, 'pr-mini', caUnmeasured(r))+'</td>'
+      +  '<td>'+(caUnmeasured(r)?'<span style="color:var(--dim)">not measured</span>':caPlain(r.firstPassMinutes))+'</td>'
+      +  '<td>'+caPlain(r.afterFirstPassMinutes)+'</td>'
+      +  (rate?'<td style="color:#ff9b83">'+caMoney(r.afterFirstPassMinutes, rate, cur)+'</td>':'')
+      +  '<td>'+r.iterations+'</td><td>'+r.reviewCycles+'</td><td>'+r.lateDiscoveries+'</td><td>'+(r.settled?'yes':'not yet')+'</td></tr>';
   }
   h += '</table>';
   if(rows.length>40) h += '<div style="margin-top:8px">Showing the 40 most recent of '+rows.length+'.</div>';
@@ -4317,6 +4393,13 @@ function caPrivacy(d){
 function caBind(view, m, seq){
   view.querySelectorAll('[data-days]').forEach(b=>b.addEventListener('click',()=>{ caDays=+b.dataset.days; renderChangeAudit(view,m,seq); }));
   view.querySelectorAll('[data-idle]').forEach(b=>b.addEventListener('click',()=>{ caIdle=+b.dataset.idle; renderChangeAudit(view,m,seq); }));
+  const rateEl = view.querySelector('#pr-rate'), curEl = view.querySelector('#pr-cur');
+  const saveRate = ()=>{
+    const body = { path:selected, rate:Number(rateEl.value)||0, currency:curEl.value };
+    fetch('/api/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+      .then(()=>renderChangeAudit(view, m, seq)).catch(()=>{});
+  };
+  if(rateEl){ rateEl.addEventListener('change', saveRate); curEl.addEventListener('change', saveRate); }
   const send = view.querySelector('#au-send');
   if(send) send.addEventListener('click',()=> caForm(view.querySelector('#au-form')));
 }
@@ -4335,6 +4418,9 @@ function caForm(host){
     + '<label class="au-k">Company</label><input id="ca-co" autocomplete="organization">'
     + '<label class="au-k">Anything you want us to look at</label><textarea id="ca-note"></textarea>'
     + '<input class="au-hp" id="ca-hp" tabindex="-1" autocomplete="off" aria-hidden="true">'
+    + (caData.rate ? '<label style="display:flex;gap:8px;align-items:center;color:var(--dim);font-size:12.5px">'
+        + '<input type="checkbox" id="ca-rate" checked> Include your hourly rate ('+caMoney(60, caData.rate, caData.currency)+'/h) so we can talk in money rather than hours'
+        + '</label>' : '')
     + '<div class="au-k">Exactly what gets sent</div><div class="au-pay" id="ca-pay"></div>'
     + '<div class="au-err" id="ca-err" style="display:none"></div>'
     + '<div style="display:flex; gap:8px"><button class="btn" id="ca-go">Send</button>'
@@ -4358,6 +4444,13 @@ function caForm(host){
       iterationsPerChange: Math.round((caData.iterationsPerChange||0)*100)/100,
       reviewCycles: caData.reviewCycles, lateDiscoveries: caData.lateDiscoveries,
       idleCutoffHours: caData.idleCutoffHours,
+      // Only when the box above is ticked. A blended rate is the sender's own
+      // business data, and it goes out because they chose it, not because we set a
+      // default that reads well for us.
+      ...(caData.rate && host.querySelector('#ca-rate') && host.querySelector('#ca-rate').checked
+          ? { hourlyRate: caData.rate, currency: caData.currency,
+              reworkCost: Math.round((caData.afterFirstPassMinutes/60)*caData.rate) }
+          : {}),
       areas: (caData.areas||[]).slice(0,10).map(a=>({ area:a.area, afterFirstPassMinutes:Math.round(a.afterFirstPassMinutes) })),
     },
     gitmir: { version: caData.version||'', generatedAt: new Date().toISOString() },
@@ -4365,6 +4458,7 @@ function caForm(host){
   const paint = ()=>{ host.querySelector('#ca-pay').textContent = JSON.stringify(payload(), null, 2); };
   paint();
   host.querySelectorAll('input,textarea').forEach(el=>el.addEventListener('input', paint));
+  host.querySelectorAll('input[type=checkbox]').forEach(el=>el.addEventListener('change', paint));
 
   host.querySelector('#ca-x').addEventListener('click', ()=>{ host.innerHTML=''; host.dataset.open='0'; });
   host.querySelector('#ca-go').addEventListener('click', async ()=>{
@@ -4393,4 +4487,38 @@ function caForm(host){
       + 'We received nothing from your code.</div>';
     host.dataset.open='0';
   });
+}
+
+
+// The headline: what this period cost, split at the moment somebody first said the
+// work was ready for review. Money only appears once a rate is given — a default
+// rate would be the only number on this screen nobody could check.
+function caPriceBlock(d){
+  const fp = d.firstPassMinutes||0, af = d.afterFirstPassMinutes||0, tot = fp+af;
+  const rate = d.rate||0, cur = d.currency||'USD';
+  const pct = tot ? Math.round(af/tot*100) : 0;
+  let h = '<div class="pr-wrap">';
+  h += '<div class="pr-top">'
+    +  '<div class="pr-sum">'+(rate ? caMoney(tot, rate, cur) : caPlain(tot))+'</div>'
+    +  '<div class="pr-sub">'+(rate
+         ? 'What <b>'+d.changes+'</b> change'+(d.changes===1?'':'s')+' cost over '+d.periodDays+' days, at '+caMoney(60, rate, cur)+'/h. '
+           + '<b style="color:#ff9b83">'+caMoney(af, rate, cur)+'</b> of it — '+pct+'% — went on rework: everything after the work was first put up for review.'
+         : 'Measured time for <b>'+d.changes+'</b> change'+(d.changes===1?'':'s')+'. <b>'+pct+'%</b> of it went on rework — everything after the work was first put up for review. '
+           + 'Add an hourly rate below to read that in money.')
+    +  '</div></div>';
+  h += caBar(fp, af);
+  h += '<div class="pr-key">'
+    +  '<span class="k1"><i class="dot"></i>First pass <b>'+caPlain(fp)+(rate?' · '+caMoney(fp, rate, cur):'')+'</b></span>'
+    +  '<span class="k2"><i class="dot"></i>Rework <b>'+caPlain(af)+(rate?' · '+caMoney(af, rate, cur):'')+'</b></span>'
+    +  '</div>';
+  h += '<div class="pr-rate"><span class="au-k">Hourly rate</span>'
+    +  '<input id="pr-rate" type="number" min="0" step="1" value="'+(rate||'')+'" placeholder="0">'
+    +  '<select id="pr-cur">'+Object.keys(CUR).map(c=>'<option'+(c===cur?' selected':'')+'>'+c+'</option>').join('')+'</select>'
+    +  '<span class="h">Blended cost of an engineering hour. Stays on this machine — it is not written into your repository.</span>'
+    +  '</div>';
+  // The honest sentence. Priced measured time is not an invoice, and the difference
+  // is where a number like this normally gets torn apart in the room.
+  h += '<div class="au-priv" style="margin:10px 0 0">This prices the time this screen measured — time between queue moves, minus gaps longer than the '
+    +  '<b>'+d.idleCutoffHours+'h</b> cutoff. It is not an invoice and not everyone’s salary: it is what the measured work would cost at the rate you gave.</div>';
+  return h + '</div>';
 }

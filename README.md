@@ -113,14 +113,24 @@ The **Audit** tab separates them, from nothing but the moves your tasks make
 between `todo → in progress → verify → done`:
 
 ```
+€854   What 4 changes cost over 7 days, at €85/h.
+       €623 of it — 73% — went on rework.
+
+  ██████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  ■ First pass  2.7h · €231      ■ Rework  7.3h · €623
+
 FIRST-PASS RATIO       50%      ITERATIONS PER CHANGE  0.5
-AFTER THE FIRST PASS  7.3h      REVIEW CYCLES            8
-FIRST PASS            2.7h      LATE DISCOVERIES         2
+REVIEW CYCLES            8      LATE DISCOVERIES         2
 
 WHERE THE TIME CONCENTRATES
   Search           4.8h after first pass · 2 changes
   Billing rules    2.3h after first pass · 1 change
 ```
+
+Every change carries **two prices** — the cyan half is the work, the red half is
+the cost of it not being right yet — and the same bar sits on each task card in the
+queue, so you can see per request what came back and what that cost. Give it an
+hourly rate and it reads in money; leave it out and it reads in hours.
 
 Every number opens to show what it was computed from, and the screen states the
 rules it applied rather than assuming you trust them: which changes were in the
@@ -265,7 +275,7 @@ subprocess over stdin/stdout — **no port, no network, and the dashboard does n
 running.** Every reply states how fresh the model is, because there is no amber banner in
 somebody else's editor.
 
-**→ [The MCP server](docs/MCP.md)** — fourteen tools, and what each admits about its own
+**→ [The MCP server](docs/MCP.md)** — fifteen tools, and what each admits about its own
 behaviour.
 
 An agent that starts a session with `gitmir_attention` gets the list this screen shows —

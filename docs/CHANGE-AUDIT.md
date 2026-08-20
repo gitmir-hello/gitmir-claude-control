@@ -82,6 +82,32 @@ real nights, and the screen says how much — "5 stretches longer than 4h were n
 counted, worth 35h between them". If your work runs in longer sittings than the
 cutoff, widen it and the number changes in front of you.
 
+### Two prices, not one
+
+Every change on this screen carries two: what the first pass cost, and what
+everything after it cost. The bar is cyan for the first, red for the second, in
+the order the work happened.
+
+A total is the one number you cannot act on, because its halves behave
+differently. The first half is the work; the second is the cost of the work not
+being right yet — and that is the half that moves when the process changes.
+
+Give the screen an hourly rate and both halves are shown in money, per change and
+across the period. The rate is the blended cost of an engineering hour, it is
+stored in the dashboard's own project list on your machine, and it is deliberately
+**not** written into `.gitmir/` — that folder is committed, and a company's rate is
+not something to push to a shared repository by accident.
+
+What that money is: the time this screen measured, priced at the rate you gave. It
+is not an invoice and not anyone's salary. Its error is the timer's error, which is
+why the timer's rules are stated on the same screen.
+
+**A change whose first pass ran longer than the idle cutoff shows an unmeasured
+split** — a hatched bar and the words *not measured*, never a bar filled end to end
+with red. Its first pass was not zero; it was refused by the cutoff. A bar chart is
+the most convincing way to state something, which is exactly why it must not state
+something untrue.
+
 ### What is deliberately not counted
 
 - **A task that never entered `in progress`** — backlog is not cost.
@@ -121,6 +147,11 @@ The button beside the results opens a form — email required, name, company, no
 and then shows the **exact JSON** that will leave, updating as you type. The
 numbers on the screen, the fields you filled, the areas by name-in-the-model, the
 build version. No paths, no file names, no code, no model.
+
+If a rate is set, one tick box offers to include it — `hourlyRate`, `currency` and
+the rework cost — so the conversation can be about money rather than hours. It is a
+choice, not a default that reads well for us: untick it and the field disappears
+from the JSON in front of you before anything is sent.
 
 It posts from the local server rather than from the page, so the request carries an
 `Origin` the receiving end can score. Three attempts on a network failure; a
