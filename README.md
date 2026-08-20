@@ -282,7 +282,7 @@ subprocess over stdin/stdout — **no port, no network, and the dashboard does n
 running.** Every reply states how fresh the model is, because there is no amber banner in
 somebody else's editor.
 
-**→ [The MCP server](docs/MCP.md)** — fifteen tools, and what each admits about its own
+**→ [The MCP server](docs/MCP.md)** — sixteen tools, and what each admits about its own
 behaviour.
 
 An agent that starts a session with `gitmir_attention` gets the list this screen shows —

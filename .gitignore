@@ -8,6 +8,9 @@ examples/*/.gitmir/footprint.json
 # and shipping one machine's queue history as though it were the example's is a lie
 # about a screen whose whole value is that the numbers are yours.
 examples/*/.gitmir/audit/
+# A status line about what an agent was doing on somebody's machine at some moment
+# is never worth committing, least of all into the shipped example.
+examples/*/.gitmir/progress.json
 projects.json
 team.json
 .claude/

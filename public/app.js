@@ -4714,24 +4714,54 @@ function renderSteps(view, pathStr, d){
         +    '<div class="act"><button class="ghost big-btn" data-copy="'+esc(say)+'">Copy it</button></div></div>';
     }
 
-    // 3 — what we can see from here
+    // 3 — what is happening, in the agent's own words where it has said any
+    const pr = d.progress;
     const seen = [];
-    seen.push([d.agentSeen, d.agentSeen ? 'Your assistant is talking to us' : 'Waiting for your assistant']);
-    seen.push([d.queue, d.queue ? 'The task queue is set up' : 'No task queue yet']);
-    seen.push([d.modelFiles > 0, d.modelFiles > 0 ? d.modelFiles+' map file'+(d.modelFiles===1?'':'s')+' written so far' : 'The map is not written yet']);
+    seen.push([d.agentSeen || d.queue, (d.agentSeen || d.queue) ? 'Your assistant is on it' : 'Waiting for your assistant']);
+    seen.push([pr && (pr.stage === 'reading' || pr.stage === 'writing' || pr.stage === 'done'),
+               pr && pr.stage === 'reading' ? 'Reading ' + (d.hasCode ? 'your code' : 'what you wrote')
+             : pr && (pr.stage === 'writing' || pr.stage === 'done') ? 'Read it'
+             : 'Not started reading yet']);
+    seen.push([d.modelFiles > 0,
+               d.modelFiles > 0 ? d.modelFiles+' map file'+(d.modelFiles===1?'':'s')+' written'
+             : pr && pr.stage === 'writing' ? 'Writing the map now…' : 'The map is not written yet']);
+
     h += '<div class="st-do-c three'+((d.hasCode||brief)?' wait':'')+'"><div class="num">3</div>'
-      +    '<h5>Come back here</h5>'
-      +    '<ul class="st-seen">';
-    for(const [ok,label] of seen) h += '<li class="'+(ok?'ok':'')+'"><i></i>'+esc(label)+'</li>';
-    h += '</ul>'
-      +    '<div class="act"><div class="st-wait"><i class="st-dot"></i>Watching this folder every few seconds</div></div></div>';
+      +    '<h5>' + (pr && pr.stage === 'blocked' ? 'It needs an answer from you'
+                   : pr && pr.stage === 'writing' ? 'It is writing your map'
+                   : pr && pr.stage === 'failed' ? 'It ran into a problem'
+                   : 'Come back here') + '</h5>';
+
+    if(pr && pr.stage === 'blocked'){
+      h += '<p>Your assistant stopped and asked you something. Answer it in the chat and it carries on.</p>'
+        +  (pr.note ? '<div class="st-say">'+esc(pr.note)+'</div>' : '');
+    } else if(pr && pr.stage === 'failed'){
+      h += '<p>'+esc(pr.note || 'It could not finish. The chat will say why.')+'</p>';
+    } else {
+      h += '<ul class="st-seen">';
+      for(const [ok,label] of seen) h += '<li class="'+(ok?'ok':'')+'"><i></i>'+esc(label)+'</li>';
+      h += '</ul>';
+      if(pr && pr.note && !pr.stale) h += '<p style="margin-top:2px">'+esc(pr.note)+'</p>';
+    }
+
+    h += '<div class="act"><div class="st-wait"><i class="st-dot"></i>'
+      +    (pr && pr.stale ? 'Nothing heard for a while — it may have stopped'
+          : pr && pr.stage === 'blocked' ? 'Paused until you answer'
+          : 'Updating on its own, every few seconds')
+      +  '</div></div></div>';
 
     h += '</div>';
 
     // The thing that actually goes wrong, said out loud.
     // Pasting by hand never produces a hello, so this cannot depend on one: a queue
     // on disk is equally good proof that an assistant has been in here and stopped.
-    if((d.agentSeen || d.queue) && !d.modelFiles){
+    if(d.progress && d.progress.stage === 'blocked'){
+      h += '<div class="st-hint"><b>Your assistant is waiting on you</b> — it asked a question in the chat and stopped. '
+        +  'Go and answer it; the map gets written the moment you do.'
+        +  (d.progress.note ? '<br><br>It asked: <b>'+esc(d.progress.note)+'</b>' : '')
+        +  '</div>';
+    }
+    else if((d.agentSeen || d.queue) && !d.modelFiles && !(d.progress && (d.progress.stage==='reading' || d.progress.stage==='writing'))){
       h += '<div class="st-hint"><b>Your assistant has been here and set the project up — but the map is not written yet.</b> '
         +  'Nine times out of ten it asked you something in the chat and is waiting on your answer. Go and look at it: '
         +  (d.hasCode ? 'it may be asking which parts of the code to treat as the product.'
@@ -4794,17 +4824,25 @@ function renderSteps(view, pathStr, d){
   // The two waiting screens end by themselves. Polling is the honest thing here:
   // the person is told nothing needs refreshing, so nothing may need refreshing.
   if(d.step < 3){
+    // Everything the screen shows has to be in this signature, or the screen does not
+    // change when it changes. It used to compare the step alone, which is why an agent
+    // could report four stages in a row into a page that never redrew — the exact
+    // "nothing happens" people reported.
+    const sig = (x)=> !x ? '' : [x.step, x.agentSeen, x.queue, x.modelFiles, x.brief,
+      x.progress && x.progress.stage, x.progress && x.progress.note, x.progress && x.progress.stale].join('|');
     stepPoll = setInterval(async ()=>{
       if(selected !== pathStr || activeTab !== 'home'){ clearInterval(stepPoll); return; }
-      const before = d.step + '/' + d.agentSeen;
+      const before = sig(d);
       const n = await loadSteps(pathStr);
       if(!n || !n.ok) return;
-      if(n.step + '/' + n.agentSeen !== before){
+      if(sig(n) !== before){
         clearInterval(stepPoll);
         // The one moment in this product worth marking. Somebody just did the thing
         // that makes everything else exist; saying so costs nothing and lands.
         if(n.step === 3) toast('Your map is here — everything just opened up');
-        else if(n.agentSeen) toast('Your assistant said hello. Connected.');
+        else if(n.agentSeen && !d.agentSeen) toast('Your assistant said hello. Connected.');
+        else if(n.progress && n.progress.stage === 'blocked'
+                && !(d.progress && d.progress.stage === 'blocked')) toast('Your assistant is asking you something');
         renderHome(pathStr);
       }
     }, 3000);

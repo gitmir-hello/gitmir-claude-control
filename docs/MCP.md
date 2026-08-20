@@ -116,6 +116,23 @@ creates `tasks/todo|inprogress|verify|done`, and reports what is left. If the
 model is missing it says so and points at `gitmir_skill("gitmir-model")`, which
 hands back the procedure in full for the agent to carry out.
 
+### Saying what it is doing
+
+`gitmir_progress` exists because the person watching the dashboard cannot see the
+chat. Building a model takes minutes, and for all of them the screen would
+otherwise say "waiting" with nothing behind it. The agent reports `started`,
+`reading`, `writing`, `done` — and, the one that matters, `blocked`, with the
+question it is waiting on.
+
+That last case is the one that strands people: the agent stopped to ask something
+perfectly reasonable, and the person is looking at a different window entirely. A
+`blocked` report puts the question on the screen they are already watching.
+
+It writes one line to `.gitmir/progress.json` and nothing else, and the dashboard
+deletes it the moment the model appears — a status line that outlives its job stops
+being believed. Nothing depends on it: pasted in as plain text with no tools at
+all, the procedure writes the same file itself.
+
 That is the whole reason those two are tools rather than prompts. A prompt is
 user-controlled: it appears as a slash command and waits to be typed. A tool is
 model-controlled, so the agent can reach for the procedure the moment it finds

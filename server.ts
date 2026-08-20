@@ -97,6 +97,7 @@ import { modelVersions, modelAt, diffModels } from './lib/history.js';
 import { readFindings, writeFinding, setFindingStatus, findingsSummary } from './lib/findings.js';
 import { readUsage, summarise, modelBytes, sourceBytes, record as recordUse, fileBytesFor } from './lib/usage.js';
 import { attention, caught, nextSkill } from './lib/attention.js';
+import { read as readProgress, clear as clearProgress } from './lib/progress.js';
 import { snapshot as auditSnapshot, transitions as auditTransitions, record as auditRecord,
   readEvents as auditEvents, metrics as auditMetrics, byArea as auditByArea,
   developerCount as auditDevelopers } from './lib/audit.js';
@@ -1357,7 +1358,14 @@ const server = http.createServer(async (req, res) => {
       const mode = prj.mode === 'skills' || prj.mode === 'mcp' ? prj.mode : '';
       // Proof the wiring works: something that was not this dashboard asked us a
       // question about this project.
-      const agentSeen = readUsage(p, 400).some((e: any) => e && e.by && e.by !== 'human');
+      const prog = m.exists ? null : readProgress(p);
+      // Proof the wiring works: something that was not this dashboard asked us a
+      // question — or told us what it is doing. A progress report is written by an
+      // agent and by nothing else, so an agent that got straight to work without
+      // needing to ask us anything still counts as connected. Waiting for a hello
+      // it had no reason to say is how somebody sits on the wrong screen while the
+      // work happens behind it.
+      const agentSeen = !!prog || readUsage(p, 400).some((e: any) => e && e.by && e.by !== 'human');
       let objects = 0;
       for (const d of Object.values(m.model || {})) if (Array.isArray(d)) objects += d.length;
       let tasks = 0;
@@ -1368,6 +1376,10 @@ const server = http.createServer(async (req, res) => {
       // wiring is actually live is a separate question, answered by `agentSeen`, and
       // it belongs inside step two — otherwise somebody who ran the command and hit a
       // problem is bounced back to a choice they already made.
+      // The map is here: whatever the agent last said it was doing, it is finished.
+      // Leaving "writing the model" on the screen forever is how a status line stops
+      // being believed.
+      if (m.exists) clearProgress(p);
       const step = m.exists ? 3 : (mode ? 2 : 1);
       return sendJSON(res, 200, {
         ok: true, step, mode, agentSeen,
@@ -1380,6 +1392,9 @@ const server = http.createServer(async (req, res) => {
           .some((c) => { try { return fs.statSync(path.join(p, 'tasks', c)).isDirectory(); } catch { return false; } }),
         modelFiles: (() => { try { return fs.readdirSync(path.join(p, '.gitmir', 'model')).filter((f) => f.endsWith('.json')).length; } catch { return 0; } })(),
         brief: BRIEF_NAMES.find((f) => { try { return fs.statSync(path.join(p, f)).isFile(); } catch { return false; } }) || '',
+        // What the agent last said it was doing. Null when nothing ever said anything,
+        // which is a normal state and not an error.
+        progress: prog,
         model: { exists: m.exists, objects },
         tasks, cli: hasGitmirCli(),
       });

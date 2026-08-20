@@ -21,6 +21,44 @@ description: >-
 
 # GitMir object-information model
 
+## Say what you are doing, out loud
+
+Somebody is watching a dashboard while you work, and they cannot see this chat.
+Until the model exists, that screen is a waiting room — and it is your job to keep
+it honest.
+
+**Report every stage.** If `gitmir_progress` is available, call it. If it is not —
+you were pasted in as text, with no tools — write the same thing yourself to
+`.gitmir/progress.json`, overwriting it each time:
+
+```json
+{ "stage": "reading", "note": "Reading 34 source files", "at": "<ISO timestamp now>" }
+```
+
+Stages, in the order they normally happen:
+
+| stage | when |
+|---|---|
+| `started` | the moment you accept this job, before anything else |
+| `reading` | while you read the code, or the brief for a product that has no code yet |
+| `writing` | when you begin writing files into `.gitmir/model/` |
+| `blocked` | **the important one** — you stopped to ask the person something |
+| `done` | the model is written |
+| `failed` | you cannot finish; put the reason in `note` |
+
+**`blocked` is not optional.** The single worst thing this tool does to a person is
+leave them watching a screen that says "waiting" while you sit in a chat window
+they are not looking at, waiting for them. The moment you need an answer — the
+folder is empty and you do not know what they are building, the repository has four
+apps in it and you do not know which is the product — report `blocked` with the
+question itself in `note`, then ask it in the chat. They will see it on the screen
+they are already looking at.
+
+An empty folder with no brief is exactly that case. Do not guess a product from a
+folder name, and do not stop silently: report `blocked` with "What are you
+building? A few sentences is enough", and tell them they can type it into the box
+on the dashboard, which saves it as `PRODUCT-BRIEF.md` for you to read.
+
 ## Language
 
 **Write everything you produce in English.** File names and their contents,

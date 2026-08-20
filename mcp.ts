@@ -22,6 +22,7 @@
  */
 
 import fs from 'node:fs';
+import { report as reportProgress, clear as clearProgress } from './lib/progress.js';
 import path from 'node:path';
 import { readModel, modelStaleness, modelIdSet, readTasks, MODEL_ID } from './lib/read.js';
 import { createTask, setApproval, COLUMNS } from './lib/write.js';
@@ -431,6 +432,39 @@ const TOOLS: Tool[] = [
     },
   },
 
+  {
+    // The person watching the dashboard cannot see a chat window. Without this they
+    // watch a folder and guess — and the case that strands them is the one where the
+    // agent stopped to ask them something, which a folder can never show.
+    name: 'gitmir_progress',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    title: 'Say what you are doing right now',
+    description:
+      'Tell the dashboard what you are currently doing on this project, so the person watching it ' +
+      'sees progress instead of a blank wait. Call it when you START building or refreshing the ' +
+      'model, when you move on to WRITING files, when you are BLOCKED waiting for an answer from ' +
+      'the person (put the question in `note` — this is the one that matters most), and when you ' +
+      'are DONE. Cheap, safe, and it writes nothing but a one-line status file.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...PROJECT_ARG,
+        stage: { type: 'string', enum: ['started', 'reading', 'writing', 'blocked', 'done', 'failed'],
+          description: 'started · reading the code or the brief · writing the model files · blocked on a question for the person · done · failed' },
+        note: { type: 'string', description: 'One short line for a human. If blocked, the exact question you are waiting on.' },
+      },
+      required: ['stage'],
+    },
+    async run(args: Record<string, unknown>, project: string) {
+      const stage = String(args.stage || '');
+      const note = String(args.note || '');
+      const ok = reportProgress(project, stage, note);
+      if (!ok) return { text: `Could not record "${stage}" — carry on, this is only a status line.` };
+      return { text: stage === 'blocked'
+        ? `Recorded: waiting on the person${note ? ` — "${note}"` : ''}. The dashboard now shows them the question. Ask it in the chat too.`
+        : `Recorded: ${stage}${note ? ` — ${note}` : ''}. The dashboard is showing it.` };
+    },
+  },
   {
     // Setting a project up is what everyone hits first, and every step of it was
     // something the person had to know to ask for: add the folder to the
