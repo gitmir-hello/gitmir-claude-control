@@ -4657,7 +4657,7 @@ function renderSteps(view, pathStr, d){
       +    '<p>It only looks for new tools when it starts up. <b>This is the step everyone skips</b>, and then thinks '
       +    'nothing happened.</p>'
       +    '<div class="act"><button class="ghost big-btn" data-skip="1">Done both — next step</button></div></div>'
-      +  '<div class="st-do-c three"><div class="num">3</div>'
+      +  '<div class="st-do-c three wait"><div class="num">3</div>'
       +    '<h5>We notice by ourselves</h5>'
       +    '<p>As soon as your assistant asks us anything, this page moves on. You do not have to tell us.</p>'
       +    '<div class="act"><div class="st-wait"><i class="st-dot"></i>Listening…</div></div></div>'
@@ -4694,7 +4694,7 @@ function renderSteps(view, pathStr, d){
       +    '<div class="st-say">'+esc(say)+'</div>'
       +    '<div class="act"><button class="ghost big-btn" data-copy="'+esc(say)+'">Copy it</button></div></div>'
 
-      +  '<div class="st-do-c three"><div class="num">3</div>'
+      +  '<div class="st-do-c three wait"><div class="num">3</div>'
       +    '<h5>Come back here</h5>'
       +    '<p>The moment the map is written, this page changes on its own. Nothing to refresh, nothing to click.</p>'
       +    '<div class="act"><div class="st-wait"><i class="st-dot"></i>Watching for it right now…</div></div></div>'

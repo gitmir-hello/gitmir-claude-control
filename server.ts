@@ -2946,18 +2946,27 @@ const HTML = /* html */ `<!doctype html>
   .st-do-c{position:relative; background:linear-gradient(170deg,rgba(20,44,80,.55),rgba(9,18,38,.5));
     border:1px solid var(--line2); border-radius:18px; padding:26px 22px 22px; display:flex; flex-direction:column; gap:12px;
     min-height:206px}
+  /* A number is an outline until it is the one being waited on. Three different
+     colours read as three different kinds of thing; one lit and two outlined reads
+     as where you are. */
   .st-do-c .num{display:grid; place-items:center; width:46px; height:46px; border-radius:14px;
-    font-size:22px; font-weight:800; color:#04121e; background:var(--cyan); box-shadow:0 6px 18px rgba(47,216,255,.28)}
-  .st-do-c.two .num{background:#a78bfa; box-shadow:0 6px 18px rgba(167,139,250,.3)}
-  .st-do-c.three .num{background:#34f0a6; box-shadow:0 6px 18px rgba(52,240,166,.28)}
+    font-size:22px; font-weight:800; color:var(--cyan); background:transparent;
+    border:2px solid rgba(47,216,255,.55)}
+  .st-do-c.wait .num{color:#04121e; border-color:transparent; background:var(--cyan);
+    animation:numGlow 1.9s ease-in-out infinite}
+  @keyframes numGlow{
+    0%,100%{ background:#1ec8e6; box-shadow:0 0 0 0 rgba(47,216,255,.34), 0 6px 18px rgba(47,216,255,.22) }
+    50%    { background:#7fe9ff; box-shadow:0 0 0 9px rgba(47,216,255,0), 0 6px 24px rgba(47,216,255,.45) }
+  }
+  @media (prefers-reduced-motion:reduce){ .st-do-c.wait .num{animation:none} }
   .st-do-c h5{margin:0; font-size:20px; font-weight:700; color:#fff; line-height:1.25}
   .st-do-c p{margin:0; color:var(--ink-1); font-size:15px; line-height:1.55}
   .st-do-c .act{margin-top:auto}
   .st-do-c .big-btn{width:100%; font-size:15.5px; padding:12px 16px; font-weight:650}
-  .st-say{background:rgba(4,10,20,.6); border:1px solid var(--line2); border-left:4px solid #a78bfa;
+  .st-say{background:rgba(4,10,20,.6); border:1px solid var(--line2); border-left:4px solid var(--cyan);
     border-radius:12px; padding:14px 16px; font-size:16px; color:#fff; line-height:1.45; word-break:break-word}
   .st-wait{display:flex; align-items:center; gap:11px; color:var(--ink-1); font-size:15px}
-  .st-dot{width:11px; height:11px; border-radius:50%; background:#34f0a6; flex:0 0 auto; animation:stp 1.4s ease-in-out infinite}
+  .st-dot{width:11px; height:11px; border-radius:50%; background:var(--cyan); flex:0 0 auto; animation:stp 1.4s ease-in-out infinite}
   @keyframes stp{0%,100%{opacity:.3; transform:scale(.75)} 50%{opacity:1; transform:scale(1.2)}}
   .st-cmd{display:flex; align-items:center; gap:10px; background:rgba(4,10,20,.6); border:1px solid var(--line2);
     border-radius:12px; padding:13px 15px; font-family:var(--font-mono); font-size:14px; color:#fff}
