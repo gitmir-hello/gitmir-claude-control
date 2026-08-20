@@ -3048,6 +3048,19 @@ const HTML = /* html */ `<!doctype html>
   .st-seen li.ok{color:var(--ink-1)}
   .st-seen li.ok i{border-color:#34f0a6; background:#34f0a6;
     box-shadow:inset 0 0 0 2px rgba(4,18,30,.9)}
+  /* Did it actually connect. Green only for evidence, never for a registration. */
+  .mcp-live{display:flex; gap:11px; align-items:flex-start; border-radius:12px; padding:14px 16px; margin-bottom:16px;
+    font-size:15px; line-height:1.55; color:var(--ink-1); background:var(--panel); border:1px solid var(--line2)}
+  .mcp-live i{flex:0 0 auto; width:11px; height:11px; margin-top:5px; border-radius:50%; background:var(--ink-3)}
+  .mcp-live b{color:#fff}
+  .mcp-live.on{background:rgba(52,240,166,.07); border-color:rgba(52,240,166,.34)}
+  .mcp-live.on i{background:#34f0a6; box-shadow:0 0 0 4px rgba(52,240,166,.16)}
+  .mcp-live.off{background:rgba(255,176,80,.06); border-color:rgba(255,176,80,.28)}
+  .mcp-live.off i{background:#ffb050; box-shadow:0 0 0 4px rgba(255,176,80,.14)}
+  /* A sentence to say to an assistant, with the button that copies it. */
+  .say-row{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:14px}
+  .say-row .sentence{flex:1 1 320px; min-width:0; background:rgba(4,10,20,.6); border:1px solid var(--line2);
+    border-left:3px solid var(--cyan); border-radius:10px; padding:11px 14px; color:#fff; font-size:15px; line-height:1.45}
   .st-hint{margin-top:18px; background:rgba(255,176,80,.08); border:1px solid rgba(255,176,80,.32);
     border-radius:14px; padding:16px 18px; color:var(--ink-1); font-size:15.5px; line-height:1.6; max-width:74ch}
   .st-hint b{color:#ffcf8f}

@@ -466,6 +466,7 @@ function renderDetail(){
   }
   renderSkillButtons();
   renderMcpBox();
+  mcpLiveStatus();
 
   refreshTasks(p.path);
   taskTimer = setInterval(()=>{ if(selected) refreshTasks(selected); }, 4000);
@@ -837,6 +838,27 @@ const subH = (n) => 50 + Math.max(0, n - 1) * SUB_LH;
 // The command carries this install's own path and the selected project's path,
 // because the two things people get wrong are where mcp.ts lives and which
 // folder they are asking about.
+/**
+ * Has an agent actually reached us about this project?
+ *
+ * Not "is it registered" — a registration that does not work looks identical to one
+ * that does. This is the only honest answer: something that was not this dashboard
+ * asked us about this project, and here is when.
+ */
+async function mcpLiveStatus(){
+  const el = document.getElementById('mcpLive'); if(!el || !selected) return;
+  let d = null;
+  try{ d = await (await fetch('/api/steps?path='+encodeURIComponent(selected))).json(); }catch{}
+  if(!el.isConnected) return;
+  const ok = d && d.ok && d.agentSeen;
+  el.className = 'mcp-live ' + (ok ? 'on' : 'off');
+  el.innerHTML = '<i></i><span>' + (ok
+    ? '<b>Connected.</b> Your assistant has asked us about this project — the wiring works.'
+    : '<b>Not heard from your assistant yet.</b> Run the command below, then close your editor and open it again. '
+      + 'Ask it anything about this product and this line turns green by itself.')
+    + '</span>';
+}
+
 function renderMcpBox(){
   const box=document.getElementById('mcpBox'); if(!box) return;
   const home=window.__GITMIR_HOME__||'/path/to/gitmir-local';
@@ -881,6 +903,11 @@ function renderMcpBox(){
     '</div>';
 
   box.innerHTML=
+    // The first question anybody has on this page is "did it work", and until now the
+    // only way to answer it was to interrogate the agent — which the tester tried,
+    // asked it for a list of arguments, got nothing recognisable, and marked the whole
+    // block untested. The dashboard already knows.
+    '<div class="mcp-live" id="mcpLive"><i></i><span>Checking…</span></div>'+
     '<div class="mcp-lead">'+
       '<div class="mcp-lead-t">The same model, inside the editor you already work in</div>'+
       '<p>The dashboard is where <b>you</b> look at the object context. MCP is how <b>your agent</b> reads it '+
@@ -1867,11 +1894,23 @@ async function renderSpec(view, m, seq){
   if(seq!=null && !viewAlive(seq)) return;
   const all=findingsData.findings||[];
   if(!all.length){
+    // The tester read "record them through gitmir_flag" as something to type, could not
+    // work out where, and stopped — taking six checks down with it. Nobody types a tool
+    // name. They say a sentence, so hand them the sentence.
+    const saySpec = 'Read the spec and the docs against the code, and record everywhere they disagree';
     view.innerHTML=viewHead('spec')+
-      '<div class="model-empty">Nothing recorded yet.<br><br>'+
-      'These are written by whoever reads the product’s rules against its code — usually your agent, with '+
-      '<code>gitmir_flag</code>, at the moment it notices. Ask it to <b>check the spec against the code and flag what does not match</b>, '+
-      'and what it finds lands here instead of scrolling out of a conversation.</div>';
+      '<div class="model-empty" style="max-width:78ch">Nothing recorded yet.<br><br>'+
+      'This fills up when somebody reads the rules your product promises against the code that actually runs it. '+
+      'That somebody is your assistant — you do not do it by hand, and you never type a command. '+
+      'Say this to it, in its chat:'+
+      '<div class="say-row"><div class="sentence">'+esc(saySpec)+'</div>'+
+      '<button class="run" data-copy="'+esc(saySpec)+'">Copy it</button></div>'+
+      '<br>Everything it finds lands here with the file and the line, instead of scrolling out of a conversation. '+
+      'Then you decide each one: fixed, or accepted on purpose with a name against it.</div>';
+    view.querySelectorAll('[data-copy]').forEach(b2=>b2.addEventListener('click', async ()=>{
+      try{ await copyToClipboard(b2.dataset.copy); toast('Copied ✓  Paste it into your assistant'); }
+      catch(e){ toast('Copy failed', true); }
+    }));
     return;
   }
   const S=findingsData.summary||{};
