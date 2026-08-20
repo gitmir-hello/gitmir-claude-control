@@ -679,6 +679,9 @@ const auditState = new Map<string, { sig: string; snap: Map<string, any>; since:
 // stub; nothing in the interface offers to change it.
 const AUDIT_ENDPOINT = process.env.GITMIR_AUDIT_ENDPOINT || 'https://ide.gitmir.com/api/audit-request';
 
+/** Files that count as "the person wrote down what they want" — checked in this order. */
+const BRIEF_NAMES = ['PRODUCT-BRIEF.md', 'SPEC.md', 'PRD.md', 'ТЗ.md', 'brief.md'];
+
 let VERSION_CACHE: string | null = null;
 /** The commit this dashboard is running, short. Empty when it was not installed from git. */
 function gitmirVersion(): string {
@@ -1323,6 +1326,28 @@ const server = http.createServer(async (req, res) => {
      * Step one advances on evidence, not on a claim. "Connected" means an agent has
      * actually asked us something — a checkbox saying it is connected is worth
      * nothing to the person whose editor is silently misconfigured. */
+    /* The description of a product that does not exist yet.
+     *
+     * An empty folder has nothing to read, so the map has to be built from what the
+     * person wants. Handing them a sentence with "(describe it here)" in the middle
+     * and hoping they replace it is how you get that placeholder pasted verbatim
+     * into a chat — which is exactly what happened. So they type it here, it becomes
+     * a real file in their project, and the sentence points at the file. */
+    if (req.method === 'POST' && url.pathname === '/api/brief') {
+      const { path: p, text } = await readBody(req);
+      // Only into a folder somebody already added. This writes to disk; it is not a
+      // place to be relaxed about which disk.
+      if (!loadProjects().some((x) => x.path === p)) return sendJSON(res, 400, { error: 'unknown project' });
+      const body = String(text || '').trim();
+      if (body.length < 20) return sendJSON(res, 400, { error: 'write a few sentences first' });
+      const file = BRIEF_NAMES[0];
+      const full = path.join(p, file);
+      try {
+        fs.writeFileSync(full, '# What we are building\n\n' + body.slice(0, 20000) + '\n');
+      } catch (e: any) { return sendJSON(res, 500, { error: String(e?.message || e) }); }
+      return sendJSON(res, 200, { ok: true, file });
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/steps') {
       const p = url.searchParams.get('path') || '';
       if (!p) return sendJSON(res, 400, { error: 'no path' });
@@ -1349,6 +1374,12 @@ const server = http.createServer(async (req, res) => {
         // An empty folder and a folder full of code need different first sentences:
         // one writes the map from what somebody wants, the other from what is there.
         hasCode: src.files > 0, sourceFiles: src.files,
+        // What we can actually see happening, so waiting is not a blank wall. A queue
+        // means the agent ran setup; model files appearing mean it is mid-write.
+        queue: tasks > 0 || ['todo', 'inprogress', 'verify', 'done']
+          .some((c) => { try { return fs.statSync(path.join(p, 'tasks', c)).isDirectory(); } catch { return false; } }),
+        modelFiles: (() => { try { return fs.readdirSync(path.join(p, '.gitmir', 'model')).filter((f) => f.endsWith('.json')).length; } catch { return 0; } })(),
+        brief: BRIEF_NAMES.find((f) => { try { return fs.statSync(path.join(p, f)).isFile(); } catch { return false; } }) || '',
         model: { exists: m.exists, objects },
         tasks, cli: hasGitmirCli(),
       });
@@ -2990,6 +3021,21 @@ const HTML = /* html */ `<!doctype html>
   .st-back{background:none; border:0; color:var(--ink-2); font-size:14.5px; cursor:pointer; padding:6px 0; text-decoration:underline}
   .st-back:hover{color:#fff}
   .st-note{color:var(--ink-1); font-size:15px; line-height:1.65; margin-top:20px; max-width:74ch}
+  .st-ta{width:100%; min-height:146px; resize:vertical; background:rgba(4,10,20,.6); border:1px solid var(--line2);
+    border-radius:12px; padding:12px 14px; color:#fff; font:inherit; font-size:15px; line-height:1.5}
+  .st-ta::placeholder{color:var(--ink-3); font-size:14px}
+  .st-ta:focus{outline:none; border-color:var(--cyan); box-shadow:0 0 0 3px rgba(47,216,255,.12)}
+  /* What we can see from here, so waiting is not a blank wall. */
+  .st-seen{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:9px}
+  .st-seen li{display:flex; align-items:flex-start; gap:10px; color:var(--ink-2); font-size:14.5px; line-height:1.45}
+  .st-seen li i{flex:0 0 auto; width:16px; height:16px; margin-top:2px; border-radius:50%;
+    border:1.5px solid var(--line2); background:transparent}
+  .st-seen li.ok{color:var(--ink-1)}
+  .st-seen li.ok i{border-color:#34f0a6; background:#34f0a6;
+    box-shadow:inset 0 0 0 2px rgba(4,18,30,.9)}
+  .st-hint{margin-top:18px; background:rgba(255,176,80,.08); border:1px solid rgba(255,176,80,.32);
+    border-radius:14px; padding:16px 18px; color:var(--ink-1); font-size:15.5px; line-height:1.6; max-width:74ch}
+  .st-hint b{color:#ffcf8f}
   /* The price of a change, in two parts. Cyan is what the first pass cost; red is
      everything after it. The same bar, at three sizes: the headline, one per change,
      and a hairline on a queue card. */

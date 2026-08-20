@@ -4668,37 +4668,76 @@ function renderSteps(view, pathStr, d){
 
   else {
     // Connected, or pasting by hand. One thing left, and it is three moves — shown as
-    // three cards with numbers you can read across the room, because the same three
-    // moves as a grey sentence is what somebody skipped before saying nothing happened.
+    // three cards with numbers you can read across the room.
+    //
+    // An empty folder gets a box to type in rather than a sentence with a hole in it.
+    // The hole version was pasted into a chat with "(describe it in a few sentences)"
+    // still in it, and the assistant — correctly — refused to invent a product.
+    const brief = d.brief || '';
     const say = d.hasCode
       ? 'Build the GitMir model for this project'
-      : 'Here is what I want to build: (describe it in a few sentences). Build the GitMir model from that, before we write any code.';
+      : (brief
+          ? 'Read ' + brief + ' and build the GitMir model from it'
+          : '');
     h += '<div class="st-mid">'
       +  '<div class="big">Now we make the map of your product</div>'
       +  '<p>' + (d.hasCode
            ? 'There is code in this folder. Your assistant reads it once and writes down what the product actually is — '
              + 'its parts, what they do, what happens where. That written-down product is the map, and everything here is built on it.'
-           : 'This folder is empty, which is the best moment to do this. Tell your assistant what you want to build — '
-             + 'a few sentences are enough — and the map gets made from that. The map first, the code after it.')
+           : brief
+             ? 'You wrote it down in <b>'+esc(brief)+'</b>. Your assistant reads that and turns it into the map — '
+               + 'the parts of your product, what they do, what happens where. The map first, the code after it.'
+             : 'This folder is empty, which is the best moment to do this. Nobody can map a product nobody has described yet, '
+               + 'so write a few sentences about what you want to build. That is all it takes.')
       +  '</p></div>';
 
-    h += '<div class="st-do">'
-      +  '<div class="st-do-c one"><div class="num">1</div>'
+    h += '<div class="st-do">';
+
+    // 1 — where to say it
+    h += '<div class="st-do-c one"><div class="num">1</div>'
       +    '<h5>Open Claude here</h5>'
       +    '<p>A terminal opens in this project with Claude already running. It has to be <b>this</b> folder — '
       +    'that is the only place it can write your map.</p>'
-      +    '<div class="act"><button class="run big-btn" data-run="1">Open Claude in this folder</button></div></div>'
+      +    '<div class="act"><button class="run big-btn" data-run="1">Open Claude in this folder</button></div></div>';
 
-      +  '<div class="st-do-c two"><div class="num">2</div>'
-      +    '<h5>' + (d.hasCode ? 'Paste this sentence' : 'Paste this and fill in the middle') + '</h5>'
-      +    '<div class="st-say">'+esc(say)+'</div>'
-      +    '<div class="act"><button class="ghost big-btn" data-copy="'+esc(say)+'">Copy it</button></div></div>'
+    // 2 — what to say, or what to write first
+    if(!d.hasCode && !brief){
+      h += '<div class="st-do-c two wait"><div class="num">2</div>'
+        +    '<h5>Say what you want to build</h5>'
+        +    '<p>A few sentences in your own words. Who uses it, what they do with it, what it has to get right.</p>'
+        +    '<textarea class="st-ta" id="st-brief" placeholder="A booking site for a small hotel. Guests pick dates and a room, pay a deposit, and get a confirmation. The owner sees today\u2019s arrivals and can block dates when a room is being repaired."></textarea>'
+        +    '<div class="act"><button class="run big-btn" id="st-save">Save it into the project</button></div></div>';
+    } else {
+      h += '<div class="st-do-c two"><div class="num">2</div>'
+        +    '<h5>Paste this sentence</h5>'
+        +    '<div class="st-say">'+esc(say)+'</div>'
+        +    '<div class="act"><button class="ghost big-btn" data-copy="'+esc(say)+'">Copy it</button></div></div>';
+    }
 
-      +  '<div class="st-do-c three wait"><div class="num">3</div>'
+    // 3 — what we can see from here
+    const seen = [];
+    seen.push([d.agentSeen, d.agentSeen ? 'Your assistant is talking to us' : 'Waiting for your assistant']);
+    seen.push([d.queue, d.queue ? 'The task queue is set up' : 'No task queue yet']);
+    seen.push([d.modelFiles > 0, d.modelFiles > 0 ? d.modelFiles+' map file'+(d.modelFiles===1?'':'s')+' written so far' : 'The map is not written yet']);
+    h += '<div class="st-do-c three'+((d.hasCode||brief)?' wait':'')+'"><div class="num">3</div>'
       +    '<h5>Come back here</h5>'
-      +    '<p>The moment the map is written, this page changes on its own. Nothing to refresh, nothing to click.</p>'
-      +    '<div class="act"><div class="st-wait"><i class="st-dot"></i>Watching for it right now…</div></div></div>'
-      +  '</div>';
+      +    '<ul class="st-seen">';
+    for(const [ok,label] of seen) h += '<li class="'+(ok?'ok':'')+'"><i></i>'+esc(label)+'</li>';
+    h += '</ul>'
+      +    '<div class="act"><div class="st-wait"><i class="st-dot"></i>Watching this folder every few seconds</div></div></div>';
+
+    h += '</div>';
+
+    // The thing that actually goes wrong, said out loud.
+    // Pasting by hand never produces a hello, so this cannot depend on one: a queue
+    // on disk is equally good proof that an assistant has been in here and stopped.
+    if((d.agentSeen || d.queue) && !d.modelFiles){
+      h += '<div class="st-hint"><b>Your assistant has been here and set the project up — but the map is not written yet.</b> '
+        +  'Nine times out of ten it asked you something in the chat and is waiting on your answer. Go and look at it: '
+        +  (d.hasCode ? 'it may be asking which parts of the code to treat as the product.'
+                      : 'on an empty folder it will ask what you are building — write it in box 2 above, save it, and tell it to read that file.')
+        +  '</div>';
+    }
 
     h += '<div class="st-note">Already have Claude open somewhere else? Fine — just make sure it is open <b>in this folder</b>. '
       +  'Prefer to do it by hand? '
@@ -4717,6 +4756,21 @@ function renderSteps(view, pathStr, d){
   view.querySelectorAll('[data-copy]').forEach(b=>b.addEventListener('click', async ()=>{
     try{ await copyToClipboard(b.dataset.copy); toast('Copied ✓'); }catch(e){ toast('Copy failed', true); }
   }));
+  const saveBtn = view.querySelector('#st-save');
+  if(saveBtn) saveBtn.addEventListener('click', async ()=>{
+    const ta = view.querySelector('#st-brief'), text = (ta.value||'').trim();
+    if(text.length < 20){ toast('A few more words — a couple of sentences is enough', true); ta.focus(); return; }
+    saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
+    let d2 = null;
+    try{
+      d2 = await (await fetch('/api/brief',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({ path:pathStr, text })})).json();
+    }catch(e){ d2 = { error:String(e&&e.message||e) }; }
+    saveBtn.disabled = false; saveBtn.textContent = 'Save it into the project';
+    if(!d2 || !d2.ok){ toast('Could not save it: '+((d2&&d2.error)||'unknown'), true); return; }
+    toast('Saved as '+d2.file+' — now tell Claude to read it');
+    renderHome(pathStr);
+  });
   view.querySelectorAll('[data-run]').forEach(b=>b.addEventListener('click', async ()=>{
     toast('Opening a terminal in this project…');
     const r = await fetch('/api/open',{method:'POST',headers:{'Content-Type':'application/json'},
