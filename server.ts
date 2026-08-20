@@ -2913,49 +2913,74 @@ const HTML = /* html */ `<!doctype html>
     font-family:var(--font-mono); font-size:11.5px; line-height:1.5; max-height:260px; overflow:auto; white-space:pre; color:var(--dim)}
   .au-err{color:#e0654e; font-size:12.5px}
   .au-hp{position:absolute; left:-9999px; width:1px; height:1px; opacity:0}
-  /* Getting started. Three steps, one on screen at a time, and nothing else in the
-     product until the map exists — because everything else is made out of it. */
-  .st-wrap{max-width:860px; margin:0 auto; padding:8px 0 40px}
-  .st-rail{display:flex; align-items:center; gap:0; margin:0 0 26px}
-  .st-rail .s{display:flex; align-items:center; gap:9px; color:var(--dim); font-size:13px; white-space:nowrap}
-  .st-rail .s b{display:grid; place-items:center; width:26px; height:26px; border-radius:50%;
-    border:1px solid var(--line); font-size:12px; font-weight:600; background:var(--panel)}
-  .st-rail .s.on{color:var(--txt)} .st-rail .s.on b{border-color:var(--cyan); color:var(--cyan); box-shadow:0 0 0 3px rgba(47,216,255,.12)}
-  .st-rail .s.ok b{border-color:#34f0a6; color:#34f0a6}
-  .st-rail .ln{flex:1; height:1px; background:var(--line); margin:0 14px; min-width:20px}
-  .st-h{font-size:27px; font-weight:700; color:var(--txt); margin:0 0 8px; letter-spacing:-.2px}
-  .st-p{color:var(--dim); font-size:15px; line-height:1.6; max-width:64ch; margin:0 0 22px}
-  .st-pick{display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:14px}
-  .st-card{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:20px; display:flex; flex-direction:column; gap:10px}
-  .st-card.pick{cursor:pointer; transition:border-color .15s, transform .1s}
-  .st-card.pick:hover{border-color:var(--cyan)} .st-card.pick:active{transform:translateY(1px)}
-  .st-card .tag{font-size:11px; letter-spacing:.5px; text-transform:uppercase; color:var(--cyan)}
-  .st-card h4{margin:0; font-size:18px; font-weight:650; color:var(--txt)}
-  .st-card p{margin:0; color:var(--dim); font-size:14px; line-height:1.6}
+  /* Getting started.
+   *
+   * Read at arm's length by somebody who has never seen this before, so nothing here
+   * is set in the interface grey used elsewhere: body copy is --ink-1 at 16px and up.
+   * The three things to do are three big cards with big numbers, because a numbered
+   * list in 13px grey is exactly what people skip and then say nothing happened. */
+  .st-wrap{max-width:1040px; margin:0 auto; padding:8px 0 48px}
+  .st-rail{display:flex; align-items:center; gap:0; margin:0 0 30px}
+  .st-rail .s{display:flex; align-items:center; gap:10px; color:var(--ink-2); font-size:14px; white-space:nowrap}
+  .st-rail .s b{display:grid; place-items:center; width:30px; height:30px; border-radius:50%;
+    border:1.5px solid var(--line2); font-size:14px; font-weight:700; background:var(--panel)}
+  .st-rail .s.on{color:#fff} .st-rail .s.on b{border-color:var(--cyan); color:var(--cyan); background:rgba(47,216,255,.12);
+    box-shadow:0 0 0 4px rgba(47,216,255,.1)}
+  .st-rail .s.ok{color:var(--ink-1)} .st-rail .s.ok b{border-color:#34f0a6; color:#34f0a6; background:rgba(52,240,166,.1)}
+  .st-rail .ln{flex:1; height:2px; background:var(--line); margin:0 16px; min-width:20px; border-radius:2px}
+  .st-h{font-size:34px; font-weight:750; color:#fff; margin:0 0 12px; letter-spacing:-.4px; line-height:1.15}
+  .st-p{color:var(--ink-1); font-size:17px; line-height:1.6; max-width:66ch; margin:0 0 26px}
+  .st-pick{display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:16px}
+  .st-card{background:var(--panel); border:1px solid var(--line2); border-radius:16px; padding:24px;
+    display:flex; flex-direction:column; gap:12px}
+  .st-card.pick{cursor:pointer; transition:border-color .15s, transform .12s, box-shadow .15s}
+  .st-card.pick:hover{border-color:var(--cyan); transform:translateY(-2px); box-shadow:0 10px 30px rgba(0,0,0,.35)}
+  .st-card.pick:active{transform:translateY(0)}
+  .st-card .tag{font-size:12px; letter-spacing:.6px; text-transform:uppercase; color:var(--cyan); font-weight:600}
+  .st-card h4{margin:0; font-size:21px; font-weight:700; color:#fff; line-height:1.25}
+  .st-card p{margin:0; color:var(--ink-1); font-size:15.5px; line-height:1.6}
   .st-card .go{margin-top:auto; align-self:flex-start}
-  .st-cmd{display:flex; align-items:center; gap:10px; background:var(--bg); border:1px solid var(--line);
-    border-radius:10px; padding:11px 13px; font-family:var(--font-mono); font-size:13.5px; color:var(--txt)}
-  /* The command scrolls inside itself; the button that copies it must not be pushed
-     off the end by a long path — that is the only control on the screen. */
+
+  /* The three things to do, as three cards you cannot miss. */
+  .st-do{display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr)); gap:16px; margin:8px 0 4px}
+  .st-do-c{position:relative; background:linear-gradient(170deg,rgba(20,44,80,.55),rgba(9,18,38,.5));
+    border:1px solid var(--line2); border-radius:18px; padding:26px 22px 22px; display:flex; flex-direction:column; gap:12px;
+    min-height:206px}
+  .st-do-c .num{display:grid; place-items:center; width:46px; height:46px; border-radius:14px;
+    font-size:22px; font-weight:800; color:#04121e; background:var(--cyan); box-shadow:0 6px 18px rgba(47,216,255,.28)}
+  .st-do-c.two .num{background:#a78bfa; box-shadow:0 6px 18px rgba(167,139,250,.3)}
+  .st-do-c.three .num{background:#34f0a6; box-shadow:0 6px 18px rgba(52,240,166,.28)}
+  .st-do-c h5{margin:0; font-size:20px; font-weight:700; color:#fff; line-height:1.25}
+  .st-do-c p{margin:0; color:var(--ink-1); font-size:15px; line-height:1.55}
+  .st-do-c .act{margin-top:auto}
+  .st-do-c .big-btn{width:100%; font-size:15.5px; padding:12px 16px; font-weight:650}
+  .st-say{background:rgba(4,10,20,.6); border:1px solid var(--line2); border-left:4px solid #a78bfa;
+    border-radius:12px; padding:14px 16px; font-size:16px; color:#fff; line-height:1.45; word-break:break-word}
+  .st-wait{display:flex; align-items:center; gap:11px; color:var(--ink-1); font-size:15px}
+  .st-dot{width:11px; height:11px; border-radius:50%; background:#34f0a6; flex:0 0 auto; animation:stp 1.4s ease-in-out infinite}
+  @keyframes stp{0%,100%{opacity:.3; transform:scale(.75)} 50%{opacity:1; transform:scale(1.2)}}
+  .st-cmd{display:flex; align-items:center; gap:10px; background:rgba(4,10,20,.6); border:1px solid var(--line2);
+    border-radius:12px; padding:13px 15px; font-family:var(--font-mono); font-size:14px; color:#fff}
   .st-cmd span{flex:1 1 auto; min-width:0; white-space:nowrap; overflow-x:auto}
   .st-cmd button{flex:0 0 auto}
-  .st-say{background:var(--bg); border:1px solid var(--line); border-left:3px solid var(--cyan);
-    border-radius:10px; padding:13px 15px; font-size:15px; color:var(--txt); line-height:1.5}
-  .st-wait{display:flex; align-items:center; gap:11px; color:var(--dim); font-size:14px; margin-top:16px}
-  .st-dot{width:9px; height:9px; border-radius:50%; background:var(--cyan); animation:stp 1.4s ease-in-out infinite}
-  @keyframes stp{0%,100%{opacity:.25; transform:scale(.8)} 50%{opacity:1; transform:scale(1.15)}}
-  .st-mid{text-align:center; padding:48px 20px 30px}
-  .st-mid .big{font-size:30px; font-weight:700; color:var(--txt); margin-bottom:10px; letter-spacing:-.3px}
-  .st-mid p{color:var(--dim); font-size:15.5px; line-height:1.65; max-width:60ch; margin:0 auto}
-  .st-un{margin-top:34px; border-top:1px solid var(--line); padding-top:26px}
-  .st-un-h{font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:var(--dim); margin-bottom:16px}
-  .st-un-g{display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:12px; text-align:left}
-  .st-un-i{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:15px 16px}
-  .st-un-i b{display:block; color:var(--txt); font-size:15px; font-weight:620; margin-bottom:5px}
-  .st-un-i span{color:var(--dim); font-size:13.5px; line-height:1.55}
-  .st-back{background:none; border:0; color:var(--dim); font-size:13px; cursor:pointer; padding:0; margin-top:20px}
-  .st-back:hover{color:var(--txt)}
-  .st-note{color:var(--dim); font-size:13px; line-height:1.6; margin-top:18px}
+  /* Inside a step card the command has a column, not a row: half a command with the
+     rest cut off looks like the tool is broken, and copying it is an act of faith. */
+  .st-do-c .st-cmd{display:block; font-size:13px; line-height:1.5}
+  .st-do-c .st-cmd span{display:block; white-space:pre-wrap; word-break:break-all; overflow:visible}
+  .st-mid{text-align:center; padding:36px 20px 26px}
+  .st-mid .big{font-size:34px; font-weight:750; color:#fff; margin-bottom:12px; letter-spacing:-.4px; line-height:1.15}
+  .st-mid p{color:var(--ink-1); font-size:17px; line-height:1.65; max-width:62ch; margin:0 auto}
+  .st-un{margin-top:40px; border-top:1px solid var(--line); padding-top:30px}
+  .st-un-h{font-size:13px; text-transform:uppercase; letter-spacing:.7px; color:var(--cyan-soft); margin-bottom:18px; font-weight:600}
+  .st-un-g{display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:14px; text-align:left}
+  .st-un-i{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px 18px;
+    transition:border-color .15s, transform .12s}
+  .st-un-i:hover{border-color:var(--line2); transform:translateY(-2px)}
+  .st-un-i b{display:block; color:#fff; font-size:16px; font-weight:700; margin-bottom:7px; line-height:1.3}
+  .st-un-i span{color:var(--ink-1); font-size:14.5px; line-height:1.55}
+  .st-back{background:none; border:0; color:var(--ink-2); font-size:14.5px; cursor:pointer; padding:6px 0; text-decoration:underline}
+  .st-back:hover{color:#fff}
+  .st-note{color:var(--ink-1); font-size:15px; line-height:1.65; margin-top:20px; max-width:74ch}
   /* The price of a change, in two parts. Cyan is what the first pass cost; red is
      everything after it. The same bar, at three sizes: the headline, one per change,
      and a hairline on a queue card. */

@@ -4640,26 +4640,36 @@ function renderSteps(view, pathStr, d){
   }
 
   else if(d.step === 2 && d.mode === 'mcp' && !d.agentSeen && !stepSkipWait){
-    // Chosen the connected route but nothing has come through yet.
+    // Chosen the connected route, nothing has come through yet. Two moves, and the
+    // second one is the one everybody skips, so it gets a card of its own.
     const cmd = window.__GITMIR_CLI__ ? 'gitmir mcp add'
       : 'claude mcp add -s user gitmir -- node "'+(window.__GITMIR_DIR__||'')+'/mcp.ts"';
-    h += '<h2 class="st-h">Run this one line, then reopen your editor</h2>'
-      +  '<p class="st-p">Paste it in a terminal. It takes a second and asks for nothing — no account, no password, nothing leaves your computer.</p>'
-      +  '<div class="st-cmd"><span>'+esc(cmd)+'</span><button class="ghost" data-copy="'+esc(cmd)+'">Copy</button></div>'
-      +  '<div class="st-note"><b>Then close your editor and open it again.</b> It only looks for new tools when it starts up. '
-      +  'This is the one step people skip, and then think nothing happened.</div>'
-      +  '<div class="st-wait"><i class="st-dot"></i>Waiting for your assistant to say hello. We will notice on our own — leave this page open.</div>'
-      +  '<div style="display:flex; gap:14px; flex-wrap:wrap; align-items:center">'
-      +    '<button class="st-back" data-skip="1">Done that — take me to the next step →</button>'
-      +    '<button class="st-back" data-mode="skills">I would rather copy and paste instead →</button>'
-      +  '</div>';
+    h += '<h2 class="st-h">Two moves and your assistant is connected</h2>'
+      +  '<p class="st-p">Nothing is asked of you — no account, no password, nothing leaves your computer. '
+      +  'It takes about ten seconds.</p>'
+      +  '<div class="st-do">'
+      +  '<div class="st-do-c one"><div class="num">1</div>'
+      +    '<h5>Run this one line</h5>'
+      +    '<div class="st-cmd"><span>'+esc(cmd)+'</span></div>'
+      +    '<div class="act"><button class="run big-btn" data-copy="'+esc(cmd)+'">Copy the line</button></div></div>'
+      +  '<div class="st-do-c two"><div class="num">2</div>'
+      +    '<h5>Close your editor and open it again</h5>'
+      +    '<p>It only looks for new tools when it starts up. <b>This is the step everyone skips</b>, and then thinks '
+      +    'nothing happened.</p>'
+      +    '<div class="act"><button class="ghost big-btn" data-skip="1">Done both — next step</button></div></div>'
+      +  '<div class="st-do-c three"><div class="num">3</div>'
+      +    '<h5>We notice by ourselves</h5>'
+      +    '<p>As soon as your assistant asks us anything, this page moves on. You do not have to tell us.</p>'
+      +    '<div class="act"><div class="st-wait"><i class="st-dot"></i>Listening…</div></div></div>'
+      +  '</div>'
+      +  '<div class="st-note">Rather not connect anything? '
+      +  '<button class="st-back" data-mode="skills">Copy and paste instead — works with any assistant</button></div>';
   }
 
   else {
-    // Connected (or pasting by hand). The only thing left is the map.
-    // An empty folder has nothing to read yet, so the sentence has to carry the
-    // description with it. Telling somebody to "build the model from the spec" when
-    // there is no spec is the kind of instruction that gets a tool closed.
+    // Connected, or pasting by hand. One thing left, and it is three moves — shown as
+    // three cards with numbers you can read across the room, because the same three
+    // moves as a grey sentence is what somebody skipped before saying nothing happened.
     const say = d.hasCode
       ? 'Build the GitMir model for this project'
       : 'Here is what I want to build: (describe it in a few sentences). Build the GitMir model from that, before we write any code.';
@@ -4667,30 +4677,36 @@ function renderSteps(view, pathStr, d){
       +  '<div class="big">Now we make the map of your product</div>'
       +  '<p>' + (d.hasCode
            ? 'There is code in this folder. Your assistant reads it once and writes down what the product actually is — '
-             + 'its parts, what they do, what happens where. That written-down product is the map.'
-           : 'This folder is empty, which is the best moment to do this. Write a few sentences about what you want to build — '
-             + 'in a file, or straight in the chat — and the map gets made from that. The map first, the code after it.')
-      +  '</p></div>'
-      +  '<p class="st-p" style="margin:0 auto 14px; text-align:center">'
-      +    (d.hasCode ? 'Say this to your assistant:' : 'Paste this into your chat and fill in the middle:')+'</p>'
-      +  '<div class="st-say">'+esc(say)+'</div>'
-      +  '<div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap">'
-      // The sentence is useless without somewhere to say it. This was the gap: the
-      // screen waited for a map and never said where the map gets made.
-      +    '<button class="run" data-run="1">Open Claude in this folder</button>'
-      +    '<button class="ghost" data-copy="'+esc(say)+'">Copy the sentence</button>'
-      +    (d.mode === 'skills'
-          ? '<button class="ghost" data-go="skill">Open the instruction to paste</button>'
-          : '<button class="ghost" data-go="skill">Or paste the instruction by hand</button>')
-      +  '</div>'
-      +  '<div class="st-note"><b>1.</b> Press the button — a terminal opens in this project with Claude running. '
-      +  '<b>2.</b> Paste the sentence above and press Enter. <b>3.</b> Come back here: this page changes by itself.'
-      +  '<br><br>Already have Claude open somewhere else? Just make sure it is open <b>in this folder</b> — '
-      +  'it can only write the map into the project it is looking at.</div>'
-      +  '<div class="st-wait"><i class="st-dot"></i>Waiting for the map. It appears here by itself the moment it is written — nothing to refresh.</div>'
-      +  '<div class="st-note">It lands in a folder called <code>.gitmir/model/</code> inside your project. Plain files you can open and read.</div>';
+             + 'its parts, what they do, what happens where. That written-down product is the map, and everything here is built on it.'
+           : 'This folder is empty, which is the best moment to do this. Tell your assistant what you want to build — '
+             + 'a few sentences are enough — and the map gets made from that. The map first, the code after it.')
+      +  '</p></div>';
 
-    h += '<div class="st-un"><div class="st-un-h">This is what opens up when it is here</div><div class="st-un-g">';
+    h += '<div class="st-do">'
+      +  '<div class="st-do-c one"><div class="num">1</div>'
+      +    '<h5>Open Claude here</h5>'
+      +    '<p>A terminal opens in this project with Claude already running. It has to be <b>this</b> folder — '
+      +    'that is the only place it can write your map.</p>'
+      +    '<div class="act"><button class="run big-btn" data-run="1">Open Claude in this folder</button></div></div>'
+
+      +  '<div class="st-do-c two"><div class="num">2</div>'
+      +    '<h5>' + (d.hasCode ? 'Paste this sentence' : 'Paste this and fill in the middle') + '</h5>'
+      +    '<div class="st-say">'+esc(say)+'</div>'
+      +    '<div class="act"><button class="ghost big-btn" data-copy="'+esc(say)+'">Copy it</button></div></div>'
+
+      +  '<div class="st-do-c three"><div class="num">3</div>'
+      +    '<h5>Come back here</h5>'
+      +    '<p>The moment the map is written, this page changes on its own. Nothing to refresh, nothing to click.</p>'
+      +    '<div class="act"><div class="st-wait"><i class="st-dot"></i>Watching for it right now…</div></div></div>'
+      +  '</div>';
+
+    h += '<div class="st-note">Already have Claude open somewhere else? Fine — just make sure it is open <b>in this folder</b>. '
+      +  'Prefer to do it by hand? '
+      +  '<button class="st-back" data-go="skill">Open the full instruction</button>'
+      +  '<br><br>The map lands in a folder called <code>.gitmir/model/</code> inside your project. '
+      +  'Plain files you can open and read — nothing hidden, nothing sent anywhere.</div>';
+
+    h += '<div class="st-un"><div class="st-un-h">And this is what opens up the second it is here</div><div class="st-un-g">';
     for(const [t2,s] of UNLOCKS) h += '<div class="st-un-i"><b>'+esc(t2)+'</b><span>'+esc(s)+'</span></div>';
     h += '</div></div>';
   }
@@ -4729,7 +4745,14 @@ function renderSteps(view, pathStr, d){
       const before = d.step + '/' + d.agentSeen;
       const n = await loadSteps(pathStr);
       if(!n || !n.ok) return;
-      if(n.step + '/' + n.agentSeen !== before){ clearInterval(stepPoll); renderHome(pathStr); }
+      if(n.step + '/' + n.agentSeen !== before){
+        clearInterval(stepPoll);
+        // The one moment in this product worth marking. Somebody just did the thing
+        // that makes everything else exist; saying so costs nothing and lands.
+        if(n.step === 3) toast('Your map is here — everything just opened up');
+        else if(n.agentSeen) toast('Your assistant said hello. Connected.');
+        renderHome(pathStr);
+      }
     }, 3000);
   }
 }
