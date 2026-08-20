@@ -256,7 +256,7 @@ function renderList(){
           // Where the last project stood in getting started says nothing about this
           // one. Left behind, it opened a project with no map onto a tab full of
           // diagrams that cannot exist yet.
-          stepData=null; qPrice=null; qPriceFor=null; }
+          stepData=null; qPrice=null; qPriceFor=null; stepSkipWait=false; }
       selected = p.path; renderDetail();
     };
     el.addEventListener('click', open);
@@ -4572,6 +4572,9 @@ function caPriceBlock(d){
  * was worth installing.
  * ------------------------------------------------------------------------ */
 let stepData = null, stepPoll = null;
+// Set when somebody says they have run the command. It only skips the waiting
+// screen — it never claims the connection works, because we still do not know.
+let stepSkipWait = false;
 
 // What arrives when the map does. Written as what you get, not as what it is.
 const UNLOCKS = [
@@ -4636,7 +4639,7 @@ function renderSteps(view, pathStr, d){
       +  '<div class="st-note">Not sure? Take the first one. If it does not work in your editor, the second one always does.</div>';
   }
 
-  else if(d.step === 2 && d.mode === 'mcp' && !d.agentSeen){
+  else if(d.step === 2 && d.mode === 'mcp' && !d.agentSeen && !stepSkipWait){
     // Chosen the connected route but nothing has come through yet.
     const cmd = window.__GITMIR_CLI__ ? 'gitmir mcp add'
       : 'claude mcp add -s user gitmir -- node "'+(window.__GITMIR_DIR__||'')+'/mcp.ts"';
@@ -4646,7 +4649,10 @@ function renderSteps(view, pathStr, d){
       +  '<div class="st-note"><b>Then close your editor and open it again.</b> It only looks for new tools when it starts up. '
       +  'This is the one step people skip, and then think nothing happened.</div>'
       +  '<div class="st-wait"><i class="st-dot"></i>Waiting for your assistant to say hello. We will notice on our own — leave this page open.</div>'
-      +  '<button class="st-back" data-mode="skills">I would rather copy and paste instead →</button>';
+      +  '<div style="display:flex; gap:14px; flex-wrap:wrap; align-items:center">'
+      +    '<button class="st-back" data-skip="1">Done that — take me to the next step →</button>'
+      +    '<button class="st-back" data-mode="skills">I would rather copy and paste instead →</button>'
+      +  '</div>';
   }
 
   else {
@@ -4669,11 +4675,18 @@ function renderSteps(view, pathStr, d){
       +    (d.hasCode ? 'Say this to your assistant:' : 'Paste this into your chat and fill in the middle:')+'</p>'
       +  '<div class="st-say">'+esc(say)+'</div>'
       +  '<div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap">'
-      +    '<button class="run" data-copy="'+esc(say)+'">Copy this sentence</button>'
+      // The sentence is useless without somewhere to say it. This was the gap: the
+      // screen waited for a map and never said where the map gets made.
+      +    '<button class="run" data-run="1">Open Claude in this folder</button>'
+      +    '<button class="ghost" data-copy="'+esc(say)+'">Copy the sentence</button>'
       +    (d.mode === 'skills'
           ? '<button class="ghost" data-go="skill">Open the instruction to paste</button>'
           : '<button class="ghost" data-go="skill">Or paste the instruction by hand</button>')
       +  '</div>'
+      +  '<div class="st-note"><b>1.</b> Press the button — a terminal opens in this project with Claude running. '
+      +  '<b>2.</b> Paste the sentence above and press Enter. <b>3.</b> Come back here: this page changes by itself.'
+      +  '<br><br>Already have Claude open somewhere else? Just make sure it is open <b>in this folder</b> — '
+      +  'it can only write the map into the project it is looking at.</div>'
       +  '<div class="st-wait"><i class="st-dot"></i>Waiting for the map. It appears here by itself the moment it is written — nothing to refresh.</div>'
       +  '<div class="st-note">It lands in a folder called <code>.gitmir/model/</code> inside your project. Plain files you can open and read.</div>';
 
@@ -4687,6 +4700,17 @@ function renderSteps(view, pathStr, d){
 
   view.querySelectorAll('[data-copy]').forEach(b=>b.addEventListener('click', async ()=>{
     try{ await copyToClipboard(b.dataset.copy); toast('Copied ✓'); }catch(e){ toast('Copy failed', true); }
+  }));
+  view.querySelectorAll('[data-run]').forEach(b=>b.addEventListener('click', async ()=>{
+    toast('Opening a terminal in this project…');
+    const r = await fetch('/api/open',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ path:pathStr })}).catch(()=>null);
+    if(!r || !r.ok) toast('Could not open a terminal. Open one yourself in this folder and run: claude', true);
+  }));
+  // Waiting for a hello that may never come is a dead end: an assistant that never
+  // needs a GitMir tool never says one. The way forward must not depend on it.
+  view.querySelectorAll('[data-skip]').forEach(b=>b.addEventListener('click', ()=>{
+    stepSkipWait = true; renderHome(pathStr);
   }));
   view.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click', async ()=>{
     await fetch('/api/update',{method:'POST',headers:{'Content-Type':'application/json'},
