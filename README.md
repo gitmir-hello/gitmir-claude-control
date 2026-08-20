@@ -189,9 +189,16 @@ gitmir
 
 <sub>Clones into <code>~/.gitmir/local</code>, links one command onto your PATH, and pulls nothing from a package registry. <a href="install.sh">Read the installer</a> — it is short on purpose. There is no npm route: <code>npm i -g</code> would put this under <code>node_modules</code>, where Node refuses to strip TypeScript types.</sub>
 
-**http://localhost:4599** → add a project folder → **▶ Run Claude** → paste the
-**`gitmir-model`** skill. Claude reads the repo, writes `.gitmir/model/`, and every view
-has something in it.
+**http://localhost:4599** → add a project folder, and it walks you through three
+steps: connect your assistant (one command, or say you would rather paste by hand),
+then make the map, then everything else. Nothing else in the tool opens until the
+map exists — every screen is built out of it, and a row of empty diagrams is a worse
+introduction than one door.
+
+The map is written by your assistant into `.gitmir/model/`, from your code if there
+is code, or from a few sentences about what you want to build if the folder is
+still empty. The dashboard notices the moment it lands; there is nothing to
+refresh.
 
 | Command | |
 |---|---|

@@ -19,7 +19,9 @@ import { execFile, execFileSync, spawn } from 'node:child_process';
 /** A folder the user added, as stored in projects.json. */
 interface Project { name: string; path: string; color?: string; description?: string;
   /** What an hour of this team costs, and in what. Local to this machine — see /api/update. */
-  rate?: number; currency?: string }
+  rate?: number; currency?: string;
+  /** How this project talks to its agent: 'mcp', 'skills', or unanswered. */
+  mode?: string }
 /** An entry in skills.json — a prompt kept in its own .md file. */
 interface Skill { name: string; title?: string; desc?: string; file: string; stripFrontmatter?: boolean; prepend?: string }
 type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
@@ -1311,6 +1313,47 @@ const server = http.createServer(async (req, res) => {
 
     // Everything the first screen needs, in one answer. Four round-trips to draw
     // one page is the kind of thing that makes a fast tool feel slow.
+    /* Where this project is in getting started, and nothing more.
+     *
+     * Three steps, and the second one cannot be faked: a project has a product map
+     * or it does not. Everything the tool can do is built on that map, so showing
+     * fifteen screens of empty diagrams to somebody who has not made one yet is not
+     * generosity, it is a maze.
+     *
+     * Step one advances on evidence, not on a claim. "Connected" means an agent has
+     * actually asked us something — a checkbox saying it is connected is worth
+     * nothing to the person whose editor is silently misconfigured. */
+    if (req.method === 'GET' && url.pathname === '/api/steps') {
+      const p = url.searchParams.get('path') || '';
+      if (!p) return sendJSON(res, 400, { error: 'no path' });
+      const m = readModel(p);
+      const src = sourceBytes(p);
+      const prj = loadProjects().find((x) => x.path === p) || ({} as Project);
+      const mode = prj.mode === 'skills' || prj.mode === 'mcp' ? prj.mode : '';
+      // Proof the wiring works: something that was not this dashboard asked us a
+      // question about this project.
+      const agentSeen = readUsage(p, 400).some((e: any) => e && e.by && e.by !== 'human');
+      let objects = 0;
+      for (const d of Object.values(m.model || {})) if (Array.isArray(d)) objects += d.length;
+      let tasks = 0;
+      for (const col of ['todo', 'inprogress', 'verify', 'done']) {
+        try { tasks += fs.readdirSync(path.join(p, 'tasks', col)).filter((f) => f.endsWith('.md')).length; } catch {}
+      }
+      // Step one is only "has this person said how they want to work". Whether the
+      // wiring is actually live is a separate question, answered by `agentSeen`, and
+      // it belongs inside step two — otherwise somebody who ran the command and hit a
+      // problem is bounced back to a choice they already made.
+      const step = m.exists ? 3 : (mode ? 2 : 1);
+      return sendJSON(res, 200, {
+        ok: true, step, mode, agentSeen,
+        // An empty folder and a folder full of code need different first sentences:
+        // one writes the map from what somebody wants, the other from what is there.
+        hasCode: src.files > 0, sourceFiles: src.files,
+        model: { exists: m.exists, objects },
+        tasks, cli: hasGitmirCli(),
+      });
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/overview') {
       const p = url.searchParams.get('path') || '';
       if (!p) return sendJSON(res, 400, { error: 'no path' });
@@ -1683,7 +1726,7 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, { added: true, project });
     }
     if (req.method === 'POST' && url.pathname === '/api/update') {
-      const { path: p, name, description, rate, currency } = await readBody(req);
+      const { path: p, name, description, rate, currency, mode } = await readBody(req);
       const list = loadProjects();
       const item = list.find((x) => x.path === p);
       if (item) {
@@ -1698,6 +1741,9 @@ const server = http.createServer(async (req, res) => {
           item.rate = Number.isFinite(n) && n > 0 ? Math.min(100000, Math.round(n * 100) / 100) : 0;
         }
         if (currency !== undefined) item.currency = String(currency).trim().slice(0, 4).toUpperCase();
+        // Which way this project talks to its agent. Answered once, by the person,
+        // on the first screen; nothing else in the tool guesses it.
+        if (mode !== undefined) item.mode = String(mode) === 'skills' ? 'skills' : String(mode) === 'mcp' ? 'mcp' : '';
         saveProjects(list);
       }
       return sendJSON(res, 200, { ok: !!item });
@@ -2867,6 +2913,49 @@ const HTML = /* html */ `<!doctype html>
     font-family:var(--font-mono); font-size:11.5px; line-height:1.5; max-height:260px; overflow:auto; white-space:pre; color:var(--dim)}
   .au-err{color:#e0654e; font-size:12.5px}
   .au-hp{position:absolute; left:-9999px; width:1px; height:1px; opacity:0}
+  /* Getting started. Three steps, one on screen at a time, and nothing else in the
+     product until the map exists — because everything else is made out of it. */
+  .st-wrap{max-width:860px; margin:0 auto; padding:8px 0 40px}
+  .st-rail{display:flex; align-items:center; gap:0; margin:0 0 26px}
+  .st-rail .s{display:flex; align-items:center; gap:9px; color:var(--dim); font-size:13px; white-space:nowrap}
+  .st-rail .s b{display:grid; place-items:center; width:26px; height:26px; border-radius:50%;
+    border:1px solid var(--line); font-size:12px; font-weight:600; background:var(--panel)}
+  .st-rail .s.on{color:var(--txt)} .st-rail .s.on b{border-color:var(--cyan); color:var(--cyan); box-shadow:0 0 0 3px rgba(47,216,255,.12)}
+  .st-rail .s.ok b{border-color:#34f0a6; color:#34f0a6}
+  .st-rail .ln{flex:1; height:1px; background:var(--line); margin:0 14px; min-width:20px}
+  .st-h{font-size:27px; font-weight:700; color:var(--txt); margin:0 0 8px; letter-spacing:-.2px}
+  .st-p{color:var(--dim); font-size:15px; line-height:1.6; max-width:64ch; margin:0 0 22px}
+  .st-pick{display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:14px}
+  .st-card{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:20px; display:flex; flex-direction:column; gap:10px}
+  .st-card.pick{cursor:pointer; transition:border-color .15s, transform .1s}
+  .st-card.pick:hover{border-color:var(--cyan)} .st-card.pick:active{transform:translateY(1px)}
+  .st-card .tag{font-size:11px; letter-spacing:.5px; text-transform:uppercase; color:var(--cyan)}
+  .st-card h4{margin:0; font-size:18px; font-weight:650; color:var(--txt)}
+  .st-card p{margin:0; color:var(--dim); font-size:14px; line-height:1.6}
+  .st-card .go{margin-top:auto; align-self:flex-start}
+  .st-cmd{display:flex; align-items:center; gap:10px; background:var(--bg); border:1px solid var(--line);
+    border-radius:10px; padding:11px 13px; font-family:var(--font-mono); font-size:13.5px; color:var(--txt)}
+  /* The command scrolls inside itself; the button that copies it must not be pushed
+     off the end by a long path — that is the only control on the screen. */
+  .st-cmd span{flex:1 1 auto; min-width:0; white-space:nowrap; overflow-x:auto}
+  .st-cmd button{flex:0 0 auto}
+  .st-say{background:var(--bg); border:1px solid var(--line); border-left:3px solid var(--cyan);
+    border-radius:10px; padding:13px 15px; font-size:15px; color:var(--txt); line-height:1.5}
+  .st-wait{display:flex; align-items:center; gap:11px; color:var(--dim); font-size:14px; margin-top:16px}
+  .st-dot{width:9px; height:9px; border-radius:50%; background:var(--cyan); animation:stp 1.4s ease-in-out infinite}
+  @keyframes stp{0%,100%{opacity:.25; transform:scale(.8)} 50%{opacity:1; transform:scale(1.15)}}
+  .st-mid{text-align:center; padding:48px 20px 30px}
+  .st-mid .big{font-size:30px; font-weight:700; color:var(--txt); margin-bottom:10px; letter-spacing:-.3px}
+  .st-mid p{color:var(--dim); font-size:15.5px; line-height:1.65; max-width:60ch; margin:0 auto}
+  .st-un{margin-top:34px; border-top:1px solid var(--line); padding-top:26px}
+  .st-un-h{font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:var(--dim); margin-bottom:16px}
+  .st-un-g{display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:12px; text-align:left}
+  .st-un-i{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:15px 16px}
+  .st-un-i b{display:block; color:var(--txt); font-size:15px; font-weight:620; margin-bottom:5px}
+  .st-un-i span{color:var(--dim); font-size:13.5px; line-height:1.55}
+  .st-back{background:none; border:0; color:var(--dim); font-size:13px; cursor:pointer; padding:0; margin-top:20px}
+  .st-back:hover{color:var(--txt)}
+  .st-note{color:var(--dim); font-size:13px; line-height:1.6; margin-top:18px}
   /* The price of a change, in two parts. Cyan is what the first pass cost; red is
      everything after it. The same bar, at three sizes: the headline, one per change,
      and a hairline on a queue card. */
@@ -3335,7 +3424,10 @@ const HTML = /* html */ `<!doctype html>
   <div class="toast" id="toast"></div>
 
 <script>window.__GITMIR_HOME__ = ${JSON.stringify(import.meta.dirname)};
-window.__GITMIR_CLI__ = ${JSON.stringify(hasGitmirCli())};</script>
+window.__GITMIR_CLI__ = ${JSON.stringify(hasGitmirCli())};
+// Where this dashboard lives, so the fallback registration command can name a real
+// path instead of asking somebody to work out where they cloned it.
+window.__GITMIR_DIR__ = ${JSON.stringify(import.meta.dirname)};</script>
 <script src="/impact.js"></script>
 <script src="/hud.js"></script>
 <script src="/hud-scenes.js"></script>

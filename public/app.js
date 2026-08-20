@@ -242,15 +242,21 @@ function renderList(){
     // The description is what a person wrote about this project; the path is the fallback,
     // because a card with an empty paragraph looks broken rather than empty.
     el.querySelector('.prj-desc').textContent = p.description || p.path;
-    el.querySelector('.pj-log').textContent = p.tasks ? p.tasks + ' done' : 'nothing logged';
-    el.querySelector('.pj-model').textContent = p.hasModel ? 'Modelled' : 'No model';
+    el.querySelector('.pj-log').textContent = p.tasks ? p.tasks + ' done' : 'no work yet';
+    // A card is where somebody decides which project to open. "No model" reads as a
+    // missing feature; "Set this one up" reads as the next thing to do.
+    el.querySelector('.pj-model').textContent = p.hasModel ? 'Ready' : 'Set this one up';
 
     const open = () => {
       // Everything below belongs to the project being left: a hand-picked what-if, a
       // selected task, a layer showing that task. Carrying them into another project
       // would show one product's answer on another product's map.
       if(selected!==p.path){ modelSrc=null; logicEntityId=null;
-        changesData=null; changesFor=null; impactPick=null; adhocIds=[]; mapLayer='none'; }
+        changesData=null; changesFor=null; impactPick=null; adhocIds=[]; mapLayer='none';
+          // Where the last project stood in getting started says nothing about this
+          // one. Left behind, it opened a project with no map onto a tab full of
+          // diagrams that cannot exist yet.
+          stepData=null; qPrice=null; qPriceFor=null; }
       selected = p.path; renderDetail();
     };
     el.addEventListener('click', open);
@@ -283,6 +289,10 @@ const RAIL = [
 function renderRail(){
   railEl.innerHTML = RAIL
     .filter(r => r.only !== 'preview' || PREVIEW_OK)
+    // Before there is a map there is nothing for these to show. A row of tabs that
+    // all open the same "nothing here yet" is worse than no row: it reads as a
+    // broken product rather than an unfinished setup.
+    .filter(r => !locked() || r.tab === 'home' || r.tab === 'settings')
     .map(r => '<button class="rl" data-tab="' + r.tab + '" title="' + r.l + '">'
       + svgIcon(r.ic, 20) + '<span class="l">' + r.l + '</span>'
       + (r.badge ? '<span class="badge" id="' + r.badge + '"></span>' : '') + '</button>').join('')
@@ -290,6 +300,9 @@ function renderRail(){
     + '<a href="https://github.com/gitmir-hello/gitmir-local" target="_blank" rel="noopener" title="Source on GitHub">'
     + svgIcon('github', 16) + '</a><span>AGPL</span></div>';
   railEl.querySelectorAll('.rl').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
+  // The rail is redrawn after the gate is known, which is after setTab ran. Without
+  // this the current tab loses its highlight and the app looks like it is nowhere.
+  railEl.querySelectorAll('.rl').forEach(b => b.classList.toggle('active', b.dataset.tab === activeTab));
 }
 
 let taskTimer = null;
@@ -300,7 +313,9 @@ let activeTab = 'home';
 // Which page of Setup is open — kept across re-renders, so it does not snap back.
 let setupSub = 'skills';
 function setTab(tab){
+  if(locked() && tab !== 'home' && tab !== 'settings') tab = 'home';
   activeTab = tab;
+  clearInterval(stepPoll);
   document.querySelectorAll('.rl').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
   document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('active', p.dataset.pane===tab));
   clearInterval(queueTimer);
@@ -314,6 +329,10 @@ function setTab(tab){
 function renderDetail(){
   const p = byPath(selected);
   clearInterval(taskTimer);
+  clearInterval(stepPoll);
+  // Not knowing yet counts as locked. Opening a project onto its Model tab and
+  // taking the diagrams away a second later is worse than waiting a beat.
+  if(p && !stepData) activeTab = 'home';
   if (!p){
     setShell(false);
     detailEl.innerHTML = '';
@@ -1333,6 +1352,13 @@ async function renderHome(pathStr){
   const p=byPath(pathStr)||{};
   view.innerHTML='<div class="model-empty">Reading the project…</div>';
 
+  // Until this project has a map, the whole product is one screen: the next thing
+  // to do. Everything else is built out of the map and would open empty.
+  const st = await loadSteps(pathStr);
+  if(selected!==pathStr) return;
+  renderRail();
+  if(st && st.ok && st.step < 3){ renderSteps(view, pathStr, st); return; }
+
   const o = await fetch('/api/overview?path='+encodeURIComponent(pathStr)).then(r=>r.json()).catch(()=>null);
   if(selected!==pathStr) return;
   if(!o || !o.ok){ view.innerHTML='<div class="model-empty">Could not read this project.</div>'; return; }
@@ -1344,13 +1370,13 @@ async function renderHome(pathStr){
   h+='<div class="hm-top"><div class="hm-name">'+esc(p.name||pathStr.split('/').pop())+'</div>'+
      '<div class="hm-path">'+esc(pathStr)+'</div></div>';
 
+  // No map: the step screens above already handle this and are the only thing shown.
+  // Reaching here means the map vanished between two reads — say so plainly and send
+  // the person back to the one screen that knows what to do about it.
   if(!o.exists){
-    h+='<div class="hm-hero empty"><div class="hm-hero-h">No object context yet</div>'+
-       '<p>GitMir reads this repository once and writes what the product is — areas, business objects, '+
-       'functions, endpoints, screens, events, journeys, lifecycles — into <code>.gitmir/model/</code>, '+
-       'linked by stable ids. After that both you and your agent answer from it instead of from the files.</p>'+
-       '<div class="hm-next"><button class="run" data-go="build-model">▶ Build it with Claude</button>'+
-       '<span>Runs the <b>'+esc(o.next.name)+'</b> skill in this folder. '+esc(o.next.why)+'</span></div></div></div>';
+    h+='<div class="hm-hero empty"><div class="hm-hero-h">The map is gone</div>'+
+       '<p>There is no <code>.gitmir/model/</code> in this folder any more. Nothing is broken — it just has to be made again.</p>'+
+       '<div class="hm-next"><button class="run" data-go="restart">Start again</button></div></div></div>';
     view.innerHTML=h; wire(); return;
   }
 
@@ -1369,14 +1395,23 @@ async function renderHome(pathStr){
     const q=s=>'"'+String(s).replace(/"/g,'\\"')+'"';
     const addCmd = window.__GITMIR_CLI__ ? 'gitmir mcp add'
       : 'claude mcp add -s user gitmir -- node '+q((window.__GITMIR_HOME__||'.')+'/mcp.ts');
-    h+='<div class="hm-hero-h">The context is built. Nothing has asked it anything yet.</div>'+
-       '<p>Point your agent at it and every answer it takes is counted here, against the size of the files '+
-       'those objects live in.</p>'+
-       '<button class="hm-cmd" data-copy="'+esc(addCmd)+'" title="Copy this command">'+
-         '<span class="hm-cmd-c">'+esc(addCmd)+'</span><span class="hm-cmd-a">Copy</span></button>'+
-       '<div class="hm-cmd-w">Once, in a terminal, for every project — then restart your editor, because a client '+
-       'reads its MCP config only at startup. All twelve skills arrive with it. '+
-       '<button class="hm-link" data-go="mcp">The rest of the steps →</button></div>';
+      // Somebody who chose to paste by hand has already answered this question.
+      // Repeating the command at them on every visit reads as the tool not listening.
+      const pasting = stepData && stepData.mode === 'skills';
+      h+='<div class="hm-hero-h">Your map is ready. Nothing has used it yet.</div>'+
+         '<p>Ask your assistant something about your product — what breaks if you change this, which rules apply '+
+         'here, what a change would touch. Every answer it takes from the map is counted below, next to how much '+
+         'it would have had to read without one.</p>'+
+         (pasting
+           ? '<div class="hm-cmd-w">You chose to copy and paste, so nothing needs setting up. '+
+             '<button class="hm-link" data-go="skill">Open the instructions →</button>'+
+             '<br><br>Want your assistant to fetch things by itself instead? '+
+             '<button class="hm-link" data-go="mcp">Connect it in one command →</button></div>'
+           : '<button class="hm-cmd" data-copy="'+esc(addCmd)+'" title="Copy this command">'+
+             '<span class="hm-cmd-c">'+esc(addCmd)+'</span><span class="hm-cmd-a">Copy</span></button>'+
+             '<div class="hm-cmd-w">Run it once in a terminal, then <b>close your editor and open it again</b> — '+
+             'it only looks for new tools when it starts. Everything else arrives with it; nothing to paste. '+
+             '<button class="hm-link" data-go="mcp">Show me the whole thing →</button></div>');
   }
   h+='</div>';
 
@@ -1393,8 +1428,8 @@ async function renderHome(pathStr){
     h+='</div>';
   } else {
     h+='<div class="hm-sec">What needs you</div>'+
-       '<div class="hm-clear">Nothing. The model matches the code, every recorded deviation has been decided, '+
-       'and no planned task reaches further than its ticket says.</div>';
+       '<div class="hm-clear">Nothing right now. The map matches your code, every disagreement found so far has been '+
+       'decided one way or the other, and no planned piece of work reaches further than it was asked to.</div>';
   }
 
   // --- what it caught before anyone wrote code ------------------------------
@@ -1409,10 +1444,10 @@ async function renderHome(pathStr){
 
   // --- what you have --------------------------------------------------------
   h+='<div class="hm-sec">What you have</div><div class="hm-row">'+
-     card('Object context', objects+' objects', countLinks(modelData&&modelData.model||{})+' relationships · '+KB(o.model.bytes), 'model')+
-     card('Read from', o.source.files+' source files', KB(o.source.bytes)+' of code in this repository', null)+
-     card('Freshness', o.stale?'Code has moved':'Matches the code',
-          o.stale? esc(o.staleFile||'')+' changed since' : 'Nothing changed since the model was built', 'model', o.stale?'warn':'')+
+     card('Your product, mapped', objects+' things', countLinks(modelData&&modelData.model||{})+' connections between them · '+KB(o.model.bytes)+' in all', 'model')+
+     card('Read out of your code', o.source.files+' file'+(o.source.files===1?'':'s'), KB(o.source.bytes)+' of code, read once so nobody has to read it again', null)+
+     card('Still true?', o.stale?'Your code has moved on':'Matches your code',
+          o.stale? esc(o.staleFile||'')+' changed after the map was made — ask your assistant to refresh it' : 'Nothing has changed since the map was made', 'model', o.stale?'warn':'')+
      '</div>';
 
   // --- the record -----------------------------------------------------------
@@ -1439,6 +1474,7 @@ async function renderHome(pathStr){
     }));
     view.querySelectorAll('[data-go]').forEach(b=>b.addEventListener('click',()=>{
       const g=b.dataset.go, arg=b.dataset.arg;
+      if(g==='restart'){ renderHome(pathStr); return; }
       if(g==='mcp'){ setTab('settings'); setupSub='mcp'; renderDetail(); return; }
       if(g==='build-model'||g==='skill'){ setTab('settings'); setupSub='skills'; renderDetail(); return; }
       if(g==='impact'){ setTab('model'); modelView='impact'; if(arg) impactPick=arg; renderModelNav(); renderModelView(); return; }
@@ -2447,7 +2483,7 @@ async function loadQueue(pathStr){
   await loadChanges(true);
     await loadQueuePrice(pathStr);
   if(!modelData || modelFor!==pathStr){ loadModel(pathStr).then(()=>{ if(selected===pathStr && activeTab==='queue') loadQueue(pathStr); }); }
-  if(!total){ view.innerHTML='<div class="model-empty">No tasks yet.<br>Open <b>Model</b>, click any element in a diagram → <b>＋ Create task</b> (or copy the <b>task-planner</b> skill). Then run <b>📋 task-runner</b> in Claude — it executes them one by one, moving each file todo → inprogress → verify → done — a task is only done once its checks actually pass.</div>'; return; }
+  if(!total){ view.innerHTML='<div class="model-empty"><b style="font-size:17px">No work here yet</b><br><br>Tell your assistant what you want changed — in your own words. It writes the work down as small steps, each one with its own way of proving it worked.<br><br>The steps move across this board on their own: <b>to do → in progress → verify → done</b>. Nothing reaches <b>done</b> until its checks actually pass, so a green board means it works, not that somebody said so.<br><br>You can also start from a picture: open <b>Model</b>, click any part of your product and choose <b>＋ Create task</b>.</div>'; return; }
   const cols=[['todo','To do','#8aa0ff'],['inprogress','In progress','#ffb86b'],['verify','Verify','#c084fc'],['done','Done','#34f0a6']];
   let html='<div class="q-cols">';
   for(const [k,label,acc] of cols){ const items=q[k]||[];
@@ -4521,4 +4557,155 @@ function caPriceBlock(d){
   h += '<div class="au-priv" style="margin:10px 0 0">This prices the time this screen measured — time between queue moves, minus gaps longer than the '
     +  '<b>'+d.idleCutoffHours+'h</b> cutoff. It is not an invoice and not everyone’s salary: it is what the measured work would cost at the rate you gave.</div>';
   return h + '</div>';
+}
+
+/* ---------------------------------------------------------------------------
+ * Getting started.
+ *
+ * Everything this tool does is made out of one thing: a map of what the product
+ * is. Without it, every screen is an empty diagram — so until it exists we show
+ * one screen at a time and nothing else at all. Not to be strict: an empty maze
+ * is harder than a single door.
+ *
+ * The words here are for somebody who has never heard of an object model, has
+ * not read the README, and is deciding in the next thirty seconds whether this
+ * was worth installing.
+ * ------------------------------------------------------------------------ */
+let stepData = null, stepPoll = null;
+
+// What arrives when the map does. Written as what you get, not as what it is.
+const UNLOCKS = [
+  ['Ask about your own product',
+   '“What happens if I change the price?” — answered from your product, not guessed. You get a real answer, with the parts it touches.'],
+  ['See what a change breaks — before it is written',
+   'Point at anything and see what depends on it, in both directions. The expensive surprises are the ones nobody thought to look for.'],
+  ['Your AI stops guessing',
+   'It gets the exact slice of the product it needs, with the rules it must not break. Less reading, fewer wrong turns, cheaper answers.'],
+  ['Catch where the code stopped matching the plan',
+   'The place your product quietly does something else than what you promised. Found and written down, not argued about.'],
+  ['Turn drawings into work',
+   'Sketch what you want on the map. It becomes tasks. Afterwards you can see how much of what you drew actually got built.'],
+  ['See what each change really cost',
+   'Every request has two prices: doing it, and doing it again. The second one is the one you can shrink.'],
+];
+
+function stepRail(step){
+  const names = ['Connect your assistant', 'Make the map', 'Everything else'];
+  let h = '<div class="st-rail">';
+  names.forEach((n,i)=>{
+    const k = i+1;
+    h += (i?'<i class="ln"></i>':'')
+      +  '<div class="s '+(k<step?'ok':k===step?'on':'')+'"><b>'+(k<step?'✓':k)+'</b>'+esc(n)+'</div>';
+  });
+  return h+'</div>';
+}
+
+async function loadSteps(pathStr){
+  try{ stepData = await (await fetch('/api/steps?path='+encodeURIComponent(pathStr))).json(); }
+  catch{ stepData = null; }
+  return stepData;
+}
+
+/** True while the project has no map — the whole product stays folded away. */
+// Locked until proven otherwise: with no answer yet, offer the two screens that are
+// always safe rather than a row of tabs that may be about to disappear.
+const locked = ()=> !stepData || !stepData.ok || stepData.step < 3;
+
+function renderSteps(view, pathStr, d){
+  clearInterval(stepPoll);
+  let h = '<div class="st-wrap">' + stepRail(d.step);
+
+  if(d.step === 1){
+    h += '<h2 class="st-h">First, let your assistant talk to GitMir</h2>'
+      +  '<p class="st-p">GitMir does not write your code. It keeps a map of what your product is, and hands the right piece of it '
+      +  'to whoever is working — you, or your AI assistant. Pick how they should talk to each other. You can change this later.</p>'
+      +  '<div class="st-pick">'
+      +  '<div class="st-card pick" data-mode="mcp">'
+      +    '<div class="tag">Recommended · one command</div>'
+      +    '<h4>Connect it once, and forget it</h4>'
+      +    '<p>Your assistant gets everything by itself — the map, the instructions, all of it. You never copy or paste anything again.</p>'
+      +    '<button class="run go">Show me the command</button>'
+      +  '</div>'
+      +  '<div class="st-card pick" data-mode="skills">'
+      +    '<div class="tag">Works anywhere</div>'
+      +    '<h4>I will copy and paste</h4>'
+      +    '<p>Nothing to set up. You copy a short instruction from this app and paste it into your chat when you need it. '
+      +    'Slower, but it works with any assistant.</p>'
+      +    '<button class="ghost go">Use this way</button>'
+      +  '</div></div>'
+      +  '<div class="st-note">Not sure? Take the first one. If it does not work in your editor, the second one always does.</div>';
+  }
+
+  else if(d.step === 2 && d.mode === 'mcp' && !d.agentSeen){
+    // Chosen the connected route but nothing has come through yet.
+    const cmd = window.__GITMIR_CLI__ ? 'gitmir mcp add'
+      : 'claude mcp add -s user gitmir -- node "'+(window.__GITMIR_DIR__||'')+'/mcp.ts"';
+    h += '<h2 class="st-h">Run this one line, then reopen your editor</h2>'
+      +  '<p class="st-p">Paste it in a terminal. It takes a second and asks for nothing — no account, no password, nothing leaves your computer.</p>'
+      +  '<div class="st-cmd"><span>'+esc(cmd)+'</span><button class="ghost" data-copy="'+esc(cmd)+'">Copy</button></div>'
+      +  '<div class="st-note"><b>Then close your editor and open it again.</b> It only looks for new tools when it starts up. '
+      +  'This is the one step people skip, and then think nothing happened.</div>'
+      +  '<div class="st-wait"><i class="st-dot"></i>Waiting for your assistant to say hello. We will notice on our own — leave this page open.</div>'
+      +  '<button class="st-back" data-mode="skills">I would rather copy and paste instead →</button>';
+  }
+
+  else {
+    // Connected (or pasting by hand). The only thing left is the map.
+    // An empty folder has nothing to read yet, so the sentence has to carry the
+    // description with it. Telling somebody to "build the model from the spec" when
+    // there is no spec is the kind of instruction that gets a tool closed.
+    const say = d.hasCode
+      ? 'Build the GitMir model for this project'
+      : 'Here is what I want to build: (describe it in a few sentences). Build the GitMir model from that, before we write any code.';
+    h += '<div class="st-mid">'
+      +  '<div class="big">Now we make the map of your product</div>'
+      +  '<p>' + (d.hasCode
+           ? 'There is code in this folder. Your assistant reads it once and writes down what the product actually is — '
+             + 'its parts, what they do, what happens where. That written-down product is the map.'
+           : 'This folder is empty, which is the best moment to do this. Write a few sentences about what you want to build — '
+             + 'in a file, or straight in the chat — and the map gets made from that. The map first, the code after it.')
+      +  '</p></div>'
+      +  '<p class="st-p" style="margin:0 auto 14px; text-align:center">'
+      +    (d.hasCode ? 'Say this to your assistant:' : 'Paste this into your chat and fill in the middle:')+'</p>'
+      +  '<div class="st-say">'+esc(say)+'</div>'
+      +  '<div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap">'
+      +    '<button class="run" data-copy="'+esc(say)+'">Copy this sentence</button>'
+      +    (d.mode === 'skills'
+          ? '<button class="ghost" data-go="skill">Open the instruction to paste</button>'
+          : '<button class="ghost" data-go="skill">Or paste the instruction by hand</button>')
+      +  '</div>'
+      +  '<div class="st-wait"><i class="st-dot"></i>Waiting for the map. It appears here by itself the moment it is written — nothing to refresh.</div>'
+      +  '<div class="st-note">It lands in a folder called <code>.gitmir/model/</code> inside your project. Plain files you can open and read.</div>';
+
+    h += '<div class="st-un"><div class="st-un-h">This is what opens up when it is here</div><div class="st-un-g">';
+    for(const [t2,s] of UNLOCKS) h += '<div class="st-un-i"><b>'+esc(t2)+'</b><span>'+esc(s)+'</span></div>';
+    h += '</div></div>';
+  }
+
+  h += '</div>';
+  view.innerHTML = h;
+
+  view.querySelectorAll('[data-copy]').forEach(b=>b.addEventListener('click', async ()=>{
+    try{ await copyToClipboard(b.dataset.copy); toast('Copied ✓'); }catch(e){ toast('Copy failed', true); }
+  }));
+  view.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click', async ()=>{
+    await fetch('/api/update',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ path:pathStr, mode:b.dataset.mode })}).catch(()=>{});
+    renderHome(pathStr);
+  }));
+  view.querySelectorAll('[data-go]').forEach(b=>b.addEventListener('click',()=>{
+    setTab('settings'); setupSub = b.dataset.go==='mcp' ? 'mcp' : 'skills'; renderDetail();
+  }));
+
+  // The two waiting screens end by themselves. Polling is the honest thing here:
+  // the person is told nothing needs refreshing, so nothing may need refreshing.
+  if(d.step < 3){
+    stepPoll = setInterval(async ()=>{
+      if(selected !== pathStr || activeTab !== 'home'){ clearInterval(stepPoll); return; }
+      const before = d.step + '/' + d.agentSeen;
+      const n = await loadSteps(pathStr);
+      if(!n || !n.ok) return;
+      if(n.step + '/' + n.agentSeen !== before){ clearInterval(stepPoll); renderHome(pathStr); }
+    }, 3000);
+  }
 }
