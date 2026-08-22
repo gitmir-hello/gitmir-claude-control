@@ -3049,6 +3049,9 @@ const HTML = /* html */ `<!doctype html>
   .st-seen li.ok i{border-color:#34f0a6; background:#34f0a6;
     box-shadow:inset 0 0 0 2px rgba(4,18,30,.9)}
   /* Did it actually connect. Green only for evidence, never for a registration. */
+  /* The name of a view that has no siblings to be a tab against. */
+  .mone{display:inline-block; padding:6px 12px; border-radius:8px; font-size:12.5px; letter-spacing:.02em;
+    color:var(--cyan-soft); background:rgba(47,216,255,.08); border:1px solid rgba(47,216,255,.22)}
   .mcp-live{display:flex; gap:11px; align-items:flex-start; border-radius:12px; padding:14px 16px; margin-bottom:16px;
     font-size:15px; line-height:1.55; color:var(--ink-1); background:var(--panel); border:1px solid var(--line2)}
   .mcp-live i{flex:0 0 auto; width:11px; height:11px; margin-top:5px; border-radius:50%; background:var(--ink-3)}

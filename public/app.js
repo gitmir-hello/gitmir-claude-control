@@ -321,7 +321,7 @@ function setTab(tab){
   clearInterval(queueTimer);
   if(tab==='home' && selected) renderHome(selected);
   if(tab==='model' && selected) loadModel(selected);
-  if(tab==='queue' && selected){ loadQueue(selected); queueTimer=setInterval(()=>{ if(selected && activeTab==='queue') loadQueue(selected); }, 4000); }
+  if(tab==='queue' && selected){ loadQueue(selected); queueTimer=setInterval(()=>{ if(selected && activeTab==='queue' && !document.hidden) loadQueue(selected); }, 4000); }
   if(tab==='audit' && selected) renderChangeAudit(document.getElementById('auditView'), null, ++modelViewSeq);
   if(tab==='team'){ renderTeam(); teamPoll(); }
   if(tab==='preview') pvInit();
@@ -469,7 +469,7 @@ function renderDetail(){
   mcpLiveStatus();
 
   refreshTasks(p.path);
-  taskTimer = setInterval(()=>{ if(selected) refreshTasks(selected); }, 4000);
+  taskTimer = setInterval(()=>{ if(selected && activeTab==='tasks' && !document.hidden) refreshTasks(selected); }, 4000);
 }
 
 let PICKER_OK = true;
@@ -1262,7 +1262,17 @@ function renderModelNav(){
   nav.appendChild(top);
   const hint=document.createElement('div'); hint.className='mghint'; hint.textContent=grp.hint;
   nav.appendChild(hint);
-  // One view in a group needs no tab bar — a single tab is a label pretending to be a choice.
+  // A group with one view used to render no tab bar at all: a single tab is a choice
+  // that is not a choice. But then its name appears nowhere, and somebody sent to look
+  // at "Confidence" reads the group heading, does not find the word, and reports the
+  // view as missing while looking straight at it. So the name is always shown — as a
+  // tab when there is something to choose between, as a plain label when there is not.
+  if(grp.views.length===1){
+    const one=document.createElement('div'); one.className='mtabs';
+    const lab=document.createElement('span'); lab.className='mone';
+    lab.textContent=grp.views[0].label;
+    one.appendChild(lab); nav.appendChild(one);
+  }
   if(grp.views.length>1){
     const row=document.createElement('div'); row.className='mtabs';
     for(const v of grp.views){
@@ -3598,13 +3608,31 @@ function bootShare(){
   renderModelNav();
   renderModelView();
 }
+  // Coming back to the tab shows current state at once, rather than up to four
+  // seconds of whatever was frozen on it.
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.hidden || !selected) return;
+    if(activeTab==='tasks') refreshTasks(selected);
+    else if(activeTab==='queue') loadQueue(selected);
+    else if(activeTab==='team') teamPoll();
+    else if(activeTab==='home') renderHome(selected);
+  });
 if(SHARE){ bootShare(); }
 else {
   fetch('/api/env').then(r=>r.json()).then(d=>{ PICKER_OK = !!d.pickerAvailable; if(d.relayUrl) RELAY_URL_DEFAULT=d.relayUrl; if(d.previewOrigin) PV_ORIGIN=d.previewOrigin; if(d.preview===false){ PREVIEW_OK=false; renderDetail(); } }).catch(()=>{});
   loadSkillsList();
   load();
   teamPoll();
-  setInterval(teamPoll, 3500);
+  // Poll for teammates only when there is a bridge to poll and somebody is looking
+  // at this window. It used to run every 3.5 seconds forever, next to a task refresh
+  // every 4 — thirty-odd requests a minute at a screen nobody was touching, which is
+  // what a tester saw in their network panel and reasonably called a storm. Solo, with
+  // no team connected, it now makes none at all.
+  setInterval(()=>{
+    if(document.hidden) return;
+    const live = teamState && (teamState.connected || teamState.connecting);
+    if(live || activeTab==='team') teamPoll();
+  }, 3500);
 }
 
 
@@ -4871,6 +4899,7 @@ function renderSteps(view, pathStr, d){
       x.progress && x.progress.stage, x.progress && x.progress.note, x.progress && x.progress.stale].join('|');
     stepPoll = setInterval(async ()=>{
       if(selected !== pathStr || activeTab !== 'home'){ clearInterval(stepPoll); return; }
+      if(document.hidden) return;   // a background tab is nobody watching
       const before = sig(d);
       const n = await loadSteps(pathStr);
       if(!n || !n.ok) return;

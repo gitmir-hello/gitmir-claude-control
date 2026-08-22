@@ -1190,7 +1190,18 @@ async function handle(msg: any): Promise<void> {
           'If a tool answers that there is no model here, call gitmir_setup: it puts the project on ' +
           'the dashboard, makes the task queue, and tells you what is missing. The written procedures ' +
           'are gitmir_skills and gitmir_skill — fetch one and follow it yourself rather than asking ' +
-          'the user to paste anything.',
+          'the user to paste anything. ' +
+          // Two procedures answer a request rather than a question, and an agent walks
+          // straight past both: asked to plan, it starts editing. Say so here, where every
+          // client reads it once at startup.
+          'Two of those procedures answer a request rather than a question. When the user asks you to ' +
+          'PLAN work — "plan this", "break this down", "what needs doing for X" — fetch ' +
+          'gitmir_skill("task-planner") and follow it instead of starting to edit code: they asked for ' +
+          'the work written down with its own checks, not for the work done. When they ask you to RUN ' +
+          'the queue, fetch gitmir_skill("task-runner"). ' +
+          'While you build or refresh the model, report each stage with gitmir_progress — and if you have ' +
+          'to stop and ask the user something, report `blocked` with the question in it, because they are ' +
+          'watching a dashboard and cannot see this conversation.',
       });
     }
     case 'notifications/initialized':
