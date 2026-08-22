@@ -201,7 +201,7 @@ function hudSceneProductMap(m, layer, hooks) {
     // all this did — left "Radius on map" landing on a picture that looked
     // exactly like the one before it.
     const lay = layer && layer.per && layer.per.get(aid);
-    if (lay) rows.unshift([({ owner: 'OWNER', heat: 'TOUCHES', change: 'THIS CHANGE' })[layer.kind] || 'RISK',
+    if (lay) rows.unshift([({ owner: 'OWNER', heat: 'TOUCHES', change: 'THIS CHANGE', rework: 'REWORK' })[layer.kind] || 'RISK',
       hudTitle(lay.text)]);
     // With the change layer on, "12 actions" is not the question. How many of
     // them the change reaches is.

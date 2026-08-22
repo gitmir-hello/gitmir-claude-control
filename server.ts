@@ -100,7 +100,7 @@ import { attention, caught, nextSkill } from './lib/attention.js';
 import { read as readProgress, clear as clearProgress } from './lib/progress.js';
 import { snapshot as auditSnapshot, transitions as auditTransitions, record as auditRecord,
   readEvents as auditEvents, metrics as auditMetrics, byArea as auditByArea,
-  developerCount as auditDevelopers } from './lib/audit.js';
+  developerCount as auditDevelopers, reworkOf, reworkTree } from './lib/audit.js';
 import { readDesign, writeItem, removeItem, designAsModel, takenIds, conformance,
   tasksFrom, taskForSlice, fieldId, newId, LINKS } from './lib/design.js';
 
@@ -683,6 +683,38 @@ const AUDIT_ENDPOINT = process.env.GITMIR_AUDIT_ENDPOINT || 'https://ide.gitmir.
 /** Files that count as "the person wrote down what they want" — checked in this order. */
 const BRIEF_NAMES = ['PRODUCT-BRIEF.md', 'SPEC.md', 'PRD.md', 'ТЗ.md', 'brief.md'];
 
+/** Every model id mapped to its human name, for labelling rework rows. */
+function objectNames(model: any): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const list of Object.values(model || {})) {
+    if (!Array.isArray(list)) continue;
+    for (const o of list) if (o && o.id) out[o.id] = o.name || o.title || o.id;
+  }
+  return out;
+}
+
+/**
+ * The rework share of a project, cheap enough for the list of all of them.
+ *
+ * Cached against the size and mtime of the event log: nineteen projects re-reading
+ * their whole history every time somebody opens the home screen would make the
+ * cheapest screen in the tool the slowest.
+ */
+const REWORK_CACHE = new Map<string, { key: string; val: any }>();
+function projectRework(projectPath: string) {
+  let key = '';
+  try {
+    const st = fs.statSync(path.join(projectPath, '.gitmir', 'audit', 'events.jsonl'));
+    key = st.size + ':' + Math.round(st.mtimeMs);
+  } catch { return null; }
+  const hit = REWORK_CACHE.get(projectPath);
+  if (hit && hit.key === key) return hit.val;
+  let val = null;
+  try { val = reworkOf(auditMetrics(auditEvents(projectPath), { periodDays: 90 }).rows); } catch {}
+  REWORK_CACHE.set(projectPath, { key, val });
+  return val;
+}
+
 let VERSION_CACHE: string | null = null;
 /** The commit this dashboard is running, short. Empty when it was not installed from git. */
 function gitmirVersion(): string {
@@ -998,6 +1030,10 @@ const server = http.createServer(async (req, res) => {
         return {
           name: p.name || '', path: p.path, description: p.description || '', exists,
           hasModel, tasks,
+          // How much of the work here was doing it a second time. Null when nothing has
+          // gone through the queue — an unworked project has no rework rate, and a card
+          // reading 0% would claim the opposite.
+          rework: exists ? projectRework(p.path) : null,
           // todo is what is waiting to be picked up; verify is built but unproven. The rail
           // badge counts todo, because that is the number that says there is work to start.
           queue: { todo, verify, pending: todo + verify, done },
@@ -1488,6 +1524,10 @@ const server = http.createServer(async (req, res) => {
         ok: true, ...m,
         idleCutoffHours: idle, periodDays: days,
         areas: auditByArea(m.rows, areas),
+        // Rework as a share, for the project and for every part of it that any task
+        // named. The map is painted from this, and so is the project card.
+        rework: reworkOf(m.rows),
+        tree: reworkTree(m.rows, { ...areas, ...objectNames(model) }),
         // What an hour of this team costs, if anyone has said. Without it the screen
         // shows hours and asks for a rate — an invented one would be the only number on
         // the page that nobody could check.
@@ -3050,6 +3090,21 @@ const HTML = /* html */ `<!doctype html>
     box-shadow:inset 0 0 0 2px rgba(4,18,30,.9)}
   /* Did it actually connect. Green only for evidence, never for a registration. */
   /* The name of a view that has no siblings to be a tab against. */
+  /* Rework on a project card: the one number worth comparing across projects. */
+  /* A rework row: bar, share, and the hours it came from. */
+  .rwc{display:flex; align-items:center; gap:12px; white-space:nowrap}
+  .rwc .pr-mini{width:110px; flex:0 0 auto}
+  .rwc b{font-variant-numeric:tabular-nums; color:var(--txt); min-width:44px; text-align:right}
+  .rwc i{font-style:normal; color:var(--dim); font-size:12px; font-variant-numeric:tabular-nums}
+  .pj-rw{margin:2px 0 8px}
+  .pj-rw-h{display:flex; justify-content:space-between; align-items:baseline; font-size:11px;
+    text-transform:uppercase; letter-spacing:.5px; color:var(--ink-3)}
+  .pj-rw-h b{font-size:15px; letter-spacing:0; font-variant-numeric:tabular-nums; color:var(--ink-1)}
+  .pj-rw-bar{height:5px; border-radius:3px; background:rgba(120,210,255,.12); overflow:hidden; margin:4px 0 4px}
+  .pj-rw-bar i{display:block; height:100%; border-radius:3px; background:#2fd8ff}
+  .pj-rw-s{font-size:11.5px; color:var(--ink-3); font-variant-numeric:tabular-nums}
+  .pj-rw.warm .pj-rw-h b{color:#ffcf8f} .pj-rw.warm .pj-rw-bar i{background:#ffb050}
+  .pj-rw.hot  .pj-rw-h b{color:#ff9b83} .pj-rw.hot  .pj-rw-bar i{background:#ff7a5e}
   .mone{display:inline-block; padding:6px 12px; border-radius:8px; font-size:12.5px; letter-spacing:.02em;
     color:var(--cyan-soft); background:rgba(47,216,255,.08); border:1px solid rgba(47,216,255,.22)}
   .mcp-live{display:flex; gap:11px; align-items:flex-start; border-radius:12px; padding:14px 16px; margin-bottom:16px;

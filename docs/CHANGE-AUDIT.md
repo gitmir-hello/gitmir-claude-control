@@ -108,6 +108,32 @@ with red. Its first pass was not zero; it was refused by the cutoff. A bar chart
 the most convincing way to state something, which is exactly why it must not state
 something untrue.
 
+### Rework as a share, and where it sits
+
+Hours of rework mean nothing on their own — seven hours is a disaster on an
+eight-hour change and a rounding error on an eighty-hour one. So rework is also
+reported as a share: the time after the first review over the whole measured time.
+
+It rolls up three ways, from the same rows:
+
+- **Per object.** A task's `Touches:` line names model ids. Every change that named
+  an object carries its rework to that object, so `issueRefund` can read 62% while
+  the area around it reads 54%.
+- **Per area.** An area carries each change that touched anything inside it —
+  **once**, however many of its objects were named. Adding it once per object would
+  make an area cost more than the project it is part of.
+- **Per project.** One number on the project card in the dashboard's home list:
+  the share, the hours, and how many changes it came from. It is how you tell, at a
+  glance across fifteen projects, which one is quietly eating a second pass.
+
+Because a change spanning two areas counts in both, the areas do not sum to the
+project total and are not meant to. The project total is computed from the changes,
+not from the areas.
+
+The product map has a **Rework** layer that paints every area by its share, with
+the objects underneath it available in the Audit tab. An area nobody has worked in
+stays unpainted rather than being drawn as a perfect zero.
+
 ### What is deliberately not counted
 
 - **A task that never entered `in progress`** — backlog is not cost.

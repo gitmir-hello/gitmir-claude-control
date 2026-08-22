@@ -233,6 +233,7 @@ function renderList(){
       '<div class="col gap-3 grow prj-body">' +
         '<div class="prj-desc muted text-sm"></div>' +
         '<div class="divider" style="margin:auto 0 0"></div>' +
+          '<div class="pj-rw"></div>' +
         '<div class="between gap-2">' +
           '<span class="row gap-2 dim text-xs">' + ICON.clock + '<span class="pj-log"></span></span>' +
           '<span class="prj-method">' + ICON.code + '<span class="pj-model"></span></span>' +
@@ -246,6 +247,20 @@ function renderList(){
     // A card is where somebody decides which project to open. "No model" reads as a
     // missing feature; "Set this one up" reads as the next thing to do.
     el.querySelector('.pj-model').textContent = p.hasModel ? 'Ready' : 'Set this one up';
+    // How much of the work here was doing it twice. The one number on a card worth
+    // comparing between projects, and the reason to open this one rather than that one.
+    // Absent rather than zero when nothing has been worked — see the server.
+    const rw = p.rework, rwEl = el.querySelector('.pj-rw');
+    if(rw && rwEl){
+      const hrs = m => m < 90 ? m+'m' : (m/60 < 10 ? (m/60).toFixed(1) : Math.round(m/60))+'h';
+      rwEl.className = 'pj-rw ' + (rw.pct >= 50 ? 'hot' : rw.pct >= 25 ? 'warm' : 'cool');
+      rwEl.innerHTML =
+        '<div class="pj-rw-h"><span>rework</span><b>'+rw.pct+'%</b></div>'+
+        '<div class="pj-rw-bar"><i style="width:'+Math.min(100, rw.pct)+'%"></i></div>'+
+        '<div class="pj-rw-s">'+hrs(rw.minutes)+' of '+hrs(rw.totalMinutes)+' · '+
+          rw.changes+' change'+(rw.changes===1?'':'s')+'</div>';
+      rwEl.title = 'Of the measured work on this project, '+rw.pct+'% happened after it was first put up for review.';
+    }
 
     const open = () => {
       // Everything below belongs to the project being left: a hand-picked what-if, a
@@ -769,6 +784,7 @@ const groupOfView = (k)=> (MODEL_GROUPS.find(g=>g.views.some(v=>v.key===k))||MOD
 const MAP_LAYERS = [
   {key:'none',  label:'Structure', hint:'The product as it is wired.'},
   {key:'heat',  label:'Heat',      hint:'How often work has touched each area.'},
+  {key:'rework',label:'Rework',    hint:'How much of the work in each area was doing it a second time.'},
   {key:'risk',  label:'Risk',      hint:'What a change in each area would reach.'},
   {key:'owner', label:'Ownership', hint:'Who is accountable for each area.'},
   {key:'change',label:'This change', hint:'Where the task picked in Impact lands.'},
@@ -2804,7 +2820,7 @@ function graphProductMap(m, layer){
     // A layer replaces the area's own summary with what the layer measures. The
     // structure stays identical — only the reading of it changes.
     const lay = layer && layer.per.get(id);
-    if(lay) lines.unshift((layer.kind==='owner'?'☗ ':layer.kind==='heat'?'▮ ':'⚠ ')+lay.text);
+    if(lay) lines.unshift((layer.kind==='owner'?'☗ ':layer.kind==='heat'?'▮ ':layer.kind==='rework'?'↺ ':'⚠ ')+lay.text);
     const W=272;
     const dl = b.desc ? wrapPx(b.desc, W-15-11, CW_MONO).slice(0,2) : [];
     const h = 32 + dl.length*SUB_LH + Math.max(1,lines.length)*18 + 10;
@@ -4083,6 +4099,33 @@ async function mapLayerData(m){
     return { kind:'change', per, reach, seeds:seedSet, origin: ids.length===1 ? ids[0] : null,
       legend: what+' — solid where it changes something, faint where the change arrives on its own.' };
   }
+  if(mapLayer==='rework'){
+    // Painted from the audit, not from anything on this page: the same rows the Audit
+    // tab counts, grouped by the area each change said it touched. An area nobody has
+    // worked in stays unpainted rather than being drawn as a perfect zero.
+    let d=null;
+    try{ d = await (await fetch('/api/audit?path='+encodeURIComponent(selected)+'&days=90')).json(); }catch{}
+    const tree = d && d.ok && d.tree ? d.tree : null;
+    if(!tree || !tree.areas.length){
+      return { kind:'rework', per:new Map(),
+        legend:'Nothing measured yet. Rework is counted from tasks moving through the queue — once work has run, each area is painted by how much of it happened after the first review.' };
+    }
+    const per=new Map();
+    for(const a of tree.areas){
+      if(a.pct==null) continue;
+      const hrs = a.minutes < 90 ? a.minutes+'m' : Math.round(a.minutes/60)+'h';
+      per.set(a.id, { text: a.pct+'% · '+hrs+' redone', t: Math.min(1, a.pct/100) });
+    }
+    // The objects inside, so an area with a bad number can be opened rather than
+    // argued with. Rework belongs to whatever the task named.
+    const inner=new Map();
+    for(const o of tree.objects) if(o.pct!=null) inner.set(o.id, o);
+    const worst = tree.areas.filter(a=>a.pct!=null).slice(0,1)[0];
+    return { kind:'rework', per, rework:inner,
+      legend: (d.rework ? 'Across this project, '+d.rework.pct+'% of measured work was rework. ' : '')
+        + (worst ? 'Heaviest here: '+worst.name+' at '+worst.pct+'%. ' : '')
+        + 'Darker means more of the work in that area happened after it was first put up for review.' };
+  }
   if(mapLayer==='owner'){
     const out=new Map();
     for(const mod of (m.modules||[])) if(mod.owner) out.set(mod.id, {text:String(mod.owner).slice(0,40), t:1});
@@ -4440,13 +4483,33 @@ async function renderChangeAudit(view, m, seq){
   }
   html += '</div>';
 
-  if((d.areas||[]).length){
-    html += '<div class="ov-sec">Where the time concentrates</div><div class="au-rows">';
-    for(const a of d.areas.slice(0,10)){
-      html += '<div class="au-row"><span>'+esc(a.name||a.area)+'</span>'
-           +  '<span class="n">'+caPlain(a.afterFirstPassMinutes)+' after first pass · '+a.changes+' change'+(a.changes===1?'':'s')+'</span></div>';
+  // By area, then by the things inside it. An area with a bad number is an argument;
+  // the objects underneath it are the part somebody can act on.
+  const tree = d.tree || { areas: [], objects: [] };
+  if(tree.areas.length){
+    html += '<div class="ov-sec">Where the rework concentrates</div><div class="au-rows">';
+    for(const a of tree.areas.slice(0,10)){
+      html += '<div class="au-row"><span>'+esc(a.name)+'</span>'
+           +  '<span class="rwc">'+caBar(a.totalMinutes-a.minutes, a.minutes, 'pr-mini')
+           +    '<b>'+(a.pct==null?'—':a.pct+'%')+'</b>'
+           +    '<i>'+caPlain(a.minutes)+' of '+caPlain(a.totalMinutes)+' · '+a.changes+' change'+(a.changes===1?'':'s')+'</i>'
+           +  '</span></div>';
     }
     html += '</div>';
+  }
+  if(tree.objects.length){
+    html += '<details class="au-thin" style="max-width:none"><summary style="cursor:pointer">'
+         +  'The parts inside them — '+tree.objects.length+' object'+(tree.objects.length===1?'':'s')+' that tasks named</summary>'
+         +  '<div class="au-rows" style="margin-top:12px">';
+    for(const o of tree.objects.slice(0,40)){
+      html += '<div class="au-row"><span>'+esc(o.name)+'</span>'
+           +  '<span class="rwc">'+caBar(o.totalMinutes-o.minutes, o.minutes, 'pr-mini')
+           +    '<b>'+(o.pct==null?'—':o.pct+'%')+'</b>'
+           +    '<i>'+caPlain(o.minutes)+' of '+caPlain(o.totalMinutes)+'</i></span></div>';
+    }
+    html += '</div><div style="margin-top:10px">An object carries the rework of every change that named it in '
+         +  '<code>Touches:</code>. An area carries each of those changes once, however many of its objects were named — '
+         +  'which is why the areas do not add up to the project total, and should not.</div></details>';
   }
 
   html += caRowsTable(rows, d.rate, d.currency);
